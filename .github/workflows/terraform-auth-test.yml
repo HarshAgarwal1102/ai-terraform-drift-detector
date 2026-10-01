@@ -11,6 +11,9 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  TERRAFORM_VERSION: "1.14.7"
+
 jobs:
   validate-and-plan:
     name: "Terraform OIDC Auth & Plan Test"
@@ -21,35 +24,58 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Azure OIDC Login
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # Fails the job loudly if OIDC login did not produce a usable context,
+      # rather than letting a broken credential surface later as a confusing
+      # Terraform backend error.
+      - name: Verify Azure OIDC Authentication
+        run: |
+          set -euo pipefail
+          echo "==> Confirming Azure authentication context (OIDC, no client secret)..."
+          az account show --output json \
+            --query '{subscriptionId:id, tenantId:tenantId, principalType:user.type}'
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.7.0"
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Check Terraform Formatting
         run: terraform fmt -check -recursive
 
-      - name: Validate Bootstrap Configuration
+      # Bootstrap intentionally uses LOCAL state, which is excluded from Git by
+      # .gitignore and therefore never present in CI. Planning here would compare
+      # against empty state and propose re-creating the already-deployed state
+      # infrastructure. CI is restricted to offline validation only — matching
+      # the pattern already used by scripts/validate.sh.
+      - name: Validate Bootstrap Configuration (offline, no state)
         run: |
-          cd terraform/bootstrap
-          terraform init
-          terraform validate
-          terraform plan
+          set -euo pipefail
+          terraform -chdir=terraform/bootstrap init -backend=false -input=false
+          terraform -chdir=terraform/bootstrap validate
 
+      # Dev uses the AzureRM remote backend. Authentication is OIDC end to end:
+      #   ARM_USE_OIDC    - exchange the GitHub ID token for an Azure token
+      #   ARM_USE_AZUREAD - authenticate to the storage data plane with Entra ID
+      #                     instead of storage account access keys, so the
+      #                     identity needs only Storage Blob Data Contributor
+      #                     on the state container (least privilege).
+      # No client secret or storage account key is used anywhere.
       - name: Validate Dev Environment Configuration
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
         run: |
-          cd terraform/environments/dev
-          terraform init
-          terraform validate
-          terraform plan -var-file="dev.tfvars"
+          set -euo pipefail
+          terraform -chdir=terraform/environments/dev init -input=false
+          terraform -chdir=terraform/environments/dev validate
+          terraform -chdir=terraform/environments/dev plan \
+            -var-file="dev.tfvars" -input=false -no-color
