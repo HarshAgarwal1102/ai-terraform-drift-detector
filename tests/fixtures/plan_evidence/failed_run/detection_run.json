@@ -1,0 +1,15 @@
+{
+  "backend_key": null,
+  "environment": "dev",
+  "failure_reason": "terraform plan exited 1 (error); any plan file written is not valid evidence",
+  "failure_stage": "plan",
+  "finished_at": "2026-10-01T17:16:33Z",
+  "git_commit": "d6f5ba49f1200c98d4877ee7983ceee8261c9285",
+  "outcome": "failed",
+  "plan_exit_code": 1,
+  "run_id": "local-20261001T171632Z-23745",
+  "show_exit_code": null,
+  "started_at": "2026-10-01T17:16:32Z",
+  "terraform_version": "1.14.7",
+  "working_dir": "terraform/environments/dev"
+}

@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 3 — Deterministic Terraform Drift Detection
-- **Current Active Task**: Task 3.1 — Drift Detection Strategy & Execution Plan
+- **Current Active Task**: Task 3.4 — Resource Identification & Categorization
 - **Phases Completed**: 2 of 14
 
 ---
@@ -576,7 +576,7 @@ The application Resource Group `aitdd-dev-main-rg` is managed by `terraform/envi
 ---
 
 ### PHASE 3 — Deterministic Terraform Drift Detection
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS
 
 Phase 3 builds the core deterministic drift detection engine using Terraform state files, machine-readable `terraform plan` JSON outputs, and resource diff parsing prior to AI involvement.
 
@@ -598,50 +598,87 @@ The first end-to-end drift scenario uses ONLY `aitdd-dev-main-rg`. No VNet, Subn
 > **Note**: Which Resource Group property is used has not been proven yet. Tags are the candidate, but it must be empirically verified that an external tag change is detected by `terraform plan` before the scenario is implemented.
 
 #### Task 3.1 — Drift Detection Strategy & Execution Plan
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-01
+- **Completed**: 2026-10-01
 - **Objective**: Define exact CLI strategy for generating, exporting, and parsing machine-readable Terraform plans.
 - **Dependencies**: Task 2.8
 - **Files/Areas**: `docs/drift-detection-spec.md`
 - **Acceptance Criteria**:
-  - [ ] Document specifying `terraform plan -detailed-exitcode -out=tfplan` strategy.
-  - [ ] Document specifying conversion to JSON via `terraform show -json tfplan`.
+  - [x] Document specifying `terraform plan -detailed-exitcode -out=tfplan` strategy.
+  - [x] Document specifying conversion to JSON via `terraform show -json tfplan`.
 - **Validation**:
-  - [ ] Specification review.
+  - [x] Specification review.
 - **Implementation Notes**:
   - Deterministic engine foundation.
 - **Completion Notes**:
-  - None.
+  - Created `docs/drift-detection-spec.md` — the Phase 3 contract: command and flag contract (required / forbidden flags), exit-code contract, `plan.json` field contract and integrity gate, drift vs configuration-change classification (resource- and attribute-level), Resource Group MVP signatures, evidence bundle and Phase 4 input contract, sensitive-data handling, future extensibility, AI source-of-truth boundary, and acceptance criteria for downstream implementations.
+  - **Core decision**: exit codes govern **process outcome only**; drift is determined from `plan.json` (`resource_drift` × `resource_changes`). Exit 1 or any non-0/2 ⇒ run FAILED, drift `unknown`, never "no drift".
+  - **Verified on Terraform 1.14.7** (not assumed), in a scratch copy outside the repo with a local backend, seeded by a read-only `terraform state pull`, providers reused (no downloads), refreshing against the real `aitdd-dev-main-rg` read-only. **No `apply`, no Azure modification, real remote state neither locked nor written.** Findings that shaped the contract:
+    - Configuration change and external drift **both** return exit 2; only `resource_drift` separates them.
+    - **Converged drift returns exit 0 with a non-empty `resource_drift`** — exit 0 is not proof of no drift.
+    - Output-only changes return exit 2 with all resources `no-op` — exit 2 is not proof of drift.
+    - **On plan failure (provider auth error, variable validation error) Terraform still writes the `-out` plan file; `show -json` on it succeeds and yields `errored: true`, `complete: false`, no change arrays** — a naive parser would report "no drift". The spec rejects this via the exit code and an independent JSON integrity gate.
+    - `-refresh=false` hides real drift (exit 0) → forbidden. `-refresh-only` returns exit 2 on any drift (supplementary signal only).
+    - `resource_drift` is **omitted** (not `[]`) when empty; `format_version` = `1.2`.
+    - External deletion signature: `resource_drift` `delete` + `resource_changes` `create`.
+    - The azurerm provider refreshes `tags` from Azure and reports divergence in `resource_drift` — supports (by simulation) the tags candidate for the Phase 3 MVP scenario.
+  - The documented §4.1 command sequence was executed verbatim (against the scratch copy) and a throwaway rule checker (scratchpad only, not committed) applied the §5.3 gate and §6 classification to every captured plan: all scenarios classified as specified, and both errored plan files were rejected even with the exit code ignored.
+  - `./scripts/validate.sh` → "All local validations passed ✓"; dev backend configuration (`.terraform/terraform.tfstate`) unchanged; no local `*.tfstate` created; markdown fences/mermaid/tables checked. No secrets, credentials, or Azure tenant/subscription/client GUIDs in the new document.
+  - **Limitations recorded in the spec (not resolved by guessing)**: "configuration change" means desired ≠ recorded state (cannot distinguish `.tf` edit vs tfvars vs provider-default change); `resource_drift` means remote ≠ recorded (not necessarily a human change — attribution is Phase 7); unmanaged resources/properties are invisible; whether Terraform filters "irrelevant" drift out of `resource_drift` could not be isolated in this configuration; move/import-only exit behavior unverified. A **real** external Azure mutation was not performed — that remains Task 3.6/3.7 (requires approval).
+  - **Note for Task 3.2**: its Implementation Note "exit code … 2 (drift found)" is superseded by spec §4.2 — exit 2 means *changes pending*, not drift. Task 3.2 must also capture the plan exit code explicitly (exit 2 under `set -e` would otherwise abort the job) and write artifacts outside the tracked tree. Task 3.2 text was intentionally not edited.
 
 #### Task 3.2 — Machine-Readable Terraform Plan Generation
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-01
+- **Completed**: 2026-10-01
 - **Objective**: Implement script to execute non-interactive Terraform plan and convert plan file to JSON format.
 - **Dependencies**: Task 3.1
 - **Files/Areas**: `scripts/generate_plan_json.sh`
 - **Acceptance Criteria**:
-  - [ ] Script runs `terraform plan -out=tfplan` cleanly.
-  - [ ] Script runs `terraform show -json tfplan > plan.json`.
-  - [ ] Valid JSON file produced.
+  - [x] Script runs `terraform plan -out=tfplan` cleanly. (Plan file written to `$ARTIFACT_DIR/tfplan`, outside the repository, per spec §4.1.)
+  - [x] Script runs `terraform show -json tfplan > plan.json`. (`$ARTIFACT_DIR/plan.json`.)
+  - [x] Valid JSON file produced.
 - **Validation**:
-  - [ ] `jq . plan.json` executes without errors.
+  - [x] `jq . plan.json` executes without errors.
 - **Implementation Notes**:
-  - Script must handle detailed exit code 0 (no changes), 2 (drift found), and 1 (error).
+  - Script must handle detailed exit code 0 (no pending changes), 2 (pending changes — **not** by itself drift; corrected 2026-10-01 per `docs/drift-detection-spec.md` §4.2, superseding the original "2 (drift found)" wording), and 1 / any other code (detection failed).
 - **Completion Notes**:
-  - None.
+  - Implemented `scripts/generate_plan_json.sh` (Bash + `jq`, no Python), following `docs/drift-detection-spec.md` §4, §5.3 and §8 exactly: `init -input=false` → `plan -var-file=dev.tfvars -input=false -no-color -lock-timeout=120s -detailed-exitcode -out=$ARTIFACT_DIR/tfplan` (refresh and locking left at defaults) → `show -json` only when plan exit ∈ {0, 2} → integrity gate → run manifest. No `set -e`; every exit code is captured explicitly, so exit 2 never aborts the run. The script accepts no Terraform arguments, so forbidden flags cannot be passed, and it refuses `TF_CLI_ARGS*`, which could inject them. No `apply` anywhere.
+  - **Evidence bundle** in `ARTIFACT_DIR`, which must be absolute, outside the repository and empty (default `$RUNNER_TEMP/drift` in CI, else `mktemp -d`): `detection_run.json` (manifest; always written), `plan.log` (init/plan/show output; always), `plan.json` (plan exit 0/2 only), `tfplan` (transient). The manifest carries the spec §8.1 fields plus `failure_reason`. It contains **no** drift verdict; classification remains Task 3.3+.
+  - **Integrity gate (spec §5.3)**: exactly one JSON object; `format_version` major 1; `terraform_version` = pinned 1.14.7; `errored == false`; `complete == true`; `resource_changes` / `resource_drift` / `output_changes` well-formed where present; exit-code ↔ pending-change consistency. Any violation ⇒ `outcome: failed`, `failure_stage: integrity`.
+  - **Script exit status**: 0 = run succeeded (plan 0 or 2), 1 = detection failed, 64 = unusable `ARTIFACT_DIR` (the only case with no manifest). A partial `plan.json` from a failed `show` is deleted; a signal or unexpected termination still writes a `failed` manifest (EXIT trap).
+  - **Validation — real backend, read-only**: an unmodified run against the real `dev` remote state → script 0, plan exit 0, `backend_key: dev.tfstate`, state lock acquired and released, `jq . plan.json` OK, `.terraform.lock.hcl` and backend config byte-identical afterwards.
+  - **Validation — Task 3.1 scratch copy** (local backend, read-only state pull, live Azure read only): config change → plan 2, succeeded; simulated drift → plan 2, succeeded, `resource_drift` present; converged drift → plan 0, succeeded, `resource_drift` present (passed through for Task 3.3); provider auth failure and variable-validation failure → plan 1, `failed/plan`, **no `plan.json`** although Terraform wrote an errored `tfplan`.
+  - **Validation — stub `terraform`** (scratchpad only, not committed) for paths real Terraform cannot produce safely: errored JSON with exit 0, exit 2 with only no-op, exit 0 with pending changes, truncated JSON, `format_version` 2.0, non-array `resource_changes`, entry without `actions`, missing `complete`, JSON `terraform_version` mismatch, `show` failure with partial output (deleted), plan exit 3, `TF_CLI_ARGS` set, Terraform version mismatch → all `failed` at the correct stage; output-only exit 2 and valid exit 0/2 → `succeeded`. The plan arguments passed to Terraform were captured and match the contract exactly. `ARTIFACT_DIR` guards (inside the repository, including via `..`; relative; non-empty) → exit 64 and no directory left behind. SIGTERM during plan → `failed`, "interrupted by signal during plan". **16/16 stub cases pass.**
+  - `./scripts/validate.sh` → "All local validations passed ✓". `git status` shows only this task's files. No evidence/state artifact in the repository tree (only the pre-existing, ignored `terraform/bootstrap/terraform.tfstate`). Sensitive-data scan of all changed files: no GUIDs, UPNs, keys or secrets. No Azure resource modified.
+  - `docs/drift-detection-spec.md` §8.1 synced with the implementation: `preflight` failure stage, `failure_reason` field, and script exit statuses. The contract itself is unchanged.
+  - **Limitations**: (a) a **real** external Azure change was not exercised (Task 3.6/3.7, requires approval); exit 2 with drift was proven via the state-copy simulation. (b) The script is not wired into any GitHub workflow; CI integration is Phase 5 (Tasks 5.1–5.4), and `terraform-auth-test.yml` was not modified. (c) Validated locally on bash 3.2 (macOS); the CI runner's bash 5 is expected to be compatible but was not exercised. (d) Move/import-only exit-code consistency remains unverified, as recorded in spec §5.3.
 
 #### Task 3.3 — State vs Infrastructure Change Detection
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-01
+- **Completed**: 2026-10-01
 - **Objective**: Develop core logic to parse `resource_changes` in `plan.json` for `create`, `update`, `delete`, and `no-op` actions.
 - **Dependencies**: Task 3.2
-- **Files/Areas**: `scripts/detect_drift.py`
+- **Files/Areas**: `scripts/detect_drift.py`, `tests/test_detect_drift.py`, `tests/fixtures/plan_evidence/`
 - **Acceptance Criteria**:
-  - [ ] Evaluates `resource_changes[].change.actions`.
-  - [ ] Identifies added, modified, deleted, and replaced resources correctly.
+  - [x] Evaluates `resource_changes[].change.actions`.
+  - [x] Identifies added, modified, deleted, and replaced resources correctly.
 - **Validation**:
-  - [ ] Test execution against sample Terraform plan JSON.
+  - [x] Test execution against sample Terraform plan JSON.
 - **Implementation Notes**:
   - Pure deterministic evaluation without AI.
 - **Completion Notes**:
-  - None.
+  - Implemented `scripts/detect_drift.py` (Python standard library only; no Terraform, Azure, network or LLM calls). It consumes a Task 3.2 evidence bundle and writes `drift_classification.json`. It **re-applies the spec §5.3 integrity gate itself** and never parses human-readable plan output. Output is byte-deterministic: sorted keys and addresses, no generated timestamps.
+  - **Three-view classification (spec §6)** per managed address: S = recorded state (`resource_drift.before`, else `resource_changes.before`), R = refreshed (`resource_drift.after`), D = desired (`resource_changes.after`). Resource classes: `in_sync`, `external_drift`, `external_deletion`, `converged_drift`, `config_change` (update/replace/move/import), `resource_added`, `resource_removed`, `drift_and_config_change`, plus `undetermined` when the evidence does not explain a pending change. Attribute classes (§6.2, top-level, **names only**): `drifted`, `drifted_converged`, `config_changed`, `drifted_and_config_changed`, `unknown_until_apply`. `ambiguous` is set for `undetermined` and for same-attribute `drifted_and_config_changed`; Terraform evidence cannot attribute those, so they are never resolved.
+  - `has_drift` = a managed resource appears in `resource_drift` — **not** the exit code. Failed runs (manifest `outcome: failed`) and rejected evidence → `outcome: failed`, `has_drift: null`, a `failure` object (source `detection_run` or `classifier`), process exit 1. Never "no drift". Output-only changes are reported as the plan-level `summary.output_only_change` flag; all resources stay `in_sync`. Data sources are ignored. No causality is inferred: classes describe how Terraform's views differ, never who/what changed Azure (Phase 7).
+  - `docs/drift-detection-spec.md` synced: §6.1 adds `resource_added` / `resource_removed` as config-side refinements of `config_change`, `undetermined`, and `output_only_change` as a summary flag; §8.2 documents the classifier output and exit codes. `in_sync` is the spec's name for "no change".
+  - **Fixtures — real Terraform evidence, read-only**: 11 bundles generated by `scripts/generate_plan_json.sh` against the Task 3.1 scratch copy (local backend seeded from a read-only state pull; only the scratch state/tfvars altered; live Azure read only; **plan only — binary plans deleted, never applied**): in_sync, config_change, external_drift, drift_and_config_change, converged_drift (exit 0), resource_added, resource_removed (`delete_because_each_key`), external_deletion, replace (`replace_because_cannot_update`), output_only_change, failed_run (auth failure). Sanitized: subscription ID → `<AZURE_SUBSCRIPTION_ID>`, scratch paths → repo-relative; `backend_key` is null because they come from the local-backend scratch copy. Plans are stored as `plan.sanitized.json` because `.gitignore` deliberately ignores every `plan.json`. The tests materialize the bundles in a temp directory, so `.gitignore` was **not** weakened.
+  - **Tests**: `python3 -m unittest discover -s tests` → **43 passed** (also passed in a simulated fresh clone containing only git-visible files, and with ResourceWarnings as errors). Covers all 10 required scenarios. Invalid-evidence cases: missing manifest/plan, truncated JSON, multiple documents, non-object, errored plan with a succeeded manifest, missing `complete`, `format_version` 2.0, Terraform version mismatch, malformed arrays, exit-code inconsistency both ways, succeeded manifest with exit 1, unknown outcome. Also synthetic §6.2 rule tests, undetermined, drift on different attributes, move/import, data sources, CLI exit codes 0/1/64, and byte-determinism.
+  - **End-to-end on the real `dev` backend (read-only)**: `generate_plan_json.sh` → `detect_drift.py` → `outcome: succeeded`, `has_drift: false`, `in_sync`, plan exit 0, `backend_key: dev.tfstate`; `drift_classification.json` valid JSON; lock file and backend config unchanged; no apply markers in the log.
+  - Regression: Task 3.2 stub suite 16/16; `./scripts/validate.sh` passed. Sensitive scan of every new file: no GUIDs, real subscription ID, UPNs, paths or secrets. `git status` shows only Task 3.1–3.3 files. No Azure resource modified, no `terraform apply`.
+  - **Limitations**: (a) Comparison is per **top-level** attribute; nested diffs (individual tag keys) and before/after values are Task 3.4. (b) For `replace`, D describes the *new* object, so optional attributes not set in configuration can show as `config_changed` (observed: `managed_by` `""` → `null`). This is recorded in the resource `notes`, not suppressed; noise rules are later, declarative work (spec §9). (c) `resource_drift` means remote ≠ recorded; provider normalization can also produce it. (d) Move/import classification and `undetermined` are exercised only by synthetic tests; move/import exit behavior remains unverified (spec §5.3). (e) Drift was simulated by altering a state copy; a real external Azure change is Task 3.6/3.7 (requires approval).
 
 #### Task 3.4 — Resource Identification & Categorization
 - **Status**: ⬜ NOT STARTED

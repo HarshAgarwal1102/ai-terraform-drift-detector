@@ -1,0 +1,512 @@
+{
+  "applyable": true,
+  "checks": [
+    {
+      "address": {
+        "kind": "var",
+        "module": "module.resource_group",
+        "name": "resource_groups",
+        "to_display": "module.resource_group.var.resource_groups"
+      },
+      "instances": [
+        {
+          "address": {
+            "module": "module.resource_group",
+            "to_display": "module.resource_group.var.resource_groups"
+          },
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    {
+      "address": {
+        "kind": "var",
+        "module": "module.resource_group",
+        "name": "resource_name_prefix",
+        "to_display": "module.resource_group.var.resource_name_prefix"
+      },
+      "instances": [
+        {
+          "address": {
+            "module": "module.resource_group",
+            "to_display": "module.resource_group.var.resource_name_prefix"
+          },
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    {
+      "address": {
+        "kind": "var",
+        "name": "environment",
+        "to_display": "var.environment"
+      },
+      "instances": [
+        {
+          "address": {
+            "to_display": "var.environment"
+          },
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    {
+      "address": {
+        "kind": "var",
+        "name": "project_name",
+        "to_display": "var.project_name"
+      },
+      "instances": [
+        {
+          "address": {
+            "to_display": "var.project_name"
+          },
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    }
+  ],
+  "complete": true,
+  "configuration": {
+    "provider_config": {
+      "azurerm": {
+        "expressions": {
+          "features": [
+            {}
+          ]
+        },
+        "full_name": "registry.terraform.io/hashicorp/azurerm",
+        "name": "azurerm",
+        "version_constraint": "~> 5.0"
+      }
+    },
+    "root_module": {
+      "module_calls": {
+        "resource_group": {
+          "expressions": {
+            "common_tags": {
+              "references": [
+                "var.common_tags"
+              ]
+            },
+            "resource_groups": {
+              "references": [
+                "var.resource_groups"
+              ]
+            },
+            "resource_name_prefix": {
+              "references": [
+                "local.resource_name_prefix"
+              ]
+            }
+          },
+          "module": {
+            "outputs": {
+              "resource_groups": {
+                "description": "Map of created resource groups keyed by the logical identifier.",
+                "expression": {
+                  "references": [
+                    "azurerm_resource_group.this"
+                  ]
+                }
+              }
+            },
+            "resources": [
+              {
+                "address": "azurerm_resource_group.this",
+                "expressions": {
+                  "location": {
+                    "references": [
+                      "each.value.location",
+                      "each.value"
+                    ]
+                  },
+                  "name": {
+                    "references": [
+                      "var.resource_name_prefix",
+                      "each.value.name",
+                      "each.value"
+                    ]
+                  },
+                  "tags": {
+                    "references": [
+                      "var.common_tags",
+                      "each.value.extra_tags",
+                      "each.value"
+                    ]
+                  }
+                },
+                "for_each_expression": {
+                  "references": [
+                    "var.resource_groups"
+                  ]
+                },
+                "mode": "managed",
+                "name": "this",
+                "provider_config_key": "azurerm",
+                "schema_version": 0,
+                "type": "azurerm_resource_group"
+              }
+            ],
+            "variables": {
+              "common_tags": {
+                "default": {},
+                "description": "Tags applied to every resource group (merged with per-RG extra_tags)."
+              },
+              "resource_groups": {
+                "description": "Map of resource groups to create.\nKey   = logical identifier used in for_each (e.g. \"main\").\nValue = object with name suffix, location, and optional extra tags.\n"
+              },
+              "resource_name_prefix": {
+                "description": "Prefix prepended to every resource group name (e.g. 'aitdd-dev')."
+              }
+            }
+          },
+          "source": "../../modules/resource-group"
+        }
+      },
+      "outputs": {
+        "resource_groups": {
+          "description": "All created resource groups.",
+          "expression": {
+            "references": [
+              "module.resource_group.resource_groups",
+              "module.resource_group"
+            ]
+          }
+        }
+      },
+      "variables": {
+        "common_tags": {
+          "default": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "description": "Tags applied to every resource via modules."
+        },
+        "environment": {
+          "default": "dev",
+          "description": "Deployment environment (e.g. dev, staging, prod)."
+        },
+        "location": {
+          "default": "Central India",
+          "description": "Default Azure region for resources."
+        },
+        "project_name": {
+          "default": "aitdd",
+          "description": "Short project identifier used in resource naming."
+        },
+        "resource_groups": {
+          "default": {},
+          "description": "Map of resource groups to create (passed to the resource-group module)."
+        }
+      }
+    }
+  },
+  "errored": false,
+  "format_version": "1.2",
+  "output_changes": {
+    "resource_groups": {
+      "actions": [
+        "no-op"
+      ],
+      "after": {
+        "main": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+          "location": "centralindia",
+          "name": "aitdd-dev-main-rg"
+        }
+      },
+      "after_sensitive": false,
+      "after_unknown": false,
+      "before": {
+        "main": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+          "location": "centralindia",
+          "name": "aitdd-dev-main-rg"
+        }
+      },
+      "before_sensitive": false
+    }
+  },
+  "planned_values": {
+    "outputs": {
+      "resource_groups": {
+        "sensitive": false,
+        "type": [
+          "object",
+          {
+            "main": [
+              "object",
+              {
+                "id": "string",
+                "location": "string",
+                "name": "string"
+              }
+            ]
+          }
+        ],
+        "value": {
+          "main": {
+            "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+            "location": "centralindia",
+            "name": "aitdd-dev-main-rg"
+          }
+        }
+      }
+    },
+    "root_module": {
+      "child_modules": [
+        {
+          "address": "module.resource_group",
+          "resources": [
+            {
+              "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+              "identity": {
+                "name": "aitdd-dev-main-rg",
+                "subscription_id": "<AZURE_SUBSCRIPTION_ID>"
+              },
+              "identity_schema_version": 0,
+              "index": "main",
+              "mode": "managed",
+              "name": "this",
+              "provider_name": "registry.terraform.io/hashicorp/azurerm",
+              "schema_version": 0,
+              "sensitive_values": {
+                "tags": {}
+              },
+              "type": "azurerm_resource_group",
+              "values": {
+                "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+                "location": "centralindia",
+                "managed_by": "",
+                "name": "aitdd-dev-main-rg",
+                "tags": {
+                  "environment": "dev",
+                  "managed_by": "terraform",
+                  "probe": "2",
+                  "project": "ai-terraform-drift-detector"
+                },
+                "timeouts": null
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "prior_state": {
+    "format_version": "1.0",
+    "terraform_version": "1.14.7",
+    "values": {
+      "outputs": {
+        "resource_groups": {
+          "sensitive": false,
+          "type": [
+            "object",
+            {
+              "main": [
+                "object",
+                {
+                  "id": "string",
+                  "location": "string",
+                  "name": "string"
+                }
+              ]
+            }
+          ],
+          "value": {
+            "main": {
+              "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+              "location": "centralindia",
+              "name": "aitdd-dev-main-rg"
+            }
+          }
+        }
+      },
+      "root_module": {
+        "child_modules": [
+          {
+            "address": "module.resource_group",
+            "resources": [
+              {
+                "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+                "identity": {
+                  "name": "aitdd-dev-main-rg",
+                  "subscription_id": "<AZURE_SUBSCRIPTION_ID>"
+                },
+                "identity_schema_version": 0,
+                "index": "main",
+                "mode": "managed",
+                "name": "this",
+                "provider_name": "registry.terraform.io/hashicorp/azurerm",
+                "schema_version": 0,
+                "sensitive_values": {
+                  "tags": {}
+                },
+                "type": "azurerm_resource_group",
+                "values": {
+                  "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+                  "location": "centralindia",
+                  "managed_by": "",
+                  "name": "aitdd-dev-main-rg",
+                  "tags": {
+                    "environment": "dev",
+                    "managed_by": "terraform",
+                    "project": "ai-terraform-drift-detector"
+                  },
+                  "timeouts": null
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "relevant_attributes": [
+    {
+      "attribute": [],
+      "resource": "module.resource_group.azurerm_resource_group.this"
+    }
+  ],
+  "resource_changes": [
+    {
+      "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+          "location": "centralindia",
+          "managed_by": "",
+          "name": "aitdd-dev-main-rg",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "probe": "2",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_identity": {
+          "name": "aitdd-dev-main-rg",
+          "subscription_id": "<AZURE_SUBSCRIPTION_ID>"
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+          "location": "centralindia",
+          "managed_by": "",
+          "name": "aitdd-dev-main-rg",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_identity": {
+          "name": "aitdd-dev-main-rg",
+          "subscription_id": "<AZURE_SUBSCRIPTION_ID>"
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "index": "main",
+      "mode": "managed",
+      "module_address": "module.resource_group",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_resource_group"
+    }
+  ],
+  "resource_drift": [
+    {
+      "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+          "location": "centralindia",
+          "managed_by": "",
+          "name": "aitdd-dev-main-rg",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg",
+          "location": "centralindia",
+          "managed_by": "",
+          "name": "aitdd-dev-main-rg",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "probe": "1",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "index": "main",
+      "mode": "managed",
+      "module_address": "module.resource_group",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_resource_group"
+    }
+  ],
+  "terraform_version": "1.14.7",
+  "timestamp": "2026-10-01T17:16:11Z",
+  "variables": {
+    "common_tags": {
+      "value": {
+        "environment": "dev",
+        "managed_by": "terraform",
+        "project": "ai-terraform-drift-detector"
+      }
+    },
+    "environment": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "Central India"
+    },
+    "project_name": {
+      "value": "aitdd"
+    },
+    "resource_groups": {
+      "value": {
+        "main": {
+          "extra_tags": {
+            "probe": "2"
+          },
+          "location": "Central India",
+          "name": "main"
+        }
+      }
+    }
+  }
+}

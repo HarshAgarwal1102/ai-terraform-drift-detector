@@ -1,0 +1,15 @@
+{
+  "backend_key": null,
+  "environment": "dev",
+  "failure_reason": null,
+  "failure_stage": null,
+  "finished_at": "2026-10-01T17:16:07Z",
+  "git_commit": "d6f5ba49f1200c98d4877ee7983ceee8261c9285",
+  "outcome": "succeeded",
+  "plan_exit_code": 2,
+  "run_id": "local-20261001T171603Z-23017",
+  "show_exit_code": 0,
+  "started_at": "2026-10-01T17:16:03Z",
+  "terraform_version": "1.14.7",
+  "working_dir": "terraform/environments/dev"
+}
