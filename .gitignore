@@ -1,0 +1,55 @@
+# -------------------------------------------------
+# Terraform
+# -------------------------------------------------
+
+# Local .terraform directories
+.terraform/
+
+# Terraform state files (never commit state)
+*.tfstate
+*.tfstate.*
+
+# Terraform plan artifacts (may contain resource IDs / sensitive values)
+tfplan
+*.tfplan
+plan.json
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Variable override files (may contain secrets)
+*.tfvars
+*.tfvars.json
+# Allow example/dev tfvars that contain no secrets
+!dev.tfvars
+
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored.
+# The provider lock file should be committed for reproducible builds.
+
+# -------------------------------------------------
+# Environment / Secrets
+# -------------------------------------------------
+.env
+.env.*
+
+# -------------------------------------------------
+# OS / Editor
+# -------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# -------------------------------------------------
+# Python (for future phases)
+# -------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
