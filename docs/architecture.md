@@ -13,7 +13,7 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 | Phase | Description | Scope | Status |
 |---|---|---|---|
 | **1** | **Azure + Terraform Infrastructure** | Minimal Resource Group baseline in `Central India`; reusable modules preserved for Network, Storage, Key Vault | ✅ Complete |
-| **2** | **Remote State & Secure Auth** | Dedicated Storage Backend (`Central India`), Bootstrap module, State Migration, GitHub OIDC | 🟡 In Progress (Deployment Pending) |
+| **2** | **Remote State & Secure Auth** | Dedicated Storage Backend (`Central India`), Bootstrap module, Remote State, GitHub OIDC (plan-only CI) | ✅ Complete |
 | 3 | Drift Detection Engine | Scheduled plan analysis, state vs actual state comparison | ⬜ Planned |
 | 4 | Python Drift Parser | Structured JSON extraction from plan files | ⬜ Planned |
 | 5 | GitHub Actions Automation | CI/CD scheduled workflow for drift runs | ⬜ Planned |
@@ -69,7 +69,9 @@ flowchart TD
 | Access Control | Container access is private (`container_access_type = "private"`). No public blob access. |
 | State Versioning | Storage Blob Versioning enabled for recovery from state corruptions. |
 | Soft Delete | Container and Blob 7-day soft-delete retention policies active. |
-| No Committed Secrets | Local state and credentials are in `.gitignore`. Only `.terraform.lock.hcl` is committed. |
+| No Committed Secrets | Local state, plan artifacts, and credentials are in `.gitignore` (`*.tfstate`, `*.tfstate.*`, `.terraform/`, `tfplan`, `*.tfplan`, `plan.json`). Only `.terraform.lock.hcl` and the secret-free `dev.tfvars` are committed. |
+| Dev State Blob | The `dev` environment's state is the blob `dev.tfstate` inside the `tfstate` container. |
+| Bootstrap State | `terraform/bootstrap` intentionally keeps **local** state (it provisions the backend it would otherwise store state in). That state is never committed, so CI validates bootstrap offline only (`init -backend=false` + `validate`) and never plans it. |
 
 ---
 
@@ -92,7 +94,7 @@ For CI/CD automation, the project relies on **GitHub Workload Identity / OpenID 
 flowchart TD
     GHA["🐙 GitHub Actions Workflow"]
     ENTRA["🔐 Microsoft Entra ID<br/>(App Registration / SP)"]
-    FED_CRED["📜 Federated Identity Credential<br/>(repo:org/repo:ref)"]
+    FED_CRED["📜 Federated Identity Credential<br/>(immutable subject:<br/>repo:OWNER@ID/REPO@ID:ref:refs/heads/main)"]
     AZURE_ARM["☁️ Azure Resource Manager"]
     TF_REMOTE["💾 Azure Remote State"]
 
@@ -103,13 +105,47 @@ flowchart TD
     AZURE_ARM -->|"5. Reads/Writes State"| TF_REMOTE
 ```
 
-### Minimum Azure RBAC Permissions
+### Azure RBAC Permissions (GitHub OIDC Identity)
+
+The GitHub Actions identity is the Entra ID App Registration / service principal
+**`aitdd-github-oidc`**. The following are its **actual, verified** assignments — exactly
+two, and nothing else:
 
 | Identity Role | Scope | Purpose |
 |---|---|---|
-| **Storage Blob Data Contributor** | `aitddtfstatesa001` Storage Account | Allows Terraform to read, write, and lock state blobs. |
-| **Contributor** | `aitdd-dev-main-rg` Resource Group | Allows Terraform to plan and apply application infrastructure changes. |
-| **Key Vault Secrets Officer** | `aitdd-dev-kv-001` Key Vault | Allows secret provisioning in dev Key Vault. |
+| **Reader** | Subscription | Read-only resource metadata so `terraform plan` can refresh state against live Azure. Grants `*/read` only. |
+| **Storage Blob Data Contributor** | `tfstate` **container** (`aitddtfstatesa001`) | Read, write, and lock the Terraform state blobs in that one container. |
+
+Deliberately **not** assigned to this identity:
+
+| Not Assigned | Why |
+|---|---|
+| `Storage Blob Data Contributor` at subscription or storage-account scope | Container scope is narrower; a broader grant would expose every blob container in the subscription. |
+| `Contributor` on any scope | CI is **plan-only**. Write access is not required and is withheld by design. |
+| `Owner`, `User Access Administrator` | Never required by this workload. |
+| `Key Vault Secrets Officer` | No Key Vault is deployed; the module is preserved but unused. |
+
+The identity has **no group or directory-role memberships**, so there are no inherited
+permission paths, and it requests **no** Microsoft Graph or API permissions.
+
+### CI Security Model — Plan-Only
+
+GitHub Actions is currently **plan-only** and has **no autonomous `terraform apply`
+capability**. This is enforced by RBAC, not merely by workflow convention: the identity
+holds no write actions. Verified against the Azure role definitions —
+`resourceGroups/write`, `resourceGroups/delete`, `storageAccounts/write`,
+`storageAccounts/listkeys/action`, and `deployments/write` are all **denied**.
+
+Because `listkeys` is denied, Terraform cannot retrieve a storage account access key.
+State access therefore goes through Microsoft Entra ID on the storage data plane
+(`ARM_USE_AZUREAD=true`), with no account key and no client secret anywhere in the
+pipeline.
+
+> **Future / conditional only — not current access.** Should a later phase introduce
+> automated remediation, any write capability (for example a narrowly scoped
+> `Contributor` on `aitdd-dev-main-rg`) would be a **future** change requiring explicit
+> human approval, and is **not** granted today. The project principle *No autonomous
+> apply* stands: remediation requires human approval.
 
 ---
 

@@ -6,9 +6,9 @@
 
 ## 📌 Current Phase
 
-**Phase 2 — Remote Terraform State & Secure Azure Authentication** 🟡 (Pending Deployment)
+**Phase 2 — Remote Terraform State & Secure Azure Authentication** ✅ Complete
 
-This phase establishes a dedicated, secure Azure Storage remote backend for Terraform state, along with GitHub Actions OIDC (Workload Identity) authentication patterns. Infrastructure deployment to Azure is pending authentication (`az login`).
+This phase established a dedicated, secure Azure Storage remote backend for Terraform state and GitHub Actions OIDC (Workload Identity) authentication. The state backend and the `dev` baseline Resource Group are deployed to Azure, the `dev` environment's state lives in the remote `dev.tfstate` blob, and a GitHub Actions run has authenticated to Azure via OIDC and completed `terraform plan` with no long-lived credentials. CI is **plan-only**.
 
 ---
 
@@ -60,7 +60,8 @@ flowchart TD
 | Terraform | >= 1.6.0 | Infrastructure as Code |
 | AzureRM Provider | ~> 5.0 | Azure resource management |
 | Azure CLI | >= 2.x | Local developer authentication |
-| GitHub Actions | v4 / v2 / v3 | CI/CD & OIDC authentication test |
+| GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3` | CI/CD & OIDC authentication test |
+| Terraform in CI | 1.14.7 (pinned) | Matches the version that wrote the remote state |
 
 ---
 
@@ -73,6 +74,7 @@ flowchart TD
 | Resource Group | `aitdd-tfstate-rg` | `Central India` | Dedicated state storage RG |
 | Storage Account | `aitddtfstatesa001` | `Central India` | Encrypted, versioned state storage |
 | Blob Container | `tfstate` | N/A | Private container for `.tfstate` files |
+| State Blob | `dev.tfstate` | N/A | Remote state for the `dev` environment |
 
 ### Application Infrastructure (Phase 1 Dev — Minimal Foundation)
 
@@ -161,30 +163,59 @@ terraform plan -var-file="dev.tfvars"
 
 ## 🔐 GitHub Actions OIDC Authentication Setup
 
-This project uses **GitHub OIDC / Azure Federated Identity Credentials** (no long-lived client secrets).
+This project uses **GitHub OIDC / Azure Federated Identity Credentials**. No long-lived
+client secret, certificate, or storage account access key is used anywhere — the app
+registration holds zero credentials.
 
-### Manual Azure Setup Steps:
+### Azure Setup Steps
 
-1. **Create an Azure Entra App Registration & Service Principal**:
+1. **Create the Entra App Registration & Service Principal** (this project uses
+   `aitdd-github-oidc`):
    ```bash
-   az ad app create --display-name "github-actions-aitdd"
+   az ad app create --display-name "aitdd-github-oidc" --sign-in-audience AzureADMyOrg
    az ad sp create --id "<app-id>"
    ```
 
-2. **Add Federated Identity Credential**:
-   Link GitHub repository `main` branch to Azure Entra ID:
-   - **Subject identifier**: `repo:<your-github-org>/<your-repo>:ref:refs/heads/main`
+2. **Add the Federated Identity Credential** linking the repository's `main` branch to
+   Entra ID:
    - **Issuer**: `https://token.actions.githubusercontent.com`
+   - **Audience**: `api://AzureADTokenExchange`
+   - **Subject identifier**: must match GitHub's `sub` claim **exactly** — Entra does not
+     support wildcards, and a mismatch fails the token exchange *silently, with no error*.
 
-3. **Assign Azure RBAC Roles**:
-   - `Storage Blob Data Contributor` on `aitddtfstatesa001`
-   - `Contributor` on `aitdd-dev-main-rg`
+   > **Pick the right subject format.** Repositories created **after 2026-07-15** use
+   > GitHub's **immutable** subject format, which embeds numeric owner and repository IDs:
+   >
+   > ```
+   > repo:OWNER@OWNER-ID/REPO@REPO-ID:ref:refs/heads/main
+   > ```
+   >
+   > Older repositories use the legacy form `repo:OWNER/REPO:ref:refs/heads/main`.
+   > This repository was created after the cutoff and therefore uses the immutable
+   > format. Retrieve the two IDs from
+   > `https://api.github.com/repos/<owner>/<repo>` (`owner.id` and `id`).
 
-4. **Add GitHub Secrets**:
-   Set the following secrets in GitHub Repository Settings -> Secrets and variables -> Actions:
-   - `AZURE_CLIENT_ID`
+3. **Assign least-privilege Azure RBAC** — exactly these two, and nothing more:
+   - `Reader` at **subscription** scope — read-only metadata for `terraform plan`
+   - `Storage Blob Data Contributor` scoped to the **`tfstate` container** (not the
+     storage account, not the subscription)
+
+   `Contributor` is **not** assigned. CI is plan-only; see
+   [Security Principles](#-security-principles).
+
+   > Creating role assignments requires **Owner** or **User Access Administrator**.
+   > A `Contributor` account cannot create them.
+
+4. **Add GitHub repository secrets** under *Settings → Secrets and variables → Actions*:
+   - `AZURE_CLIENT_ID` — the App Registration's Application (client) ID
    - `AZURE_TENANT_ID`
    - `AZURE_SUBSCRIPTION_ID`
+
+   These are referenced by the workflow as `${{ secrets.* }}`; their values are
+   intentionally not recorded in this repository.
+
+5. **Verify** by running the `terraform-auth-test.yml` workflow. A green run proves the
+   federated credential, the secrets, and the RBAC scopes are all correct together.
 
 ---
 
@@ -196,7 +227,9 @@ This project uses **GitHub OIDC / Azure Federated Identity Credentials** (no lon
 | No Committed Secrets | Credentials, tokens, and state files are gitignored. |
 | OIDC Authentication | Workload Identity replaces static Azure client secrets in GitHub Actions. |
 | State Security | State blob versioning enabled; container set to private. |
-| Least Privilege | Scope-based RBAC permissions assigned to deployment identity. |
+| Least Privilege | Exactly two RBAC assignments on the CI identity: `Reader` (subscription) and `Storage Blob Data Contributor` (`tfstate` container). No `Contributor`, `Owner`, or `User Access Administrator`. |
+| Plan-Only CI | GitHub Actions has **no autonomous `terraform apply` capability**, enforced by RBAC rather than convention — the identity holds no write actions. Any future remediation/apply capability would require explicit human approval. |
+| No Storage Account Keys | `listkeys` is denied to the CI identity, so state access uses Entra ID on the data plane (`ARM_USE_AZUREAD=true`) instead of account keys. |
 
 ---
 
@@ -205,8 +238,8 @@ This project uses **GitHub OIDC / Azure Federated Identity Credentials** (no lon
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Terraform + Azure Foundation (Minimal Baseline) | ✅ Complete |
-| **2** | **Remote state backend + secure auth** | 🟡 In Progress (Deployment Pending) |
-| 3 | Deterministic Terraform drift detection | ⬜ Planned |
+| 2 | Remote state backend + secure auth (plan-only CI) | ✅ Complete |
+| **3** | **Deterministic Terraform drift detection** | 🟡 Next |
 | 4 | Python drift parser | ⬜ Planned |
 | 5 | Scheduled GitHub Actions drift detection | ⬜ Planned |
 | 6 | LangGraph AI analysis | ⬜ Planned |
