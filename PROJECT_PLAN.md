@@ -91,6 +91,26 @@ Every task in this plan must have exactly one status from the following lifecycl
     - This rule applies to all future tasks unless a task explicitly
       requires a different location.
 
+16. **Filesystem Access Boundary (strict security rule)**:
+    - Normal project work is restricted to the project directory
+      `~/Developer/DevOps/Project/AI-Terraform-Drift-Detector`.
+    - Temporary validation/scratch work uses only the **current**
+      Claude session's scratchpad (not scratchpads of earlier sessions).
+    - Never run home-directory-wide searches (e.g. `find ~`) or
+      recursive scans of `~/Desktop`, `~/Documents`, `~/Downloads`,
+      `~/Music` or similar personal folders.
+    - To locate a tool or dependency, search the project and the current
+      session scratchpad first; if it is not there, install it into the
+      current scratchpad or ask the user. Never scan the home directory.
+    - Do not access files or directories outside the project unless the
+      user explicitly asks. If a task genuinely requires outside access,
+      STOP and ask the user before accessing it.
+    - Do not request additional macOS filesystem permissions unless they
+      are genuinely required, and explain why before requesting them.
+      Do not use Full Disk Access for this project.
+    - This rule applies to all future tasks and takes precedence over
+      convenience (e.g. reusing tools found elsewhere on the machine).
+
 ### Core Project Principles
 - **Deterministic source of truth**: Terraform/Azure deterministic tooling is the source of truth for drift. AI interprets, classifies, explains, and recommends; AI is NOT the source of truth for detecting drift.
 - **Evidence vs inference**: AI must distinguish evidence from inference, and must not hallucinate who changed infrastructure.
@@ -1481,6 +1501,37 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - **Phase 5 complete**: Tasks 5.1–5.5 all 🟢.
 
 ---
+
+### PHASE 5A — Dev Infrastructure Expansion (pre-Phase 6)
+**Status**: 🟢 COMPLETED
+
+The dedicated infrastructure expansion anticipated by the Phase 1 scope note: adds networking resource types so drift detection (and later AI analysis) can be exercised on more than the single Resource Group. Key Vault, an application Storage Account and any compute remain out of scope.
+
+#### Task 5A.1 — VNet, Subnet & NSG in the Dev Environment
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
+- **Objective**: Add one Virtual Network, one Subnet and one Network Security Group associated with that Subnet to the dev environment, inside the existing Resource Group `aitdd-dev-main-rg`, leaving the Resource Group unchanged.
+- **Dependencies**: Phase 5
+- **Files/Areas**: `terraform/modules/network/` (new), `terraform/environments/dev/{main,variables,outputs}.tf`, `terraform/environments/dev/dev.tfvars`
+- **Acceptance Criteria**:
+  - [x] Reusable `network` module (VNet + `for_each` subnets/NSGs + subnet-NSG association), driven by a `virtual_networks` map in `dev.tfvars`; location and resource group come from the existing Resource Group module (looked up by key).
+  - [x] No Key Vault, application Storage Account, compute or other resources; backend, OIDC, drift engine and workflow unchanged.
+  - [x] Real `terraform plan` against the remote backend shows only the 4 intended creates and no Resource Group change.
+  - [x] `terraform apply` executed **only after explicit user approval**; post-apply plan is clean (exit 0).
+- **Implementation Notes**:
+  - Names: `aitdd-dev-main-vnet` (10.10.0.0/16), `aitdd-dev-main-app-snet` (10.10.1.0/24), `aitdd-dev-main-app-nsg`.
+  - NSG declares `security_rule = []` (azurerm 5.7.0 marks it Optional+Computed, so omitted rules would hide out-of-band rules from the plan); Azure default rules only. Subnet sets `default_outbound_access_enabled = false` explicitly to avoid provider/API default ambiguity.
+  - Known limitation: the VNet's inline `subnet` attribute is Optional+Computed and is left unset (subnets are separate resources), so a subnet created outside Terraform in this VNet is not visible to the plan.
+- **Progress Notes (2026-10-02)**:
+  - Offline: `terraform fmt`, `init -backend=false -lockfile=readonly` + `validate` pass; lock file unchanged; `./scripts/validate.sh` passes; `pytest` 319 passed. Mocked-provider `terraform test` (scratchpad only, not committed) with the real `dev.tfvars` confirms names, CIDRs, single association, empty NSG rule set, and rejection of an undefined NSG key / invalid CIDR.
+  - Drift run #9 (2026-10-02) found `external_drift` on the Resource Group: the user's intentional `owner=Harsh` drift-test tag. The user removed it in the Azure Portal before the real plan.
+  - **Real plan (2026-10-02, user-approved, local Azure CLI auth, `ARM_USE_AZUREAD=true`)**: run against commit `f1b2ccd` plus the uncommitted Task 5A.1 changes. `init -lockfile=readonly` against the remote `dev.tfstate`; `plan -detailed-exitcode -var-file=dev.tfvars` exit **2**; JSON `errored=false`, `complete=true`. **Plan: 4 to add, 0 to change, 0 to destroy**: create `azurerm_virtual_network` (`aitdd-dev-main-vnet`, 10.10.0.0/16), `azurerm_subnet` (`aitdd-dev-main-app-snet`, 10.10.1.0/24, default outbound false), `azurerm_network_security_group` (`aitdd-dev-main-app-nsg`, `security_rule = []`), and the subnet-NSG association, all in `aitdd-dev-main-rg` / `centralindia` with the common tags. Resource Group **no-op** (before == after, tags back to the 3 common tags); `resource_drift` empty; no replace/delete. No warnings. `Microsoft.Network` is Registered. Evidence (tfplan, plan.json, logs, `TF_DATA_DIR`) kept in the session scratchpad only; lock file unchanged.
+- **Completion Notes**:
+  - **Apply (user-approved)**: the exact reviewed saved plan was applied: `Apply complete! Resources: 4 added, 0 changed, 0 destroyed` (NSG, VNet, subnet, association). No other Azure change.
+  - **Post-apply state refresh**: the first fresh plan printed "No changes" (exit 0) but its JSON still carried 2 `resource_drift` entries, which the engine classified as `converged_drift` (has_drift=true, MEDIUM). They were provider-computed values filled in after creation: subnet `network_security_group_id` (set by the later association) and `service_endpoint_policy_ids` (null→[]), and the VNet's computed `subnet` list. A `plan -refresh-only` showing exactly those attributes (no resource actions, no output changes) was reviewed and then applied as the saved plan with user approval: `0 added, 0 changed, 0 destroyed` (state only).
+  - **Final verification** (via `scripts/generate_plan_json.sh` + `drift-engine analyze --manifest`, evidence in the session scratchpad only): manifest `outcome=succeeded`, `plan_exit_code=0`; plan.json `errored=false`, `complete=true`, `resource_drift` empty, all actions no-op; "No changes. Your infrastructure matches the configuration."; report `outcome=succeeded`, **`has_drift=false`, `in_sync=5`**, severity INFO. Provider lock file unchanged.
+  - **Lesson for later phases**: creating a subnet and its NSG association in one apply leaves computed attributes stale in state until a refresh is persisted; the engine reports that as `converged_drift`. After applies that add associated network resources, run a reviewed `apply -refresh-only` (or expect one converged-drift scan).
 
 ### PHASE 6 — LangGraph AI Analysis Engine
 **Status**: ⬜ NOT STARTED

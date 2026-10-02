@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). **Phase 5 — Automated drift detection workflow** ✅ Complete: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); Task 5.5 ✅ (failure reporting + `drift_detected` job output, verified by a green real run). Next: Phase 6, Task 6.1.
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). **Phase 5 — Automated drift detection workflow** ✅ Complete: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); Task 5.5 ✅ (failure reporting + `drift_detected` job output, verified by a green real run). **Phase 5A — Dev infrastructure expansion** ✅ Complete: Task 5A.1 ✅ (Virtual Network, Subnet, Network Security Group and Subnet–NSG association added to `dev` inside the existing resource group; applied with approval and verified in sync: plan exit 0, `drift-engine` `in_sync=5`). Next: Phase 6, Task 6.1.
 
 | Phase | Status |
 |---|---|
@@ -20,6 +20,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 | 3 — Deterministic drift detection, validated against a real Azure change | ✅ Complete |
 | 4 — Python drift engine | ✅ Complete |
 | 5 — Automated drift detection workflow (scheduled + manual) | ✅ Complete |
+| 5A — Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -90,6 +91,11 @@ flowchart TD
     subgraph "Application Infrastructure Layer (Remote State)"
         DEV_ENV["⚙️ terraform/environments/dev"] -->|"Stores State"| STATE_CONTAINER
         DEV_ENV -->|"module resource-group"| APP_RG["📦 aitdd-dev-main-rg"]
+        DEV_ENV -->|"module network"| APP_VNET["🌐 aitdd-dev-main-vnet<br/>10.10.0.0/16"]
+        APP_RG --> APP_VNET
+        APP_VNET --> APP_SNET["🔀 aitdd-dev-main-app-snet<br/>10.10.1.0/24"]
+        APP_NSG["🛡️ aitdd-dev-main-app-nsg"] -->|"subnet association"| APP_SNET
+        APP_RG --> APP_NSG
     end
 
     subgraph "Deterministic Drift Detection (implemented)"
@@ -146,11 +152,16 @@ library, so they run with plain `python3`. Pydantic and PyYAML are needed only f
 
 | Resource | Name | Location | Purpose |
 |---|---|---|---|
-| Resource Group | `aitdd-dev-main-rg` | `Central India` | The only managed application resource; target of drift detection |
+| Resource Group | `aitdd-dev-main-rg` | `Central India` | Parent of all application resources (Phase 1) |
+| Virtual Network | `aitdd-dev-main-vnet` | `Central India` | Address space `10.10.0.0/16` (Phase 5A) |
+| Subnet | `aitdd-dev-main-app-snet` | `Central India` | `10.10.1.0/24`; default outbound access disabled (Phase 5A) |
+| Network Security Group | `aitdd-dev-main-app-nsg` | `Central India` | No custom rules (Azure defaults only); rule set declared empty so out-of-band rules show as drift (Phase 5A) |
+| Subnet–NSG association | `aitdd-dev-main-app-snet` ↔ `aitdd-dev-main-app-nsg` | N/A | Applies the NSG to the subnet (Phase 5A) |
 
-The minimal footprint is deliberate: one resource group is the MVP drift target. No
-network, storage or Key Vault modules exist in this repository. More resource types are
-planned for a later infrastructure-expansion phase.
+All five resources are Terraform-managed drift targets. The footprint stays deliberately
+small and cost-free: no compute, public IPs, application storage or Key Vault. Networking is
+defined by the reusable `network` module and the `virtual_networks` map in `dev.tfvars`;
+each network inherits its resource group's name and location.
 
 ---
 
@@ -159,12 +170,13 @@ planned for a later infrastructure-expansion phase.
 ```
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
-└── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: OIDC, plan evidence, drift-engine analyze (Phase 5, in progress)
+└── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → report (Phase 5)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
 ├── modules/
-│   └── resource-group/           # for_each-driven resource group module
+│   ├── resource-group/           # for_each-driven resource group module
+│   └── network/                  # VNet + for_each subnets/NSGs + subnet–NSG associations (Phase 5A)
 └── environments/
     └── dev/                      # Dev environment (remote state, dev.tfvars)
 
@@ -504,6 +516,7 @@ registration holds zero credentials.
 | 3 | Deterministic Terraform drift detection | ✅ Complete |
 | 4 | Python drift engine | ✅ Complete |
 | 5 | Scheduled GitHub Actions drift detection | ✅ Complete |
+| 5A | Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
 | **6** | **LangGraph AI analysis** | ⬜ Next |
 | 7 | Azure Activity Log investigation | ⬜ Planned |
 | 8 | GitHub Issue/PR automation | ⬜ Planned |
@@ -516,8 +529,15 @@ registration holds zero credentials.
 
 ### Known limitations (current state)
 
-- Only one Azure resource type (resource group) is managed and drift-tested. Rules for Key
-  Vault, NSG and storage are verified on synthetic plans only.
+- Five resources are managed (resource group, VNet, subnet, NSG, subnet–NSG association), but
+  real Azure drift has so far been exercised only on the resource group (tags). The network
+  resources are verified in sync after apply; NSG severity rules, like the Key Vault and storage
+  rules, are verified on synthetic plans only.
+- A subnet created outside Terraform inside the managed VNet is not visible to the plan (the
+  VNet's inline `subnet` attribute is provider-computed and left unmanaged).
+- Right after an apply that adds a subnet and its NSG association, provider-computed attributes
+  are stale in state and the engine reports them as `converged_drift` until a reviewed
+  `terraform apply -refresh-only` records them (see Task 5A.1).
 - Scheduled detection (`drift-detection.yml`, daily 02:00 UTC) uploads only the contract report
   (sensitive values redacted by the engine) and run manifest as `drift-report-<run_id>` (30 days).
   Raw plan evidence (`tfplan`, `plan.json`, `plan.log`) is kept only on the ephemeral runner and is

@@ -1,9 +1,9 @@
 # ============================================================
-# Dev Environment — Resource Definitions (Phase 1 Minimal Foundation)
+# Dev Environment — Resource Definitions
 # ============================================================
-# Minimal resource footprint focused on Azure Resource Group
-# to establish a clean baseline for Terraform state management
-# and deterministic drift detection.
+# Small resource footprint for deterministic drift detection:
+# the Phase 1 Resource Group plus one VNet, Subnet and NSG
+# (no compute, no storage, no Key Vault).
 # ============================================================
 
 # --- Global Settings ---
@@ -18,7 +18,7 @@ common_tags = {
   managed_by  = "terraform"
 }
 
-# --- Resource Groups (Active Minimal Foundation) ---
+# --- Resource Groups (Phase 1 Foundation) ---
 
 resource_groups = {
   main = {
@@ -27,3 +27,28 @@ resource_groups = {
   }
 }
 
+# --- Networking ---
+# One VNet in the main resource group with a single subnet protected by an NSG.
+# The NSG has no custom rules (Azure default rules only); no compute is attached.
+
+virtual_networks = {
+  main = {
+    name               = "main"
+    resource_group_key = "main"
+    address_space      = ["10.10.0.0/16"]
+
+    network_security_groups = {
+      app = {
+        name = "app"
+      }
+    }
+
+    subnets = {
+      app = {
+        name                       = "app"
+        address_prefixes           = ["10.10.1.0/24"]
+        network_security_group_key = "app"
+      }
+    }
+  }
+}

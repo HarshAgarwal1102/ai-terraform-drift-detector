@@ -1,9 +1,9 @@
 # -----------------------------------------------
 # Dev Environment Variables
 # -----------------------------------------------
-# Phase 1 Minimal Foundation:
-# The active dev environment manages ONLY the Resource
-# Group module (aitdd-dev-main-rg).
+# The dev environment manages the Resource Group module
+# (aitdd-dev-main-rg) and the network module (VNet,
+# Subnet, NSG) placed inside that group.
 # -----------------------------------------------
 
 # --- Global Settings ---
@@ -58,3 +58,28 @@ variable "resource_groups" {
   default = {}
 }
 
+# --- Networking ---
+
+variable "virtual_networks" {
+  description = <<-EOT
+    Map of virtual networks to create (passed to the network module).
+    resource_group_key must match a key in resource_groups; the network uses
+    that group's name and location.
+  EOT
+  type = map(object({
+    name               = string
+    resource_group_key = string
+    address_space      = list(string)
+    subnets = optional(map(object({
+      name                            = string
+      address_prefixes                = list(string)
+      network_security_group_key      = optional(string)
+      default_outbound_access_enabled = optional(bool, false)
+    })), {})
+    network_security_groups = optional(map(object({
+      name = string
+    })), {})
+    extra_tags = optional(map(string), {})
+  }))
+  default = {}
+}
