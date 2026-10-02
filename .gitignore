@@ -28,6 +28,11 @@ crash.*.log
 # The provider lock file should be committed for reproducible builds.
 
 # -------------------------------------------------
+# Downloaded / extracted validation artifacts (PROJECT_PLAN.md rule 15)
+# -------------------------------------------------
+.artifacts/
+
+# -------------------------------------------------
 # Environment / Secrets
 # -------------------------------------------------
 .env

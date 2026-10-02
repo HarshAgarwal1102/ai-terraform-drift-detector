@@ -72,6 +72,25 @@ Every task in this plan must have exactly one status from the following lifecycl
     insecure, or inconsistent with actual Terraform/Azure behavior, stop
     and explain the issue instead of blindly implementing it.
 
+15. **Project-Local Artifact Handling**:
+    - Any downloaded GitHub Actions artifacts, reports, logs, test
+      outputs, or other validation files that need to be inspected
+      locally must be downloaded/extracted inside the project workspace,
+      preferably under the ignored `.artifacts/` directory
+      (e.g. `.artifacts/<artifact-name>/`).
+    - Do not use the user's general `~/Downloads` folder for project
+      validation artifacts.
+    - `.artifacts/` must stay gitignored so downloaded/generated
+      validation artifacts cannot be accidentally committed.
+    - Do not overwrite source files or tracked project files with
+      downloaded artifacts.
+    - Temporary files may still use system temporary locations when
+      technically required, but the final locally retained
+      artifact/report used for inspection must be kept inside the
+      project workspace.
+    - This rule applies to all future tasks unless a task explicitly
+      requires a different location.
+
 ### Core Project Principles
 - **Deterministic source of truth**: Terraform/Azure deterministic tooling is the source of truth for drift. AI interprets, classifies, explains, and recommends; AI is NOT the source of truth for detecting drift.
 - **Evidence vs inference**: AI must distinguish evidence from inference, and must not hallucinate who changed infrastructure.
