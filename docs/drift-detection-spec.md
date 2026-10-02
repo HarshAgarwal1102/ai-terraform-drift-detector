@@ -342,8 +342,23 @@ from `src/` (no installation needed); its output is unchanged.
   Terraform version) are skipped, every `run` field is `null`, and a warning is printed.
   All other gate checks still apply. Pass the manifest whenever one exists.
 - Exit codes: `0` classified, `1` evidence failed or rejected (report still written, drift
-  status unknown), `2` usage, `70` the report would break the contract (nothing written),
-  `73` output not writable.
+  status unknown), `2` usage, `70` the report would break the contract or an unexpected
+  internal error occurred (nothing written, drift status unknown), `73` output not
+  writable, `130` interrupted, `141` standard output closed early.
+- `--output` is written atomically (temporary file in the same directory, then rename).
+  Failure keeps an existing report, permissions included. An existing report keeps its
+  permission bits (never widened); a new one gets `0666` minus the umask; an unwritable
+  report is refused (`73`). The directory must be writable; there is no non-atomic
+  fallback. A symlink at the output path is replaced, never written through. A
+  hard-linked report gets a new inode.
+- **Logging (Task 4.7):** structured events through the standard `logging` module
+  (`src/drift_engine/logs.py`). Off by default, both for library callers and the script;
+  enabled with `--log-level` / `--log-format text|json`. Logs go to standard error, never
+  into the report. Event fields carry identifiers, counts, stages and failure reasons,
+  never attribute values, so §8.3 redaction cannot be bypassed through log events. The
+  exception is an unexpected internal error (exit `70`): its message is printed to standard
+  error and, at debug level, its traceback is logged. These engine-defect diagnostics
+  contain whatever text that exception carried.
 - Exit `70` is defense in depth. The identity checks in §5.3 reject the malformed resource
   fields that previously reached the report, so for gate-passing input it indicates an
   engine defect.

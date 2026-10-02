@@ -20,9 +20,14 @@ Standard library only. No Terraform, Azure, network or LLM access.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
+
+from drift_engine.logs import log_event
+
+logger = logging.getLogger(__name__)
 
 PLAN_STAGE = "integrity"
 
@@ -96,7 +101,10 @@ def load_json(path: str, stage: str, max_bytes: int = MAX_PLAN_BYTES) -> Any:
             data = fh.read(max_bytes + 1)  # the file may grow after the size check
         if len(data) > max_bytes:
             raise EvidenceError(stage, f"{name} exceeds the {max_bytes} byte limit")
-        return json.loads(data.decode("utf-8"))  # rejects trailing data / multiple documents
+        document = json.loads(data.decode("utf-8"))  # rejects trailing data / multiple documents
+        log_event(logger, logging.DEBUG, "evidence_loaded", f"loaded {name}",
+                  file=name, stage=stage, bytes=len(data))
+        return document
     except FileNotFoundError:
         raise EvidenceError(stage, f"{name} not found") from None
     except RecursionError:
@@ -310,8 +318,16 @@ def parse_plan(
     """Gate and extract an already-loaded plan, or raise EvidenceError."""
     violations = integrity_violations(plan, plan_rc, expected_tf_version)
     if violations:
+        log_event(logger, logging.DEBUG, "integrity_gate_failed", "plan rejected by the integrity gate",
+                  violations=len(violations))
         raise EvidenceError(PLAN_STAGE, "; ".join(violations))
-    return extract_plan(plan)
+    parsed = extract_plan(plan)
+    log_event(logger, logging.DEBUG, "plan_parsed", "plan passed the integrity gate",
+              resources=len(parsed.resources), output_changes=len(parsed.output_changes),
+              format_version=parsed.header["format_version"],
+              terraform_version=parsed.header["terraform_version"],
+              manifest_checks=plan_rc is not None and expected_tf_version is not None)
+    return parsed
 
 
 def extract_plan(plan: dict) -> ParsedPlan:

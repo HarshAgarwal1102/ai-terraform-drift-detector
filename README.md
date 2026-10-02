@@ -11,14 +11,14 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** 🟡 In progress (Tasks 4.1–4.6 complete; next: Task 4.7, logging / error handling / coverage)
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Next: Phase 5, Task 5.1 (scheduled drift detection in GitHub Actions).
 
 | Phase | Status |
 |---|---|
 | 1 — Minimal Terraform foundation | ✅ Complete |
 | 2 — Remote state & OIDC authentication (plan-only CI) | ✅ Complete |
 | 3 — Deterministic drift detection, validated against a real Azure change | ✅ Complete |
-| 4 — Python drift engine | 🟡 6 of 7 tasks complete |
+| 4 — Python drift engine | ✅ Complete |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -48,8 +48,9 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   reverted (Tasks 3.6–3.7).
 - **Python drift engine** (`src/drift_engine/`): plan parser, classifier, strict Pydantic
   report models, attribute comparator with noise and user-configured assessment, a
-  rules-based severity rating, and the `drift-engine analyze` command with JSON, YAML and
-  console output. See [Python drift engine](#-python-drift-engine).
+  rules-based severity rating, the `drift-engine analyze` command with JSON, YAML and
+  console output, and opt-in structured logging. Coverage is gated at 85% (currently
+  above 99%). See [Python drift engine](#-python-drift-engine).
 - **Plan-only CI with OIDC**: GitHub Actions authenticates to Azure without stored secrets
   and runs `terraform plan`; the identity has no write permissions.
 
@@ -57,7 +58,6 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Structured logging, error-handling review and a coverage gate for the engine (Task 4.7)
 - Scheduled drift detection in GitHub Actions (Phase 5)
 - **AI-powered analysis with LangGraph + an LLM** (Phase 6)
 - Azure Activity Log investigation of who or what changed a resource (Phase 7)
@@ -179,7 +179,8 @@ src/drift_engine/                 # Python drift engine (Phase 4)
 ├── severity.py                   # Rules-based severity rating (4.5)
 ├── classifier.py                 # Resource classification and report building (moved in 4.6)
 ├── formatters.py                 # JSON / YAML / console rendering (4.6)
-└── cli.py                        # drift-engine command (4.6)
+├── cli.py                        # drift-engine command (4.6; error handling 4.7)
+└── logs.py                       # Structured logging (4.7)
 
 schemas/
 ├── drift_report.schema.json      # Report contract (JSON Schema 2020-12)
@@ -242,6 +243,7 @@ The script's output is unchanged.
 | `comparator.py` | 4.4 | Deep attribute diff, plus an assessment of each changed path as `configured` (set in the Terraform configuration), `noise` (declarative rules: computed IDs, timeouts, timestamps, read-only metadata), `unconfigured` or `undetermined`. It annotates only: nothing is dropped and only proven noise is excluded from "significant". |
 | `classifier.py` | 4.6 | Resource classification (spec §6) and report building, moved from the script so the CLI and the script share one implementation. |
 | `formatters.py`, `cli.py` | 4.6 | `drift-engine analyze`: JSON (default), YAML or console output. See below. |
+| `logs.py` | 4.7 | Structured logging on the standard `logging` module. Silent by default; each event has a stable name and fields (identifiers, counts, stages, reasons), never attribute values. |
 | `severity.py` | 4.5 | Deterministic, rules-based `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` per change and per resource. Examples: Key Vault access policies, NSG inbound rules open to any source and public storage access rate `CRITICAL`/`HIGH`; tags and descriptions rate `LOW`; proven noise rates `INFO`; changes no rule covers default to `MEDIUM`. |
 
 Install for development (a virtual environment is recommended):
@@ -269,6 +271,8 @@ drift-engine analyze --plan "$ARTIFACT_DIR/plan.json" --manifest "$ARTIFACT_DIR/
 | `--output PATH` | Write to a file instead of standard output; a one-line summary is printed |
 | `--format json\|yaml\|console` | `json` (default) and `yaml` are the report itself; `console` is a readable view |
 | `--color auto\|always\|never` | ANSI colors for `console` (`auto`: terminal only, honours `NO_COLOR`) |
+| `--log-level debug\|info\|warning\|error` | Emit structured logs at this level and above to standard error. Default: off. |
+| `--log-format text\|json` | Log line format (default `text`; `json` is one object per line) |
 
 - **JSON and YAML** are the report defined by
   [`schemas/drift_report.schema.json`](schemas/drift_report.schema.json), checked against the
@@ -283,8 +287,34 @@ drift-engine analyze --plan "$ARTIFACT_DIR/plan.json" --manifest "$ARTIFACT_DIR/
 | `0` | Evidence valid and classified (drift or not) |
 | `1` | Evidence failed or rejected: drift status unknown. The failed report is still written. |
 | `2` | Usage error |
-| `70` | The report would break the report contract. Nothing is written and drift status is unknown. Defense in depth: the integrity gate rejects malformed input first, so this indicates an engine defect. |
+| `70` | Engine defect: the report would break the report contract, or an unexpected internal error occurred. Nothing is written and drift status is unknown. The integrity gate rejects malformed input first. |
 | `73` | The output file could not be written |
+| `130` | Interrupted (Ctrl-C) |
+| `141` | Standard output was closed early, e.g. piped into `head` |
+
+`--output` is written atomically (temporary file in the same directory, then rename):
+- A failed or interrupted write leaves no partial file and keeps an existing report
+  unchanged, including its permissions.
+- An existing report keeps its permission bits, so a `0600` report stays `0600`. A new
+  report gets `0666` minus the umask. A report you may not write (e.g. `0444`) is refused
+  with exit `73`, as before.
+- Because it is a rename, the directory must be writable (otherwise exit `73`; there is no
+  non-atomic fallback). A **symlink** at the output path is replaced by a regular file and
+  never written through, so the link's target is untouched. A **hard-linked** report gets a
+  new file, and other names of the old file keep the old content.
+
+**Logging** is off by default, so standard output and the existing standard-error messages
+are unchanged. With `--log-level`, events such as `classification_finished`,
+`classification_failed`, `manifest_not_given`, `comparison_finished`, `severity_rated` and
+`report_written` go to standard error, never into the report. Event fields carry
+identifiers, counts, stages and failure reasons, never Terraform attribute values. The one
+exception is an unexpected internal error (exit `70`): its exception message is printed to
+standard error, and at `--log-level debug` its traceback is logged. Both are diagnostics of
+an engine defect and can contain whatever text that exception carried.
+
+```bash
+drift-engine analyze --plan plan.json --manifest detection_run.json --log-level info --log-format json
+```
 
 ### Library use
 
@@ -312,8 +342,8 @@ of this uses an LLM.
 ## 🧪 Testing & Validation
 
 ```bash
-# Full suite (inside the dev virtual environment)
-pytest
+# Full suite with the coverage gate (inside the dev virtual environment; fails below 85%)
+pytest --cov=src/drift_engine tests/
 
 # Without installing anything: the Pydantic-dependent tests are skipped
 python3 -m unittest discover -s tests
@@ -322,19 +352,21 @@ python3 -m unittest discover -s tests
 ./scripts/validate.sh
 ```
 
-State after Task 4.6: **243 tests pass** with `pytest` (Python 3.13 and 3.14). With plain
-`python3` and no installation, the same 243 run and 62 are skipped (they need Pydantic and
-PyYAML).
+State after Task 4.7: **319 tests pass** with `pytest` (Python 3.13 and 3.14), with **99.87%**
+line and branch coverage of `src/drift_engine`. With plain `python3` and no installation, the
+same 319 run and 90 are skipped (they need Pydantic and PyYAML).
 
 | Test file | Covers | Tests |
 |---|---|---|
 | `test_detect_drift.py` | Classification, integrity gate, attribute detail, redaction, CLI exit codes | 63 |
-| `test_parser.py` | Parser: real fixtures, missing/null/unknown fields, malformed input and identity fields, 50 MiB limit | 38 |
+| `test_parser.py` | Parser: real fixtures, missing/null/unknown fields, malformed input and identity fields, 50 MiB limit | 41 |
+| `test_classifier.py` | `evaluate()` with and without a manifest, manifest failures, undetermined branches | 15 |
 | `test_models.py` | Models: strict types, JSON round trip, agreement with the JSON Schema | 25 |
-| `test_comparator.py` | Diff, configured vs noise assessment, Azure-shaped acceptance cases | 35 |
-| `test_severity.py` | Severity rules, escalation, floors, edge cases | 45 |
-| `test_cli.py` | `drift-engine analyze`: every format, plan-only and manifest modes, failures, exit codes, console view | 35 |
-| `test_package.py` | Package installation smoke test | 2 |
+| `test_comparator.py` | Diff, configured vs noise assessment, Azure-shaped acceptance cases | 38 |
+| `test_severity.py` | Severity rules, escalation, floors, edge cases | 47 |
+| `test_cli.py` | `drift-engine analyze`: every format, plan-only and manifest modes, failures, exit codes, console view, logging flags, error handling, atomic output and its permission/link behavior | 63 |
+| `test_logging.py` | Structured logging: silent default, every event, formatters, no values in logs | 24 |
+| `test_package.py` | Package installation smoke test, version fallback | 3 |
 
 **Live drift scenario** (changes Azure, then reverts it; explicit opt-in):
 
@@ -469,8 +501,8 @@ registration holds zero credentials.
 | 1 | Terraform + Azure foundation (minimal baseline) | ✅ Complete |
 | 2 | Remote state backend + secure auth (plan-only CI) | ✅ Complete |
 | 3 | Deterministic Terraform drift detection | ✅ Complete |
-| **4** | **Python drift engine** | 🟡 In progress (4.1–4.6 done; 4.7 logging/coverage remaining) |
-| 5 | Scheduled GitHub Actions drift detection | ⬜ Planned |
+| 4 | Python drift engine | ✅ Complete |
+| **5** | **Scheduled GitHub Actions drift detection** | ⬜ Next |
 | 6 | LangGraph AI analysis | ⬜ Planned |
 | 7 | Azure Activity Log investigation | ⬜ Planned |
 | 8 | GitHub Issue/PR automation | ⬜ Planned |

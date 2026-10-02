@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
@@ -523,6 +524,29 @@ class TestSizeLimit(TempDirTestCase):
         elapsed = time.monotonic() - start
         self.assertEqual(len(parsed.resources), count)
         self.assertLess(elapsed, 30, f"parsing {size} bytes took {elapsed:.1f}s")
+
+
+class TestRemainingBranches(TempDirTestCase):
+    """Task 4.7: branches not reached by the tests above."""
+
+    def test_file_that_grows_after_the_size_check(self):
+        path = self.write("plan.json", json.dumps(minimal_plan()) + " " * 100)
+        real_size = os.path.getsize(path)
+        with unittest.mock.patch.object(p.os.path, "getsize", return_value=10):  # stat said small...
+            err = self.assertEvidenceError(p.load_json, path, p.PLAN_STAGE, real_size - 1, contains="exceeds")
+        self.assertEqual(err.reason, f"plan.json exceeds the {real_size - 1} byte limit")
+
+    def test_normalize_action_table(self):
+        cases = {None: None, ("no-op",): "no-op", ("read",): "read", ("create",): "create", ("update",): "update",
+                 ("delete",): "delete", ("delete", "create"): "replace", ("create", "delete"): "replace",
+                 ("update", "delete"): "unrecognized", (): "unrecognized"}
+        for actions, expected in cases.items():
+            with self.subTest(actions=actions):
+                self.assertEqual(p.normalize_action(None if actions is None else list(actions)), expected)
+
+    def test_resource_evidence_needs_an_entry(self):
+        with self.assertRaises(ValueError):
+            p.resource_evidence(None, None)
 
 
 if __name__ == "__main__":

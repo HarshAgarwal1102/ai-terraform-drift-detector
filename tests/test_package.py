@@ -8,6 +8,7 @@ runs with a plain `python3 -m unittest discover -s tests`. Install with
 from __future__ import annotations
 
 import importlib.util
+import os
 import unittest
 from importlib.metadata import PackageNotFoundError, version
 
@@ -34,6 +35,30 @@ class PackageTests(unittest.TestCase):
         import pydantic
 
         self.assertEqual(pydantic.VERSION.split(".")[0], "2")
+
+
+class VersionFallbackTests(unittest.TestCase):
+    def test_version_without_installed_metadata(self):
+        import importlib
+        import logging
+        import sys
+        from unittest import mock
+
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+        import drift_engine
+
+        def missing(name):
+            raise PackageNotFoundError(name)
+
+        try:
+            with mock.patch("importlib.metadata.version", side_effect=missing):
+                importlib.reload(drift_engine)
+            self.assertEqual(drift_engine.__version__, "0.0.0+unknown")
+            null_handlers = [h for h in logging.getLogger("drift_engine").handlers
+                             if isinstance(h, logging.NullHandler)]
+            self.assertEqual(len(null_handlers), 1)  # reload does not stack handlers
+        finally:
+            importlib.reload(drift_engine)
 
 
 if __name__ == "__main__":

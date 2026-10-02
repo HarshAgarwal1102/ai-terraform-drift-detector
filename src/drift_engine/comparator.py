@@ -27,11 +27,16 @@ Standard library only. No Terraform, Azure, network or LLM access.
 
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any, Mapping
 
+from drift_engine.logs import log_event
 from drift_engine.parser import ParsedPlan, ResourceEvidence, normalize_action
+
+logger = logging.getLogger(__name__)
 
 # Attribute classes (spec §6.2)
 DRIFTED = "drifted"
@@ -432,4 +437,9 @@ def compare_plan(
     rules: tuple[NoiseRule, ...] = NOISE_RULES,
 ) -> tuple[ResourceComparison, ...]:
     """compare_resource for every managed resource, in address order."""
-    return tuple(compare_resource(ev, configured, rules) for ev in parsed.resources)
+    result = tuple(compare_resource(ev, configured, rules) for ev in parsed.resources)
+    categories = Counter(c.category for r in result for c in r.changes)
+    log_event(logger, logging.DEBUG, "comparison_finished", "attribute changes assessed",
+              resources=len(result), changes=sum(categories.values()), categories=dict(sorted(categories.items())),
+              configuration_evidence=bool(configured))
+    return result

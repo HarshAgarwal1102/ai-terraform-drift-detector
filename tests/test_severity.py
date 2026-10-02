@@ -428,5 +428,32 @@ class TestApi(unittest.TestCase):
                 self.assertEqual(rate_fixture(name), rate_fixture(name))
 
 
+class TestRemainingBranches(unittest.TestCase):
+    """Task 4.7: branches not reached by the tests above."""
+
+    def assessment(self, real, desired):
+        change = {"path": ["https_traffic_only_enabled"], "attribute": "https_traffic_only_enabled",
+                  "class": c.DRIFTED, "state": {"status": "value", "value": True},
+                  "real": real, "desired": desired, "redacted": False}
+        return c.ChangeAssessment(change, c.CONFIGURED, True, None)
+
+    def test_value_is_false_for_custom_rules(self):
+        on, off = {"status": "value", "value": True}, {"status": "value", "value": False}
+        self.assertTrue(sv.value_is_false(self.assessment(off, on), None))
+        self.assertFalse(sv.value_is_false(self.assessment(on, on), None))
+        self.assertFalse(sv.value_is_false(self.assessment({"status": "redacted"}, {"status": "unknown"}), None))
+        rule = sv.SeverityRule("https-off", sv.HIGH, "test", (("https_traffic_only_enabled",),),
+                               escalate_to=sv.CRITICAL, escalate_when=sv.value_is_false)
+        self.assertEqual(rule.rate(self.assessment(off, on), None), sv.CRITICAL)
+
+    def test_standalone_rule_without_evidence_keeps_base_severity(self):
+        change = {"path": ["source_address_prefix"], "attribute": "source_address_prefix", "class": c.DRIFTED,
+                  "state": {"status": "value", "value": "10.0.0.0/8"}, "real": {"status": "value", "value": "*"},
+                  "desired": {"status": "value", "value": "10.0.0.0/8"}, "redacted": False}
+        comparison = c.ResourceComparison("azurerm_network_security_rule.r", "azurerm_network_security_rule",
+                                          "update", (c.ChangeAssessment(change, c.CONFIGURED, True, None),))
+        self.assertEqual(sv.resource_severity(comparison).severity, sv.HIGH)  # no evidence: no escalation
+
+
 if __name__ == "__main__":
     unittest.main()

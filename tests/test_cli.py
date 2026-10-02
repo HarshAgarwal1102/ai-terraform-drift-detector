@@ -15,7 +15,9 @@ import copy
 import importlib.util
 import io
 import json
+import logging
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -74,6 +76,15 @@ class CliTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="drift-cli-")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.addCleanup(self._reset_logging)
+
+    @staticmethod
+    def _reset_logging():
+        """--log-level configures the global drift_engine logger; undo it after each test."""
+        engine = logging.getLogger("drift_engine")
+        for h in [h for h in engine.handlers if getattr(h, "_drift_engine_handler", False)]:
+            engine.removeHandler(h)
+        engine.setLevel(logging.NOTSET)
 
     def run_cli(self, *args: str, env: dict | None = None) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -445,6 +456,307 @@ class TestConsole(CliTestCase):
 # ---------------------------------------------------------------------------
 # Real process invocation
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Logging (Task 4.7)
+# ---------------------------------------------------------------------------
+
+class TestCliLogging(CliTestCase):
+    ARGS = ("analyze", "--plan", plan_path("external_drift"), "--manifest", manifest_path("external_drift"))
+
+    def test_no_log_lines_by_default(self):
+        code, _, stderr = self.run_cli(*self.ARGS)
+        self.assertEqual((code, stderr), (0, ""))
+
+    def test_text_logs_on_stderr_and_report_unchanged(self):
+        _, plain, _ = self.run_cli(*self.ARGS)
+        code, logged, stderr = self.run_cli(*self.ARGS, "--log-level", "info")
+        self.assertEqual(code, 0)
+        self.assertEqual(logged, plain)
+        self.assertIn("INFO drift_engine.classifier classification_finished: evidence classified", stderr)
+        self.assertNotIn("DEBUG", stderr)
+
+    def test_json_logs_are_one_object_per_line(self):
+        code, _, stderr = self.run_cli("analyze", "--plan", plan_path("replace"), "--log-level", "debug",
+                                       "--log-format", "json")
+        self.assertEqual(code, 0)
+        records = [json.loads(line) for line in stderr.splitlines() if line.startswith("{")]
+        self.assertEqual([r["event"] for r in records], ["manifest_not_given", "evidence_loaded", "plan_parsed",
+                                                         "classification_finished", "comparison_finished",
+                                                         "severity_rated"])
+        self.assertEqual(records[-1]["fields"]["highest"], "HIGH")
+        for line in stderr.splitlines():
+            self.assertTrue(line.startswith("{") or line.startswith("WARNING: no --manifest"), line)
+
+    def test_report_written_event(self):
+        out = os.path.join(self.tmp, "r.yaml")
+        _, _, stderr = self.run_cli(*self.ARGS, "--output", out, "--format", "yaml", "--log-level", "info",
+                                    "--log-format", "json")
+        written = [json.loads(line) for line in stderr.splitlines() if '"report_written"' in line]
+        self.assertEqual(written[0]["fields"], {"output": out, "format": "yaml", "outcome": "succeeded"})
+
+    def test_failure_events(self):
+        _, _, stderr = self.run_cli("analyze", "--plan", os.path.join(self.tmp, "missing.json"),
+                                    "--log-level", "warning", "--log-format", "json")
+        failed = [json.loads(line) for line in stderr.splitlines() if '"classification_failed"' in line]
+        self.assertEqual(failed[0]["fields"]["reason"], "missing.json not found")
+        code, _, stderr = self.run_cli(*self.ARGS, "--output", os.path.join(self.tmp, "no", "dir", "r.json"),
+                                       "--log-level", "error")
+        self.assertEqual(code, cli.EXIT_CANT_WRITE)
+        self.assertIn("ERROR drift_engine.cli output_write_failed", stderr)
+
+    def test_invalid_log_options(self):
+        for args in (("--log-level", "verbose"), ("--log-level", "info", "--log-format", "xml")):
+            with self.subTest(args=args):
+                self.assertEqual(self.run_cli(*self.ARGS, *args)[0], cli.EXIT_USAGE)
+
+
+# ---------------------------------------------------------------------------
+# Error handling (Task 4.7)
+# ---------------------------------------------------------------------------
+
+class TestErrorHandling(CliTestCase):
+    ARGS = ("analyze", "--plan", plan_path("external_drift"), "--manifest", manifest_path("external_drift"))
+
+    def test_unexpected_exception_is_contained(self):
+        with mock.patch.object(cli, "evaluate", side_effect=RuntimeError("boom")):
+            code, stdout, stderr = self.run_cli(*self.ARGS)
+        self.assertEqual((code, stdout), (cli.EXIT_INTERNAL_ERROR, ""))
+        self.assertIn("INTERNAL ERROR: unexpected RuntimeError: boom", stderr)
+        self.assertIn("Drift status is UNKNOWN", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_unexpected_exception_is_logged_with_traceback_at_debug(self):
+        with mock.patch.object(cli, "evaluate", side_effect=RuntimeError("boom")):
+            _, _, error_only = self.run_cli(*self.ARGS, "--log-level", "error")
+            _, _, debug = self.run_cli(*self.ARGS, "--log-level", "debug")
+        self.assertIn("unexpected_error: unexpected internal error error_type=\"RuntimeError\"", error_only)
+        self.assertNotIn("Traceback", error_only)
+        self.assertIn("Traceback", debug)
+
+    def run_interruptible(self, *args):
+        try:
+            return self.run_cli(*args)
+        except KeyboardInterrupt:  # would otherwise abort the whole test session
+            self.fail("KeyboardInterrupt escaped the CLI")
+
+    def test_keyboard_interrupt(self):
+        with mock.patch.object(cli, "evaluate", side_effect=KeyboardInterrupt):
+            code, _, stderr = self.run_interruptible(*self.ARGS)
+        self.assertEqual((code, stderr), (cli.EXIT_INTERRUPTED, "Interrupted.\n"))
+
+    def test_broken_pipe_in_process(self):
+        broken = mock.Mock()
+        broken.write.side_effect = BrokenPipeError
+        broken.fileno.side_effect = io.UnsupportedOperation  # like StringIO: no file descriptor
+        with mock.patch.object(sys, "stdout", broken):
+            code = cli.main(list(self.ARGS))
+        self.assertEqual(code, cli.EXIT_BROKEN_PIPE)
+
+    def test_broken_pipe_real_process(self):
+        env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "src"))
+        proc = subprocess.Popen([sys.executable, "-m", "drift_engine.cli", *self.ARGS, "--format", "console"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        proc.stdout.close()  # reader goes away before the report is written
+        stderr = proc.stderr.read().decode()
+        proc.stderr.close()
+        self.assertEqual(proc.wait(timeout=60), cli.EXIT_BROKEN_PIPE, stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertNotIn("Exception ignored", stderr)
+
+
+ROOT_USER = hasattr(os, "geteuid") and os.geteuid() == 0  # root bypasses file permissions
+
+
+class TestAtomicOutput(CliTestCase):
+    """--output: atomic replacement that never weakens an existing report (Task 4.7)."""
+
+    ARGS = ("analyze", "--plan", plan_path("external_drift"))
+
+    def leftovers(self, directory: str | None = None) -> list[str]:
+        return [f for f in os.listdir(directory or self.tmp) if f.startswith(".drift-engine-")]
+
+    def existing(self, name: str, mode: int, content: str = "previous report") -> str:
+        path = os.path.join(self.tmp, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.chmod(path, mode)
+        return path
+
+    def mode(self, path: str) -> int:
+        return os.lstat(path).st_mode & 0o7777
+
+    def write_report(self, out: str, umask: int = 0o022) -> int:
+        old = os.umask(umask)
+        try:
+            return self.run_cli(*self.ARGS, "--output", out)[0]
+        finally:
+            os.umask(old)
+
+    # -- permissions ---------------------------------------------------------
+
+    def test_new_file_respects_the_umask(self):
+        for umask, expected in ((0o022, 0o644), (0o077, 0o600), (0o002, 0o664)):
+            with self.subTest(umask=oct(umask)):
+                out = os.path.join(self.tmp, f"new-{umask:o}.json")
+                self.assertEqual(self.write_report(out, umask), 0)
+                self.assertEqual(self.mode(out), expected)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_existing_0600_report_stays_0600(self):
+        out = self.existing("r.json", 0o600)
+        self.assertEqual(self.write_report(out, umask=0o022), 0)  # a loose umask must not widen it
+        self.assertEqual(self.mode(out), 0o600)
+        self.assertTrue(DriftReport.model_validate_json(read(out)).has_drift)
+
+    def test_existing_permissions_are_kept_exactly(self):
+        for mode in (0o640, 0o664, 0o604, 0o666):
+            with self.subTest(mode=oct(mode)):
+                out = self.existing(f"r-{mode:o}.json", mode)
+                self.assertEqual(self.write_report(out, umask=0o077), 0)  # a tight umask must not narrow it
+                self.assertEqual(self.mode(out), mode)
+
+    def test_special_bits_are_not_carried_over(self):
+        out = self.existing("r.json", 0o640)
+        os.chmod(out, 0o2640)  # setgid
+        if self.mode(out) != 0o2640:
+            self.skipTest("filesystem does not keep setgid on a regular file")
+        self.assertEqual(self.write_report(out), 0)
+        self.assertEqual(self.mode(out), 0o640)
+
+    @unittest.skipIf(ROOT_USER, "root can write any file")
+    def test_read_only_existing_report_is_refused(self):
+        out = self.existing("r.json", 0o444)
+        code, _, stderr = self.run_cli(*self.ARGS, "--output", out)
+        self.assertEqual(code, cli.EXIT_CANT_WRITE)
+        self.assertIn("not writable", stderr)
+        self.assertEqual((read(out), self.mode(out)), ("previous report", 0o444))
+        self.assertEqual(self.leftovers(), [])
+
+    # -- failures keep the existing report ------------------------------------
+
+    def test_failed_write_keeps_the_previous_report(self):
+        out = self.existing("r.json", 0o600)
+        with mock.patch.object(cli.os, "replace", side_effect=OSError("disk full")):
+            code, _, stderr = self.run_cli(*self.ARGS, "--output", out)
+        self.assertEqual(code, cli.EXIT_CANT_WRITE)
+        self.assertIn("disk full", stderr)
+        self.assertEqual((read(out), self.mode(out)), ("previous report", 0o600))
+        self.assertEqual(self.leftovers(), [])
+
+    def test_interrupted_write_keeps_the_previous_report(self):
+        out = self.existing("r.json", 0o600)
+        with mock.patch.object(cli.os, "fsync", side_effect=KeyboardInterrupt):
+            try:
+                code, _, _ = self.run_cli(*self.ARGS, "--output", out)
+            except KeyboardInterrupt:  # would otherwise abort the whole test session
+                self.fail("KeyboardInterrupt escaped the CLI")
+        self.assertEqual(code, cli.EXIT_INTERRUPTED)
+        self.assertEqual((read(out), self.mode(out)), ("previous report", 0o600))
+        self.assertEqual(self.leftovers(), [])
+
+    def test_interrupted_write_leaves_no_new_file(self):
+        out = os.path.join(self.tmp, "r.json")
+        with mock.patch.object(cli.os, "fsync", side_effect=KeyboardInterrupt):
+            try:
+                code, _, _ = self.run_cli(*self.ARGS, "--output", out)
+            except KeyboardInterrupt:
+                self.fail("KeyboardInterrupt escaped the CLI")
+        self.assertEqual(code, cli.EXIT_INTERRUPTED)
+        self.assertFalse(os.path.exists(out))
+        self.assertEqual(self.leftovers(), [])
+
+    def test_output_path_is_a_directory(self):
+        target = os.path.join(self.tmp, "adir")
+        os.mkdir(target)
+        code, _, _ = self.run_cli(*self.ARGS, "--output", target)
+        self.assertEqual(code, cli.EXIT_CANT_WRITE)
+        self.assertTrue(os.path.isdir(target))
+        self.assertEqual(self.leftovers(), [])
+
+    @unittest.skipIf(ROOT_USER, "root can write into any directory")
+    def test_read_only_directory_is_refused_without_fallback(self):
+        directory = os.path.join(self.tmp, "ro")
+        os.mkdir(directory)
+        out = os.path.join(directory, "r.json")
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write("previous report")
+        os.chmod(out, 0o644)
+        os.chmod(directory, 0o555)
+        self.addCleanup(os.chmod, directory, 0o755)
+        code, _, _ = self.run_cli(*self.ARGS, "--output", out)
+        self.assertEqual(code, cli.EXIT_CANT_WRITE)  # no non-atomic in-place write
+        self.assertEqual(read(out), "previous report")
+        self.assertEqual(self.leftovers(directory), [])
+
+    # -- links: atomic replacement semantics -----------------------------------
+
+    def test_hard_link_gets_a_new_file_other_names_keep_old_content(self):
+        out = self.existing("r.json", 0o600)
+        other = os.path.join(self.tmp, "other-name.json")
+        os.link(out, other)
+        self.assertEqual(self.write_report(out), 0)
+        self.assertTrue(DriftReport.model_validate_json(read(out)).has_drift)
+        self.assertEqual(self.mode(out), 0o600)  # permissions of the replaced file kept
+        self.assertEqual(read(other), "previous report")  # documented: the link is not updated
+        self.assertNotEqual(os.stat(out).st_ino, os.stat(other).st_ino)
+
+    def test_symlink_is_replaced_never_written_through(self):
+        target = self.existing("protected.json", 0o600, "must not be overwritten")
+        link = os.path.join(self.tmp, "r.json")
+        os.symlink(target, link)
+        self.assertEqual(self.write_report(link, umask=0o022), 0)
+        self.assertFalse(os.path.islink(link))  # the link itself was replaced...
+        self.assertTrue(DriftReport.model_validate_json(read(link)).has_drift)
+        self.assertEqual(self.mode(link), 0o644)  # ...by a new file with umask permissions
+        self.assertEqual((read(target), self.mode(target)), ("must not be overwritten", 0o600))
+
+    def test_dangling_symlink_is_replaced(self):
+        link = os.path.join(self.tmp, "r.json")
+        os.symlink(os.path.join(self.tmp, "does-not-exist"), link)
+        self.assertEqual(self.write_report(link), 0)
+        self.assertFalse(os.path.islink(link))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "does-not-exist")))
+
+    def test_replaces_an_existing_report(self):
+        out = self.existing("r.json", 0o644, "old")
+        self.assertEqual(self.run_cli(*self.ARGS, "--output", out)[0], 0)
+        self.assertTrue(DriftReport.model_validate_json(read(out)).has_drift)
+        self.assertEqual(self.leftovers(), [])
+
+
+class TestConsoleWithoutRatings(CliTestCase):
+    """render_console used directly, without severities (library callers)."""
+
+    def test_succeeded_report_without_ratings(self):
+        from drift_engine import classifier
+        report = classifier.evaluate(plan_path("replace"), manifest_path("replace")).report
+        text = formatters.render_console(report)
+        self.assertIn("Severity    INFO (highest across resources)", text)
+        self.assertIn("location  config_changed\n", text)  # no category/severity without ratings
+        self.assertNotIn("noise (INFO)", text)
+
+    def test_failed_report_without_run(self):
+        from drift_engine import classifier
+        report = classifier.evaluate(plan_path("in_sync"), os.path.join(self.tmp, "missing.json")).report
+        self.assertIsNone(report["run"])
+        text = formatters.render_console(report)
+        self.assertIn("FAILED: drift status UNKNOWN", text)
+        self.assertNotIn("Run ", text)
+
+
+class TestModuleEntryPoint(CliTestCase):
+    def test_run_as_main(self):
+        out = os.path.join(self.tmp, "r.json")
+        argv = ["drift-engine", "analyze", "--plan", plan_path("in_sync"), "--output", out]
+        modules = {k: v for k, v in sys.modules.items() if k != "drift_engine.cli"}
+        with mock.patch.object(sys, "argv", argv), mock.patch.dict(sys.modules, modules, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                runpy.run_module("drift_engine.cli", run_name="__main__")
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertTrue(os.path.exists(out))
+
 
 class TestProcess(CliTestCase):
     def test_python_module_invocation(self):

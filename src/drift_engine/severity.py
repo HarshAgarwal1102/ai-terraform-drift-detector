@@ -30,12 +30,17 @@ Standard library only. No Terraform, Azure, network or LLM access.
 
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any, Callable, Iterable, Mapping
 
 from drift_engine.comparator import NOISE, ChangeAssessment, ResourceComparison
+from drift_engine.logs import log_event
 from drift_engine.parser import ParsedPlan, ResourceEvidence
+
+logger = logging.getLogger(__name__)
 
 INFO = "INFO"
 LOW = "LOW"
@@ -357,7 +362,12 @@ def plan_severity(
     if [c.address for c in comparisons] != [e.address for e in parsed.resources]:
         raise ValueError("comparisons do not match the parsed plan")
     classes = classifications or {}
-    return tuple(
+    rated = tuple(
         resource_severity(c, e, classes.get(c.address), rules)
         for c, e in zip(comparisons, parsed.resources)
     )
+    counts = Counter(r.severity for r in rated)
+    log_event(logger, logging.DEBUG, "severity_rated", "resources rated",
+              resources=len(rated), highest=highest(counts), severities={s: counts[s] for s in SEVERITIES if counts[s]},
+              classification_floors=classifications is not None)
+    return rated

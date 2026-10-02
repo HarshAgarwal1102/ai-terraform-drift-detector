@@ -85,9 +85,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 4 — Python Drift Engine
-- **Current Active Task**: Task 4.7 — Logging, Error Handling & Unit Tests
-- **Phases Completed**: 3 of 14
+- **Current Active Phase**: Phase 5 — Automated Drift Detection Workflow
+- **Current Active Task**: Task 5.1 — Scheduled & Manual GitHub Actions Workflows
+- **Phases Completed**: 4 of 14
 
 ---
 
@@ -794,7 +794,7 @@ The first end-to-end drift scenario uses ONLY `aitdd-dev-main-rg`. No VNet, Subn
 ---
 
 ### PHASE 4 — Python Drift Engine
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 4 modularizes the Python drift engine into a production-grade library with structured models, custom CLI entry points, logging, and unit tests.
 
@@ -1153,19 +1153,65 @@ Phase 4 modularizes the Python drift engine into a production-grade library with
     - (e) Python 3.11/3.12 still not executed locally (syntax checked).
 
 #### Task 4.7 — Logging, Error Handling & Unit Tests
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Add comprehensive logging, exception handling, and test coverage >= 85% for `drift_engine`.
 - **Dependencies**: Task 4.6
 - **Files/Areas**: `src/drift_engine/`, `tests/`
 - **Acceptance Criteria**:
-  - [ ] Structured logging using standard library `logging`.
-  - [ ] Unit test suite covering all modules, edge cases, and invalid inputs.
+  - [x] Structured logging using standard library `logging`.
+  - [x] Unit test suite covering all modules, edge cases, and invalid inputs.
 - **Validation**:
-  - [ ] `pytest --cov=src/drift_engine tests/` achieves >= 85% coverage.
+  - [x] `pytest --cov=src/drift_engine tests/` achieves >= 85% coverage.
 - **Implementation Notes**:
   - Production readiness check for Python package.
 - **Completion Notes**:
-  - None.
+  - **Baseline before changes**: 98% line coverage (97% with branches) on the exact validation command. The gap was not coverage but missing logging and error handling, `classifier.py` (moved in 4.6) without its own tests, and 18 untested branches.
+  - **Structured logging** (`src/drift_engine/logs.py`, standard `logging` only):
+    - **Silent by default**: the package logger gets a `NullHandler` (idempotent), so library callers, `scripts/detect_drift.py` and default CLI runs see no new output.
+    - **Event format**: every record has a stable `event` name plus a `fields` mapping (one attribute, so it cannot collide with `LogRecord` names). `stacklevel=2` makes records point at the emitting module and function, not the helper.
+    - **Formatters**: `TextFormatter` (`time LEVEL logger event: message key=value …`) and `JsonFormatter` (one object per line, UTC timestamps, exceptions included).
+    - **`configure_logging(level, fmt, stream)`** replaces its own earlier handler.
+    - **Events** (aggregate, not per resource):
+      - parser: `evidence_loaded`, `plan_parsed`, `integrity_gate_failed` (DEBUG);
+      - classifier: `classification_finished` (INFO), `classification_failed` and `manifest_not_given` (WARNING);
+      - comparator: `comparison_finished`; severity: `severity_rated` (DEBUG);
+      - CLI: `report_written` (INFO), `output_write_failed`, `contract_violation` and `unexpected_error` (ERROR, with the traceback at DEBUG).
+    - **No values**: event fields carry identifiers, counts, stages and reasons only, never attribute values (tested with sensitive and plain values in both formats). The one exception is an *unexpected* internal error: its exception message is printed to stderr, and at DEBUG its traceback is logged. These engine-defect diagnostics carry whatever text that exception holds (documented in README and spec §8.2).
+  - **CLI**: `--log-level debug|info|warning|error` (default off) and `--log-format text|json`; logs go to stderr, never into the report.
+  - **Exception handling** (CLI):
+    - an unexpected exception exits 70 with "INTERNAL ERROR … drift status UNKNOWN" and no traceback dump (the traceback is logged at DEBUG);
+    - Ctrl-C exits 130 (`Interrupted.`);
+    - a closed stdout (broken pipe) exits 141 quietly, with stdout redirected to devnull so the interpreter's final flush cannot fail;
+    - `--output` is written **atomically**: temp file in the same directory, fsync, then `os.replace`. A failed or interrupted write leaves no partial file and keeps an existing report, including its permissions.
+    - **Permissions (fixed after the final review, Issue A)**: an existing regular report keeps its own rwx bits, so a `0600` report stays `0600`; setuid/setgid/sticky bits are not carried over. A new report gets `0666` minus the umask. A report we may not write (e.g. `0444`) is refused with 73, as the earlier in-place write did. The first implementation always applied the umask default, which widened a `0600` report to `0644`.
+    - **Rename semantics (safest atomic choice; no non-atomic fallback)**:
+      - the directory must be writable (otherwise 73);
+      - a symlink at the output path is replaced by a regular file and **never written through**, so the link's target is untouched (no symlink clobbering);
+      - a hard-linked report gets a new inode, and other names keep the old content.
+  - **Behavior preserved**: per-stream comparison against the committed `HEAD` CLI gives identical stdout, stderr and exit code for all 66 real-fixture runs (11 fixtures × with/without manifest × 3 formats). Script golden output is byte-identical (36 bundles). The only observable difference is that the report on stdout is now flushed before a failure message on stderr; it is visible only when both streams are merged into one file, and the flush is needed to catch a broken pipe. The report contract, schema, models, comparator and severity rules are unchanged; `__init__`, parser, classifier, comparator and severity changed only by adding log events.
+  - **Coverage gate**: `pyproject.toml` `[tool.coverage]` adds `branch = true`, `fail_under = 85` and `show_missing`, so `pytest --cov=src/drift_engine tests/` fails below 85%.
+  - **Tests** (+76; 319 total):
+    - new `tests/test_logging.py` (24): silent default, script output unchanged, report unchanged by logging, every event with exact fields, caller location, JSON-serializable fields, aggregate-only, no values in logs, both formatters, configuration;
+    - new `tests/test_classifier.py` (15): `evaluate()` with and without a manifest, every manifest failure, both undetermined branches, determinism;
+    - `tests/test_cli.py` +28: logging flags and events, unexpected error (70), interrupt (130), broken pipe in process and in a real subprocess (141), console without ratings, `__main__` via runpy;
+    - atomic output (14 tests): new file follows the umask (3 umasks); existing `0600` stays `0600`; other modes kept exactly under a tight umask; setgid not carried over; read-only report refused; failed and interrupted writes keep the previous report and its mode; interrupted write leaves no new file; directory target; read-only directory refused with no fallback; hard link gets a new inode while the other name keeps the old content; symlink replaced and its target untouched; dangling symlink.
+    - +3 each in parser and comparator, +2 in severity, +1 in package (version fallback; reload does not stack handlers).
+  - **Validation**:
+    - `pytest --cov=src/drift_engine tests/`: **319 passed, 99.87% line and branch coverage** (gate 85%) on Python 3.14.7 and 3.13, with ResourceWarnings, unraisable exceptions and RuntimeWarnings as errors; 0 skipped. Only uncovered: two race-only lines in the temp-file cleanup.
+    - Plain `python3 -m unittest discover -s tests`: 319 run, OK (90 skipped).
+    - **Mutation check**: 12 breakages of logging and error handling, plus 6 of the permission fix (including re-introducing the original bug, which fails 7 tests), were each caught. A Ctrl-C test that would have aborted the whole session now fails cleanly.
+    - **Output files vs the committed `HEAD` CLI**: new `--output` files are identical in content and mode for all 11 fixtures.
+    - **Fuzz with DEBUG JSON logging on**: 5,000 plans through the full pipeline, 0 unhandled and 27,538 log lines all valid JSON (both Pythons). Parser, comparator and severity fuzzers 0 unhandled; models and schema agree on 60k.
+    - `pyflakes` clean; Python 3.11 grammar OK; the script path stays stdlib-only; `./scripts/validate.sh` passed.
+    - README and spec links resolve, and the README logging example was run for real.
+  - **Docs**: README (Phase 4 complete; logging section and example; `--log-level`/`--log-format`; exit codes 70/130/141; atomic output; coverage command; test table, counts and tree) and spec §8.2 (exit codes, atomic output, logging and its no-values guarantee).
+  - **Limitations**:
+    - (a) The script `scripts/detect_drift.py` has no logging flags (silent library logs only); `drift-engine` is the logging-capable entry point.
+    - (b) CI does not run the Python tests or the coverage gate yet (Phase 5 or 12).
+    - (c) By design of the atomic rename: `--output` needs a writable directory; a symlinked output path is replaced, not written through; a hard-linked report is detached from its other names; the new file belongs to the user running the CLI.
+    - (d) Python 3.11/3.12 still only syntax-checked.
 
 ---
 

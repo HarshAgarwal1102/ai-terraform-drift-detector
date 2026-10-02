@@ -42,6 +42,14 @@ where = ["src"]
 [tool.setuptools.package-data]
 drift_engine = ["py.typed"]
 
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+# Task 4.7 gate: pytest --cov=src/drift_engine tests/ fails below this.
+fail_under = 85
+show_missing = true
+
 [tool.pytest.ini_options]
 # pytest also runs the existing unittest-based suite (tests/test_detect_drift.py).
 testpaths = ["tests"]

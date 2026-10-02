@@ -11,9 +11,12 @@ evidence always yields the same report.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
+
+from drift_engine.logs import log_event
 
 from drift_engine.comparator import (
     CONFIG_CHANGED,
@@ -35,6 +38,8 @@ from drift_engine.parser import (
     parse_plan,
     resource_evidence,
 )
+
+logger = logging.getLogger(__name__)
 
 CLASSIFICATION_VERSION = "1"
 OUTPUT_FILE = "drift_classification.json"
@@ -227,6 +232,29 @@ def classify_bundle(artifact_dir: str) -> dict:
 
 
 def evaluate(plan_path: str, manifest_path: str | None = None) -> Evaluation:
+    """Classify plan.json, with its run manifest when given (logged; see _evaluate)."""
+    if manifest_path is None:
+        log_event(logger, logging.WARNING, "manifest_not_given",
+                  "no run manifest: plan exit-code and Terraform-version checks are skipped",
+                  plan=os.path.basename(plan_path))
+    evaluation = _evaluate(plan_path, manifest_path)
+    report = evaluation.report
+    if report["outcome"] == "succeeded":
+        summary = report["summary"]
+        log_event(logger, logging.INFO, "classification_finished", "evidence classified",
+                  outcome="succeeded", has_drift=report["has_drift"], resources=summary["resources_total"],
+                  drifted_resources=summary["drifted_resources"],
+                  classification_counts=summary["classification_counts"],
+                  ambiguous_resources=summary["ambiguous_resources"], manifest=manifest_path is not None)
+    else:
+        failure = report["failure"]
+        log_event(logger, logging.WARNING, "classification_failed", "evidence failed or rejected: drift status unknown",
+                  outcome="failed", source=failure["source"], stage=failure["stage"], reason=failure["reason"],
+                  manifest=manifest_path is not None)
+    return evaluation
+
+
+def _evaluate(plan_path: str, manifest_path: str | None = None) -> Evaluation:
     """Classify plan.json, with its run manifest when given.
 
     With a manifest the full integrity gate applies (spec §5.3), exactly as for an

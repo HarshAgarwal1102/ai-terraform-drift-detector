@@ -402,5 +402,24 @@ class TestAnnotationOnly(unittest.TestCase):
         self.assertEqual(first, second)
 
 
+class TestRemainingBranches(unittest.TestCase):
+    """Task 4.7: branches not reached by the tests above."""
+
+    def test_whole_object_sensitive_mask_redacts_every_child(self):
+        out = c.attribute_changes({"a": 1, "b": {"x": "s"}}, {"a": 2, "b": {"x": "t"}}, {"a": 1, "b": {"x": "s"}},
+                                  {}, [True])
+        self.assertEqual([x["path"] for x in out], [["a"], ["b"]])  # sensitive subtree reported once
+        self.assertTrue(all(x["redacted"] for x in out))
+        self.assertNotIn('"t"', json.dumps(out))
+
+    def test_unknown_inside_a_list(self):
+        attrs = c.classify_attributes({"l": [1]}, {"l": [1]}, {"l": [1]}, {"l": [False, True]})
+        self.assertEqual(attrs, [{"name": "l", "class": c.UNKNOWN_UNTIL_APPLY}])
+
+    def test_no_object_in_any_view(self):
+        self.assertEqual(c.attribute_changes(None, None, None, {}, []), [])
+        self.assertEqual(c.attribute_changes("x", [1], 5, None, []), [])
+
+
 if __name__ == "__main__":
     unittest.main()
