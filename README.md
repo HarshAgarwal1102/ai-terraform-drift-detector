@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); Task 5.5 (failure reporting + `drift_detected` job output) implemented, awaiting real GitHub validation.
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). **Phase 5 — Automated drift detection workflow** ✅ Complete: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); Task 5.5 ✅ (failure reporting + `drift_detected` job output, verified by a green real run). Next: Phase 6, Task 6.1.
 
 | Phase | Status |
 |---|---|
@@ -19,6 +19,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 | 2 — Remote state & OIDC authentication (plan-only CI) | ✅ Complete |
 | 3 — Deterministic drift detection, validated against a real Azure change | ✅ Complete |
 | 4 — Python drift engine | ✅ Complete |
+| 5 — Automated drift detection workflow (scheduled + manual) | ✅ Complete |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -58,7 +59,6 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Failure reporting for the scheduled workflow (Phase 5, Task 5.5)
 - **AI-powered analysis with LangGraph + an LLM** (Phase 6)
 - Azure Activity Log investigation of who or what changed a resource (Phase 7)
 - GitHub Issue/PR automation (Phase 8)
@@ -503,8 +503,8 @@ registration holds zero credentials.
 | 2 | Remote state backend + secure auth (plan-only CI) | ✅ Complete |
 | 3 | Deterministic Terraform drift detection | ✅ Complete |
 | 4 | Python drift engine | ✅ Complete |
-| **5** | **Scheduled GitHub Actions drift detection** | ⬜ Next |
-| 6 | LangGraph AI analysis | ⬜ Planned |
+| 5 | Scheduled GitHub Actions drift detection | ✅ Complete |
+| **6** | **LangGraph AI analysis** | ⬜ Next |
 | 7 | Azure Activity Log investigation | ⬜ Planned |
 | 8 | GitHub Issue/PR automation | ⬜ Planned |
 | 9 | DevSecOps scanning | ⬜ Planned |
