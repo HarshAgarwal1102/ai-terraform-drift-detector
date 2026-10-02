@@ -2,28 +2,78 @@
 
 > Detect, analyze, and remediate infrastructure drift in Azure using Terraform, Python, LangGraph, and GitHub automation.
 
+The **deterministic** part works today: Terraform plan evidence, drift classification and a
+typed Python drift engine. The AI part (LangGraph/LLM analysis) and the automation around
+it are **planned, not yet built**. See [What works today](#-what-works-today) and
+[Planned](#-planned-not-yet-implemented).
+
 ---
 
-## 📌 Current Phase
+## 📌 Current Status
 
-**Phase 2 — Remote Terraform State & Secure Azure Authentication** ✅ Complete
+**Phase 4 — Python Drift Engine** 🟡 In progress (Tasks 4.1–4.5 complete; next: Task 4.6, structured output / CLI)
 
-This phase established a dedicated, secure Azure Storage remote backend for Terraform state and GitHub Actions OIDC (Workload Identity) authentication. The state backend and the `dev` baseline Resource Group are deployed to Azure, the `dev` environment's state lives in the remote `dev.tfstate` blob, and a GitHub Actions run has authenticated to Azure via OIDC and completed `terraform plan` with no long-lived credentials. CI is **plan-only**.
+| Phase | Status |
+|---|---|
+| 1 — Minimal Terraform foundation | ✅ Complete |
+| 2 — Remote state & OIDC authentication (plan-only CI) | ✅ Complete |
+| 3 — Deterministic drift detection, validated against a real Azure change | ✅ Complete |
+| 4 — Python drift engine | 🟡 5 of 7 tasks complete |
+
+[PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
+criteria and validation evidence.
 
 ---
 
 ## 🎯 Project Overview
 
-Infrastructure drift — the divergence between Terraform state and actual Azure resources — is a common and dangerous problem. Manual changes, failed deployments, and policy overrides silently introduce configuration gaps that can lead to security vulnerabilities, compliance violations, and outages.
+Infrastructure drift is the divergence between Terraform state and the real Azure
+resources. Manual changes, failed deployments and policy overrides introduce configuration
+gaps that can lead to security vulnerabilities, compliance violations and outages.
 
-This platform will provide:
+### ✅ What works today
 
-- **Automated drift detection** via scheduled Terraform plans
-- **AI-powered analysis** of drift causes using LangGraph + LLM
-- **Azure Activity Log investigation** to identify who/what caused drift
-- **GitHub Issue/PR automation** for tracking and remediation
-- **Human-in-the-loop approval** before any automated remediation
-- **Professional dashboard** for visibility
+- **Read-only drift evidence**: `scripts/generate_plan_json.sh` runs `terraform init`,
+  `plan -detailed-exitcode` and `show -json` (never `apply`). It writes an evidence bundle
+  (run manifest, plan log, `plan.json`) outside the repository.
+- **Deterministic drift classification**: `scripts/detect_drift.py` re-checks the
+  evidence (integrity gate) and classifies every managed resource:
+  - external drift, external deletion, converged drift, configuration change, added,
+    removed, drift plus configuration change, or undetermined;
+  - per-attribute detail with recorded / real / desired values;
+  - sensitive values redacted.
+  The output follows [`schemas/drift_report.schema.json`](schemas/drift_report.schema.json).
+- **Validated against real Azure drift**: a scripted external tag change on the `dev`
+  resource group was detected exactly (one attribute, `tags.aitdd_drift_probe`) and
+  reverted (Tasks 3.6–3.7).
+- **Python drift engine library** (`src/drift_engine/`): plan parser, strict Pydantic report
+  models, attribute comparator with noise and user-configured assessment, and a rules-based
+  severity rating. See [Python drift engine](#-python-drift-engine).
+- **Plan-only CI with OIDC**: GitHub Actions authenticates to Azure without stored secrets
+  and runs `terraform plan`; the identity has no write permissions.
+
+### 🔜 Planned (not yet implemented)
+
+These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
+
+- Engine CLI with JSON/YAML/console output (Task 4.6), plus logging and a coverage gate
+  (Task 4.7)
+- Scheduled drift detection in GitHub Actions (Phase 5)
+- **AI-powered analysis with LangGraph + an LLM** (Phase 6)
+- Azure Activity Log investigation of who or what changed a resource (Phase 7)
+- GitHub Issue/PR automation (Phase 8)
+- DevSecOps scanning and FinOps cost analysis (Phases 9–10)
+- Human-approved remediation (Phase 11)
+- Dashboard (Phase 13)
+
+### Core principles
+
+- Terraform is the source of truth for **whether** drift exists. AI will interpret,
+  explain and recommend; it never decides drift.
+- Detection works **without an LLM**. A failed detection is reported as *unknown*, never
+  as "no drift".
+- "Drift detected" is a valid result, not a pipeline failure.
+- No autonomous `terraform apply`. Remediation will require explicit human approval.
 
 ---
 
@@ -39,29 +89,41 @@ flowchart TD
 
     subgraph "Application Infrastructure Layer (Remote State)"
         DEV_ENV["⚙️ terraform/environments/dev"] -->|"Stores State"| STATE_CONTAINER
-        DEV_ENV -->|"Provisions (Minimal Foundation)"| APP_RG["📦 aitdd-dev-main-rg"]
+        DEV_ENV -->|"module resource-group"| APP_RG["📦 aitdd-dev-main-rg"]
     end
 
-    subgraph "Preserved Reusable Modules (Future Drift Scenarios)"
-        MOD_NET["🌐 modules/network"]
-        MOD_ST["💾 modules/storage"]
-        MOD_KV["🔐 modules/key-vault"]
+    subgraph "Deterministic Drift Detection (implemented)"
+        GEN["scripts/generate_plan_json.sh<br/>init · plan · show (read-only)"] --> BUNDLE["Evidence bundle<br/>detection_run.json · plan.json · plan.log"]
+        BUNDLE --> DETECT["scripts/detect_drift.py<br/>integrity gate + classification"]
+        DETECT --> REPORT["drift_classification.json<br/>(schemas/drift_report.schema.json)"]
+        ENGINE["src/drift_engine<br/>parser · comparator · models · severity"] -.->|"imported by"| DETECT
     end
+
+    DEV_ENV -.->|"read-only plan"| GEN
+    REPORT -.-> FUTURE["Planned: CLI output, scheduled CI,<br/>AI analysis, issues/PRs"]
 ```
 
-> See [docs/architecture.md](docs/architecture.md) for detailed design decisions, security controls, and OIDC flow diagrams.
+The [drift detection spec](docs/drift-detection-spec.md) defines the detection contract:
+commands, exit codes, integrity gate, classification rules and the AI boundary.
+[docs/architecture.md](docs/architecture.md) documents the Phase 1–2 design (backend,
+security controls, OIDC flow). It predates Phases 3–4 and has not been updated for them.
 
 ---
 
-## 🛠️ Technology Stack (Phases 1 & 2)
+## 🛠️ Technology Stack
 
 | Technology | Version | Purpose |
 |---|---|---|
-| Terraform | >= 1.6.0 | Infrastructure as Code |
-| AzureRM Provider | ~> 5.0 | Azure resource management |
-| Azure CLI | >= 2.x | Local developer authentication |
-| GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3` | CI/CD & OIDC authentication test |
-| Terraform in CI | 1.14.7 (pinned) | Matches the version that wrote the remote state |
+| Terraform | `>= 1.6.0` (configuration); 1.14.7 pinned for detection and CI | Infrastructure as Code; plan evidence |
+| AzureRM Provider | `~> 5.0` | Azure resource management |
+| Azure CLI | 2.x | Local authentication; drift scenario scripts |
+| Python | `>= 3.11` (tested on 3.13 and 3.14) | Drift classification and engine |
+| Pydantic | `>= 2.11, < 3` | Strict report models |
+| pytest, pytest-cov, jsonschema | dev extras | Tests and schema validation |
+| GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3` | Plan-only CI with OIDC |
+
+`scripts/detect_drift.py` and the engine modules it imports use only the Python standard
+library, so they run with plain `python3`. Pydantic is needed only for `drift_engine.models`.
 
 ---
 
@@ -76,50 +138,168 @@ flowchart TD
 | Blob Container | `tfstate` | N/A | Private container for `.tfstate` files |
 | State Blob | `dev.tfstate` | N/A | Remote state for the `dev` environment |
 
-### Application Infrastructure (Phase 1 Dev — Minimal Foundation)
+### Application Infrastructure (`dev`)
 
-| Resource | Name Pattern | Status | Location | Purpose |
-|---|---|---|---|---|
-| Resource Group | `aitdd-dev-main-rg` | Active Baseline | `Central India` | Application dev environment RG baseline |
-| Virtual Network | `aitdd-dev-main-vnet` | Module Preserved | Deferred | Deferred to future multi-resource drift scenarios |
-| Subnet | `aitdd-dev-app-snet` | Module Preserved | Deferred | Deferred to future multi-resource drift scenarios |
-| NSG | `aitdd-dev-app-nsg` | Module Preserved | Deferred | Deferred to future security drift scenarios |
-| Storage Account | `aitdddevsa001` | Module Preserved | Deferred | Deferred to future drift scenarios |
-| Key Vault | `aitdd-dev-kv-001` | Module Preserved | Deferred | Deferred to future secrets/RBAC drift scenarios |
+| Resource | Name | Location | Purpose |
+|---|---|---|---|
+| Resource Group | `aitdd-dev-main-rg` | `Central India` | The only managed application resource; target of drift detection |
+
+The minimal footprint is deliberate: one resource group is the MVP drift target. No
+network, storage or Key Vault modules exist in this repository. More resource types are
+planned for a later infrastructure-expansion phase.
 
 ---
 
 ## 📁 Repository Structure
 
 ```
-.github/
-└── workflows/
-    └── terraform-auth-test.yml     # OIDC authentication & plan workflow
+.github/workflows/
+└── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
 
 terraform/
-├── bootstrap/                      # Bootstrap module (Local state)
-│   ├── versions.tf
-│   ├── providers.tf
-│   ├── variables.tf
-│   ├── main.tf
-│   └── outputs.tf
-│
-├── modules/                        # Reusable, for_each-driven modules
-│   ├── resource-group/
-│   ├── network/
-│   ├── storage/
-│   └── key-vault/
-│
+├── bootstrap/                    # Remote-state storage (local state)
+├── modules/
+│   └── resource-group/           # for_each-driven resource group module
 └── environments/
-    └── dev/                        # Dev environment (Remote state)
-        ├── versions.tf
-        ├── providers.tf
-        ├── backend.tf              # AzureRM remote backend configuration
-        ├── variables.tf
-        ├── main.tf
-        ├── outputs.tf
-        └── dev.tfvars
+    └── dev/                      # Dev environment (remote state, dev.tfvars)
+
+scripts/
+├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
+├── detect_drift.py               # Deterministic drift classification (Tasks 3.3–3.4)
+└── validate.sh                   # terraform fmt -check + validate (no Azure auth)
+
+src/drift_engine/                 # Python drift engine (Phase 4)
+├── parser.py                     # plan.json loading, integrity gate, S/R/D extraction (4.2)
+├── models.py                     # Strict Pydantic report models (4.3)
+├── comparator.py                 # Attribute diff, noise and configuration assessment (4.4)
+└── severity.py                   # Rules-based severity rating (4.5)
+
+schemas/
+├── drift_report.schema.json      # Report contract (JSON Schema 2020-12)
+└── examples/drift_report.json    # Sample report from a real fixture
+
+tests/
+├── fixtures/plan_evidence/       # Sanitized real plan evidence (11 scenarios)
+├── scenarios/                    # Azure CLI tag-drift inject / revert / runner (Task 3.6)
+└── test_*.py                     # Unit tests (see Testing)
+
+docs/
+├── drift-detection-spec.md       # Detection contract (Phases 3–4)
+├── MASTER_PROJECT_GUIDE.md       # Project walkthrough
+└── architecture.md               # Phase 1–2 design
+
+pyproject.toml / requirements.txt # Python package and dev environment
+PROJECT_PLAN.md                   # Roadmap and task status (source of truth)
 ```
+
+---
+
+## 🔎 Running Drift Detection
+
+Detection is **read-only**: it never runs `terraform apply` and never changes Azure.
+It needs Azure access that can read state and run `terraform plan` for `dev` (locally via
+`az login`).
+
+```bash
+export ARTIFACT_DIR="$(mktemp -d)"   # must be absolute, empty, and outside the repository
+./scripts/generate_plan_json.sh
+python3 scripts/detect_drift.py "$ARTIFACT_DIR"
+```
+
+`detect_drift.py` writes `$ARTIFACT_DIR/drift_classification.json` and prints a summary,
+for example `has_drift=true  [external_drift=1]`.
+
+**Exit codes** describe the process, not the drift verdict:
+
+| Script | `0` | `1` | `64` |
+|---|---|---|---|
+| `generate_plan_json.sh` | run succeeded (plan exit 0 or 2; see manifest) | detection failed | unusable `ARTIFACT_DIR` |
+| `detect_drift.py` | evidence valid and classified (drift or not) | evidence failed or rejected: drift status **unknown** | artifact directory missing |
+
+Evidence bundles and reports can contain resource IDs and must stay outside the repository.
+`plan.json` and `tfplan` are gitignored.
+
+---
+
+## 🐍 Python Drift Engine
+
+`src/drift_engine/` is the Phase 4 library. The plan-parsing and attribute-diff code was
+**moved out of** `scripts/detect_drift.py` (not rewritten), and the script imports it. The
+script's output is unchanged.
+
+| Module | Task | What it does |
+|---|---|---|
+| `parser.py` | 4.2 | Loads `plan.json` (50 MiB limit) and re-applies the integrity gate. It extracts recorded / real / desired views per managed resource. Bad input raises `EvidenceError`, never another exception. |
+| `models.py` | 4.3 | Strict, immutable Pydantic models (`DriftReport`, `DriftSummary`, `DriftItem`, `AttributeChange`) that mirror `schemas/drift_report.schema.json`. They round-trip the classifier JSON exactly. |
+| `comparator.py` | 4.4 | Deep attribute diff, plus an assessment of each changed path as `configured` (set in the Terraform configuration), `noise` (declarative rules: computed IDs, timeouts, timestamps, read-only metadata), `unconfigured` or `undetermined`. It annotates only: nothing is dropped and only proven noise is excluded from "significant". |
+| `severity.py` | 4.5 | Deterministic, rules-based `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` per change and per resource. Examples: Key Vault access policies, NSG inbound rules open to any source and public storage access rate `CRITICAL`/`HIGH`; tags and descriptions rate `LOW`; proven noise rates `INFO`; changes no rule covers default to `MEDIUM`. |
+
+Install for development (a virtual environment is recommended):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Library use (there is no engine CLI yet; that is Task 4.6):
+
+```python
+from drift_engine import comparator, parser, severity
+from drift_engine.models import DriftReport
+
+raw = parser.load_json("/path/outside/repo/plan.json", parser.PLAN_STAGE)
+parsed = parser.parse_plan(raw)
+comparisons = comparator.compare_plan(parsed, comparator.configured_attributes(raw))
+for rated in severity.plan_severity(parsed, comparisons):
+    print(rated.severity, rated.address, rated.reasons)
+
+with open("/path/outside/repo/drift_classification.json", encoding="utf-8") as fh:
+    report = DriftReport.model_validate_json(fh.read())
+```
+
+**Not yet connected:** the comparator assessment and severity ratings are computed by the
+library but are **not written into `drift_classification.json`**, and the report schema and
+models do not contain them yet. All engine rules are deterministic. None of this uses an
+LLM.
+
+---
+
+## 🧪 Testing & Validation
+
+```bash
+# Full suite (inside the dev virtual environment)
+pytest
+
+# Without installing anything: the Pydantic-dependent tests are skipped
+python3 -m unittest discover -s tests
+
+# Terraform format + validate (no Azure authentication)
+./scripts/validate.sh
+```
+
+State after Task 4.5: **201 tests pass** with `pytest` (Python 3.13 and 3.14). With plain
+`python3` and no installation, the same 201 run and 27 are skipped (they need Pydantic).
+
+| Test file | Covers | Tests |
+|---|---|---|
+| `test_detect_drift.py` | Classification, integrity gate, attribute detail, redaction, CLI exit codes | 63 |
+| `test_parser.py` | Parser: real fixtures, missing/null/unknown fields, malformed input, 50 MiB limit | 31 |
+| `test_models.py` | Models: strict types, JSON round trip, agreement with the JSON Schema | 25 |
+| `test_comparator.py` | Diff, configured vs noise assessment, Azure-shaped acceptance cases | 35 |
+| `test_severity.py` | Severity rules, escalation, floors, edge cases | 45 |
+| `test_package.py` | Package installation smoke test | 2 |
+
+**Live drift scenario** (changes Azure, then reverts it; explicit opt-in):
+
+```bash
+tests/scenarios/run_rg_tag_drift_scenario.sh           # read-only: preflight + baseline
+tests/scenarios/run_rg_tag_drift_scenario.sh --apply   # inject tag drift, detect, revert, re-detect
+```
+
+Its approved run on 2026-10-02 passed 18/18 checks (Task 3.6). Additional validation per
+task (golden-output comparisons, fuzzing, mutation checks) is recorded in the completion
+notes in [PROJECT_PLAN.md](PROJECT_PLAN.md). No CI workflow runs the Python tests yet.
 
 ---
 
@@ -134,7 +314,8 @@ az account set --subscription "<your-subscription-id>"
 
 ### 2. Provision the Remote State Backend (Bootstrap)
 
-The backend storage must be created before configuring the environment's remote backend:
+Already provisioned for this project. For a new setup, the backend storage must exist
+before the environment can use its remote backend:
 
 ```bash
 cd terraform/bootstrap
@@ -144,20 +325,17 @@ terraform plan
 terraform apply
 ```
 
-### 3. Initialize Dev Environment with State Migration
-
-Once the bootstrap storage account is provisioned:
+### 3. Initialize and Plan the Dev Environment
 
 ```bash
 cd terraform/environments/dev
-
-# Initialize backend and migrate existing state if applicable:
-terraform init -migrate-state
-
-# Validate & Plan:
+terraform init
 terraform validate
 terraform plan -var-file="dev.tfvars"
 ```
+
+The one-time migration from local to remote state (`terraform init -migrate-state`) was
+completed in Phase 2. A fresh clone only needs `terraform init`.
 
 ---
 
@@ -217,6 +395,10 @@ registration holds zero credentials.
 5. **Verify** by running the `terraform-auth-test.yml` workflow. A green run proves the
    federated credential, the secrets, and the RBAC scopes are all correct together.
 
+> Only the `main` branch has a federated credential. The workflow also triggers on pull
+> requests, and those runs are expected to fail at Azure login until a pull-request
+> credential is added or that trigger is removed (an open decision).
+
 ---
 
 ## 🔒 Security Principles
@@ -224,12 +406,13 @@ registration holds zero credentials.
 | Principle | Implementation |
 |---|---|
 | Backend Isolation | State storage is separated from app storage. |
-| No Committed Secrets | Credentials, tokens, and state files are gitignored. |
+| No Committed Secrets | Credentials, tokens, state files and plan artifacts are gitignored; drift evidence is written outside the repository. |
 | OIDC Authentication | Workload Identity replaces static Azure client secrets in GitHub Actions. |
 | State Security | State blob versioning enabled; container set to private. |
 | Least Privilege | Exactly two RBAC assignments on the CI identity: `Reader` (subscription) and `Storage Blob Data Contributor` (`tfstate` container). No `Contributor`, `Owner`, or `User Access Administrator`. |
 | Plan-Only CI | GitHub Actions has **no autonomous `terraform apply` capability**, enforced by RBAC rather than convention — the identity holds no write actions. Any future remediation/apply capability would require explicit human approval. |
 | No Storage Account Keys | `listkeys` is denied to the CI identity, so state access uses Entra ID on the data plane (`ARM_USE_AZUREAD=true`) instead of account keys. |
+| Sensitive Values Redacted | Values Terraform marks sensitive are never emitted in drift reports. |
 
 ---
 
@@ -237,10 +420,10 @@ registration holds zero credentials.
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Terraform + Azure Foundation (Minimal Baseline) | ✅ Complete |
+| 1 | Terraform + Azure foundation (minimal baseline) | ✅ Complete |
 | 2 | Remote state backend + secure auth (plan-only CI) | ✅ Complete |
-| **3** | **Deterministic Terraform drift detection** | 🟡 Next |
-| 4 | Python drift parser | ⬜ Planned |
+| 3 | Deterministic Terraform drift detection | ✅ Complete |
+| **4** | **Python drift engine** | 🟡 In progress (4.1–4.5 done; 4.6 output/CLI and 4.7 logging/coverage remaining) |
 | 5 | Scheduled GitHub Actions drift detection | ⬜ Planned |
 | 6 | LangGraph AI analysis | ⬜ Planned |
 | 7 | Azure Activity Log investigation | ⬜ Planned |
@@ -251,6 +434,16 @@ registration holds zero credentials.
 | 12 | Testing and hardening | ⬜ Planned |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
+
+### Known limitations (current state)
+
+- Only one Azure resource type (resource group) is managed and drift-tested. Rules for Key
+  Vault, NSG and storage are verified on synthetic plans only.
+- Detection is run manually or by the scenario script; it is not scheduled (Phase 5).
+- Terraform reports drift only for resources and attributes it manages. Unmanaged resources
+  are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
+- The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.
+  Both refer to the same document.
 
 ---
 

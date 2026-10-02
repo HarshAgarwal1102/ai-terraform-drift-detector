@@ -188,6 +188,13 @@ Python may default a missing array to empty **only after** the integrity gate pa
 A consistency violation means the evidence contradicts itself and is treated as a
 detection failure, never resolved by guessing.
 
+**Structural checks (Task 4.2).** The parser (`src/drift_engine/parser.py`) also fails
+the gate, as `integrity`, when `plan.json` is larger than 50 MiB (checked before
+reading), when an action list contains non-strings, when a `resource_changes` or
+`resource_drift` array repeats an address, or when a resource entry nests deeper than
+100 levels. Terraform does not produce any of these. Before Task 4.2 they crashed the
+classifier or, for a repeated address, silently dropped an entry.
+
 ## 6. Drift vs Configuration Change
 
 `terraform plan` compares **three** views of each resource:
@@ -299,6 +306,14 @@ and refusing `TF_CLI_ARGS*`, which could inject forbidden flags.
 - **Must not** call Azure, Terraform, or an LLM to decide drift.
 - Report schema = Task 3.5 (`schemas/drift_report.schema.json`). It describes the
   classifier output below directly. There is no separate normalized artifact.
+- Python form of the same contract (Task 4.3): strict Pydantic models in
+  `src/drift_engine/models.py` (`DriftReport`, `DriftSummary`, `DriftItem`,
+  `AttributeChange`). They accept exactly what the schema accepts, except that they
+  reject whole-number floats such as `1.0` where the schema expects an integer.
+
+**Plan parsing (Task 4.2):** loading `plan.json`, the §5.3 gate and S/R/D extraction live
+in `src/drift_engine/parser.py`. `scripts/detect_drift.py` imports it from `src/` (no
+installation needed) and keeps the classification; output is unchanged.
 
 **Classifier (Task 3.3):** `scripts/detect_drift.py ARTIFACT_DIR` writes
 `ARTIFACT_DIR/drift_classification.json`, containing `outcome`, `has_drift`
@@ -373,6 +388,14 @@ The contract stays valid as resources are added:
 - Per-type **noise rules** (attributes known to drift through Azure-side normalization)
   belong in Python as declarative data, applied *after* classification and recorded in the
   report. They must never cause a resource to be removed silently.
+  **Implemented in Task 4.4** (`src/drift_engine/comparator.py`, `NOISE_RULES`):
+  - Each changed path is assessed as `configured` (its top-level attribute appears in
+    `configuration` expressions), `noise` (matches a rule *and* is proven not configured),
+    `unconfigured`, or `undetermined` (no configuration evidence for the resource).
+  - Configuration always wins over a rule, and nothing is dropped. Only proven noise is
+    left out of the "significant" view.
+  - Classification and the report are unchanged. Recording the assessment in the report
+    is not done yet; it needs a schema change (Task 4.6 or later).
 - `lifecycle.ignore_changes`, moved blocks (`previous_address`) and import blocks
   (`change.importing`) affect `resource_changes`. Their interaction with `resource_drift`
   must be verified empirically when first introduced; they are not exercised by the MVP.
@@ -392,6 +415,13 @@ The contract stays valid as resources are added:
 4. AI output is labeled **inference** and kept separate from Terraform **evidence**. AI
    must not claim *who* made a change; attribution needs Phase 7 Activity Log evidence.
 5. A failed detection run is never handed to AI as "no drift".
+6. **Severity baseline (Task 4.5):** `src/drift_engine/severity.py` rates every change
+   `CRITICAL`/`HIGH`/`MEDIUM`/`LOW`/`INFO` with declarative rules, deterministically and
+   without an LLM.
+   - Proven noise is `INFO`; an unmatched significant change is `MEDIUM`. Unknown impact is
+     never rated down.
+   - AI may add context to this rating but does not replace it.
+   - It is an annotation only and is not yet part of the report.
 
 ## 11. Verification Evidence
 

@@ -46,10 +46,16 @@ Thumbs.db
 *.code-workspace
 
 # -------------------------------------------------
-# Python (for future phases)
+# Python
 # -------------------------------------------------
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
+build/
+dist/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/

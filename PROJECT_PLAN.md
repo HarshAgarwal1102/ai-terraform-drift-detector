@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 4 — Python Drift Engine
-- **Current Active Task**: Task 4.1 — Python Project Structure & Environment
+- **Current Active Task**: Task 4.6 — Structured Output Generator (JSON/YAML)
 - **Phases Completed**: 3 of 14
 
 ---
@@ -794,84 +794,266 @@ The first end-to-end drift scenario uses ONLY `aitdd-dev-main-rg`. No VNet, Subn
 ---
 
 ### PHASE 4 — Python Drift Engine
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS
 
 Phase 4 modularizes the Python drift engine into a production-grade library with structured models, custom CLI entry points, logging, and unit tests.
 
 #### Task 4.1 — Python Project Structure & Environment
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Set up Python package structure, virtualenv configuration, dependencies, and `pyproject.toml` / `requirements.txt`.
 - **Dependencies**: Task 3.5
 - **Files/Areas**: `src/drift_engine/`, `pyproject.toml`, `requirements.txt`
 - **Acceptance Criteria**:
-  - [ ] Standard Python package layout (`src/drift_engine/`).
-  - [ ] `pyproject.toml` configured with dependencies (Pydantic, click/argparse, pytest).
+  - [x] Standard Python package layout (`src/drift_engine/`).
+  - [x] `pyproject.toml` configured with dependencies (Pydantic, click/argparse, pytest).
 - **Validation**:
-  - [ ] `pip install -e .` succeeds in clean virtual environment.
+  - [x] `pip install -e .` succeeds in clean virtual environment.
 - **Implementation Notes**:
   - Clean Python library architecture.
 - **Completion Notes**:
-  - None.
+  - **Layout**: `src/drift_engine/__init__.py` (exposes `__version__` from installed metadata) and `py.typed`. No engine logic: parser, models, comparator, severity and CLI belong to Tasks 4.2–4.6. `scripts/detect_drift.py` was **not** moved or changed; whether it migrates into the package (guide §18 #2) remains a Task 4.2+ decision.
+  - **`pyproject.toml`**: setuptools build backend, src layout, distribution `drift-engine` 0.1.0, `requires-python >=3.11`. Runtime dependency: `pydantic>=2.7,<3`. **CLI: standard-library `argparse`** (same as `scripts/detect_drift.py`), so no `click` dependency. Dev extra `[dev]`: `pytest`, `pytest-cov` (Task 4.7 coverage gate), `jsonschema` (the validator Task 3.5 limitation (b) deferred to this task; not yet used by any committed test). pytest configured with `testpaths = ["tests"]`. No console script yet (Task 4.6).
+  - **`requirements.txt`**: `-e .[dev]`, so dependencies are declared once, in `pyproject.toml`. Virtualenv convention: `.venv/` in the repo root (already ignored); setup commands are in the `pyproject.toml` header.
+  - **Test framework (guide §18 #7)**: pytest is the runner; it runs the existing `unittest` suite unchanged. `tests/test_package.py` (2 smoke tests) skips cleanly when the package is not installed, so the stdlib-only `python3 -m unittest discover -s tests` still passes without a venv.
+  - `.gitignore`: added `build/`, `dist/`, `.pytest_cache/`, `.coverage*`, `htmlcov/`.
+  - **Validation** (fresh venvs in a scratch directory outside the repo, Python 3.14.7 and 3.13): `pip install -e .` OK; `import drift_engine` → `0.1.0`, pydantic 2.13.5, resolved to `src/drift_engine/`; `pip install -r requirements.txt` OK. `pytest`: 65 passed (63 existing + 2 new). `unittest discover` in venv: 65 OK; system `python3` without install: 65 OK (2 skipped), ResourceWarnings as errors. Wheel build contains `drift_engine/__init__.py` and `py.typed`. `./scripts/validate.sh` passed. Build byproducts removed from the working tree. No Terraform, Azure, workflow or `scripts/` change.
+  - **Limitations**: (a) Dependencies use version ranges, not a lock file; reproducible pinning can be added when CI installs the package (Phase 5). (b) CI does not yet install or test the package. (c) README is not updated (already out of date, guide §18 #3; deferred to a documentation task).
 
 #### Task 4.2 — Terraform Plan JSON Parser
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Implement robust Python parser module to read Terraform plan JSON files and extract state changes safely.
 - **Dependencies**: Task 4.1
 - **Files/Areas**: `src/drift_engine/parser.py`
 - **Acceptance Criteria**:
-  - [ ] Safely parses `plan.json` files up to 50MB.
-  - [ ] Handles missing fields, null states, and unknown values gracefully without throwing unhandled exceptions.
+  - [x] Safely parses `plan.json` files up to 50MB.
+  - [x] Handles missing fields, null states, and unknown values gracefully without throwing unhandled exceptions.
 - **Validation**:
-  - [ ] `pytest tests/test_parser.py` passes.
+  - [x] `pytest tests/test_parser.py` passes.
 - **Implementation Notes**:
   - Defensive parsing for all Terraform resource change fields.
 - **Completion Notes**:
-  - None.
+  - **Packaging decision (guide §18 #2): migrate, not rewrite, one slice per task.** Task 4.2 moved the plan-parsing slice of `scripts/detect_drift.py` into `src/drift_engine/parser.py`: JSON loading, `normalize_action`, `is_pending`, the §5.3 integrity gate, `EvidenceError` and the S/R/D extraction. The script imports it by putting `src/` on `sys.path`, so it still runs with plain `python3` and no install (scenario scripts unchanged). Classification stays in the script; Tasks 4.3–4.6 can migrate their own slices the same way. No logic is duplicated.
+  - **Parser API** (stdlib only): `parse_plan_file(path, plan_rc=None, expected_tf_version=None, max_bytes=MAX_PLAN_BYTES)` and `parse_plan(plan, …)` gate then extract; `extract_plan(plan)` extracts an already-gated plan. They return a frozen `ParsedPlan` (`header`, `resources`, `output_changes`). Each `ResourceEvidence` holds identity, `actions`/`drift_actions`, `action_reason`, `previous_address`, `importing`, the `state`/`real`/`desired` views, `after_unknown` and the four sensitivity masks. When `plan_rc` or the version is `None` (a plan without its manifest, for the Task 4.6 CLI), that check is skipped. Any bad input raises `EvidenceError(stage, reason)` and nothing else.
+  - **Safety**:
+    - 50 MiB limit (`MAX_PLAN_BYTES`), checked by size before reading and again on read.
+    - Missing optional fields read as `None`. Missing arrays default to empty only after the gate passes (spec §5.2). `null` views (create/delete/external deletion) are preserved.
+    - Unknown values are passed through as `after_unknown`, never invented.
+    - `RecursionError` while decoding is reported as `EvidenceError`.
+  - **New gate checks** (spec §5.3 updated). Each closes a confirmed defect in the old script, and Terraform does not emit any of these inputs:
+    - Action lists containing non-strings: the old script crashed with `TypeError`.
+    - A repeated address within an array: the old script silently dropped an entry, turning `external_drift` into `converged_drift`.
+    - Entries nested deeper than `MAX_VALUE_DEPTH` (100): the old script raised `RecursionError` in classification from about 1,000 levels.
+    - Plans over 50 MiB.
+  - **Contract preserved**: script output is **byte-identical** before and after (output, exit code and message) across 36 bundles: all 11 real fixtures and 25 malformed, sensitive and unknown-value variants. `tests/test_detect_drift.py` is unmodified (63 passing). `tests/test_package.py` (Task 4.1) now detects installation from package metadata, because the script makes `src/` importable.
+  - **Tests**: `tests/test_parser.py`, 31 tests (52 subtests), unittest-style so they run under both pytest and plain unittest:
+    - all real fixtures, with and without the manifest;
+    - the S/R/D views for drift, config change, create, delete and external deletion;
+    - missing and null fields, unknown values, move/import, data sources excluded;
+    - 24 invalid structures and 8 invalid files (empty, truncated, two documents, BOM, non-UTF-8, deeply nested, missing, a directory);
+    - the depth-limit boundary;
+    - the size limit: exactly at the limit, one byte over, a 50 MiB + 1 sparse file rejected without reading, and a generated ~49.9 MiB plan parsed;
+    - a seeded fuzz test (1,500 mutated real plans).
+  - **Validation**:
+    - `pytest tests/test_parser.py`: 31 passed in fresh venvs on Python 3.14.7 and 3.13.
+    - Full suite: pytest 96 passed; system `python3 -m unittest discover -s tests` without install OK (2 skipped), with ResourceWarnings as errors.
+    - `pip install -e ".[dev]"` in a clean venv OK.
+    - Fuzzing 20,000 mutated plans through parser **and** classifier: 0 unhandled exceptions on both Pythons. The same inputs on the pre-change script gave 66 crashes.
+    - A 49.9 MiB plan (10,096 resources) through the CLI: exit 0 in about 0.7 s. 50 MiB + 1 byte: exit 1, `has_drift: null`.
+    - The script also works from another working directory.
+    - `./scripts/validate.sh` passed.
+    - No Terraform, Azure, workflow or scenario-script change.
+  - **Limitations**:
+    - (a) Python 3.11/3.12 (allowed by `requires-python`) were not tested; only 3.13 and 3.14 are installed. The code avoids 3.12+ syntax.
+    - (b) The 50 MiB plan is read fully into memory; there is no streaming parser. Peak memory was not measured.
+    - (c) Duplicate checks run per array, not across `resource_changes`/`resource_drift`, where one address is expected in both.
+    - (d) `sys.path` bootstrapping in the script is transitional, until Task 4.6 provides the packaged CLI.
 
 #### Task 4.3 — Drift Normalization & Pydantic Data Models
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Define strong Pydantic models for `DriftItem`, `AttributeChange`, `DriftSummary`, and `DriftReport`.
 - **Dependencies**: Task 4.2
 - **Files/Areas**: `src/drift_engine/models.py`
 - **Acceptance Criteria**:
-  - [ ] Pydantic models enforce strict types for all drift attributes.
-  - [ ] Supports JSON serialization and deserialization seamlessly.
+  - [x] Pydantic models enforce strict types for all drift attributes.
+  - [x] Supports JSON serialization and deserialization seamlessly.
 - **Validation**:
-  - [ ] `pytest tests/test_models.py` passes.
+  - [x] `pytest tests/test_models.py` passes.
 - **Implementation Notes**:
   - Types used across Python engine and LangGraph pipeline.
 - **Completion Notes**:
-  - None.
+  - **Design: the models are the Python form of the existing report contract**, not a new format. They mirror `schemas/drift_report.schema.json` (Task 3.5) field for field, so "normalization" means one typed shape for the classifier output (`drift_classification.json` = the plan's `drift_report.json`). Model mapping:
+    - `DriftReport`: the whole document.
+    - `DriftSummary`: `summary`.
+    - `DriftItem`: `resources[]`.
+    - `AttributeChange`: `attribute_changes[]`, with S/R/D views as a discriminated union `ValueView` (`value`, which may be null) | `StatusView` (`absent`/`unknown`/`redacted`, no value key).
+    - Supporting models: `AttributeSummary`, `ResourceTypeGroup`, `OutputChange`, `Failure`, `RunInfo`, `PlanInfo`.
+    - Enumerations are `Literal`s, so strict mode accepts plain strings from both JSON and Python dicts.
+  - **Strictness**: every model is `strict`, `extra="forbid"` and frozen. There is no coercion ("1"≠1, 1≠True, 1.5≠int); unknown classes, actions and fields are rejected; non-negative counts and minimum lengths are enforced. `DriftReport` enforces the schema's outcome invariants: a succeeded report needs a boolean `has_drift` plus `run`/`plan`/`summary`; a failed report needs `has_drift: null`, a `failure` object and empty results, so a failed run can never load as "no drift". `errored`/`complete` use a strict bool with a value check, because `Literal[False]` accepts `0` (found by the agreement fuzz; fixed).
+  - **Serialization**: `model_validate_json` / `model_validate` load reports; `model_dump(mode="json")` reproduces the classifier JSON exactly. The JSON key `class` is exposed as `class_`, accepted under both names and serialized as `class`.
+  - **Task 4.2 contract preserved**: `parser.py` and `scripts/detect_drift.py` are unchanged; neither imports pydantic, so the script stays stdlib-only. Script output is byte-identical to the Task 4.2 golden baseline (36 bundles). The models are not yet wired into the script or a CLI (Task 4.6).
+  - **Dependency**: the pydantic floor was raised to `>=2.11` (needed for `validate_by_name` / `serialize_by_alias`). Verified: tests pass on 2.11.0 and fail on 2.10.6.
+  - **Fix to Task 4.1/4.2 test helper**: `tests/test_package.py` could error under plain `python3` when a venv's editable install had left `src/drift_engine.egg-info` behind (reproduced). It now treats the package as installed only when pydantic is also importable.
+  - **Tests**: `tests/test_models.py`, 25 tests (213 subtests). They skip without pydantic, so the plain unittest suite still runs. Inputs are real classifier output for all 11 fixtures, plus sensitive, unknown-value, null-value and 4 failure/rejected variants, plus the Task 3.5 sample. Coverage:
+    - validation from dict and JSON;
+    - byte-identical round trip in the script's serialization;
+    - `model_dump_json` round trip;
+    - typed access;
+    - null vs absent vs unknown vs redacted;
+    - redacted values never emitted;
+    - 57 invalid structures rejected, plus failed reports carrying results;
+    - no coercion from JSON;
+    - immutability;
+    - construction by field name;
+    - **agreement with the JSON Schema** (jsonschema): every valid report is valid in both, all 57 invalid ones are invalid in both, and 3,000 seeded random mutations get the same verdict.
+  - **Validation**:
+    - `pytest tests/test_models.py`: 25 passed in clean venvs on Python 3.14.7 and 3.13.
+    - Full suite: pytest 121 passed; plain `python3 -m unittest discover -s tests` OK (27 skipped) both with a clean tree and with a stale egg-info.
+    - `pip install -e ".[dev]"` in a clean venv OK.
+    - Scratch agreement fuzz: 60,000 mutated reports, 0 disagreements between models and schema on both Pythons.
+    - `./scripts/validate.sh` passed.
+    - No Terraform, Azure, workflow, schema or script change.
+  - **Limitations**:
+    - (a) One deliberate difference from the schema: the strict models reject whole-number floats (`1.0`) where the schema accepts them as integers. The classifier never emits these. Recorded in spec §8.2.
+    - (b) The models check per-field types and the outcome invariants only. Cross-field totals, such as `resources_total == len(resources)`, are not checked, matching the schema.
+    - (c) The JSON Schema file remains hand-written. Pydantic's generated schema is not used as a replacement.
+    - (d) Python 3.11/3.12 still not tested locally.
 
 #### Task 4.4 — Resource Difference & Comparison Engine
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Build comparison module to extract deep attribute diffs between `before` and `after` resource definitions.
 - **Dependencies**: Task 4.3
 - **Files/Areas**: `src/drift_engine/comparator.py`
 - **Acceptance Criteria**:
-  - [ ] Filters out noise (e.g., computed IDs, timestamps, read-only metadata).
-  - [ ] Isolates user-configured drifts (e.g., IP whitelist changes, tag changes, security setting modifications).
+  - [x] Filters out noise (e.g., computed IDs, timestamps, read-only metadata).
+  - [x] Isolates user-configured drifts (e.g., IP whitelist changes, tag changes, security setting modifications).
 - **Validation**:
-  - [ ] `pytest tests/test_comparator.py` passes.
+  - [x] `pytest tests/test_comparator.py` passes.
 - **Implementation Notes**:
   - Intelligent diffing ignoring non-consequential metadata changes.
 - **Completion Notes**:
-  - None.
+  - **Deep diff migrated, not rewritten** (same pattern as Task 4.2): the spec §6.2 rule, `classify_attributes` and the Task 3.4 `attribute_changes` walk (S/R/D views, nested maps, whole lists, null vs absent, unknown, redaction) moved verbatim from `scripts/detect_drift.py` into `src/drift_engine/comparator.py`. The script imports them, and resource classification stays in the script. Script output is **byte-identical** to the Task 4.2 golden baseline (36 bundles).
+  - **Noise and user intent, as an annotation only** (spec §9: declarative, applied after classification, never removes anything):
+    - **Evidence for "user-configured"**: the plan's `configuration` section. `configured_attributes(plan)` returns the top-level attributes set in configuration expressions per config address, walking nested `module_calls`. `config_address()` strips module and resource instance keys, including quoted keys with `.`, `[`, `]` and escaped quotes. The real module yields `{location, name, tags}`.
+    - **`NOISE_RULES`** (declarative `NoiseRule` data: path-prefix fnmatch patterns, resource-type patterns, optional action and desired-unset conditions):
+      - `computed-id`;
+      - `timeouts`;
+      - `timestamps` (`created_at`, `creation_time`, `last_modified*`, `*_timestamp`, …);
+      - `read-only-metadata` (`etag`, `provisioning_state`, `resource_guid`);
+      - `replace-unset-optional`: the documented Task 3.3 quirk where a replace shows `managed_by` `""`→`null`.
+    - **Categories** per changed path:
+      - `configured`;
+      - `noise` (rule matched **and** proven not configured);
+      - `unconfigured` (e.g. a security setting left at its provider default and changed in Azure: still significant);
+      - `undetermined` (no configuration evidence).
+      Configuration always wins over a rule, whose id is still recorded. Anything not proven to be noise is significant.
+    - **API**: `compare_plan(parsed, configured, rules=NOISE_RULES)` returns a `ResourceComparison` per resource, with `changes` (all of them), `significant`, `noise` and `configured_drift` (spec §6.2 drift classes on configured attributes). A frozen `ChangeAssessment` carries the unmodified change entry, `category`, `configured` and `rule`. The module is stdlib-only, so the script stays installation-free.
+  - **Contracts preserved**: `parser.py` and `models.py` are byte-for-byte unchanged (checksums). The report, schema and models are unchanged, and nothing is wired into the report yet (see limitations). Resource classifications are unchanged by comparison (tested).
+  - **Real-data results**:
+    - `external_drift`: `tags.probe` is configured drift.
+    - `replace`: `location` is configured; `managed_by` is noise (`replace-unset-optional`); `id` is noise.
+    - create/delete: `id` and `timeouts` are noise; `managed_by` is unconfigured (kept).
+    - `config_change`: significant but not drift.
+  - **Tests**: `tests/test_comparator.py`, 35 tests (64 subtests), unittest-style, run with and without installation:
+    - the migrated diff equals the classifier output for every fixture, and the script uses the comparator's functions;
+    - diff units;
+    - configuration extraction: nested modules, malformed input, address stripping;
+    - acceptance cases: real tag drift, plus synthetic Azure-shaped IP allow-list (storage `network_rules`), NSG inbound rule and `public_network_access_enabled` drift;
+    - noise mixed with real drift (id, etag, timestamp, provisioning state);
+    - the real replace quirk;
+    - rule conditions, configuration-over-rule priority, undetermined and removed resources, custom rules, prefix matching;
+    - tags never noise;
+    - nothing dropped, partition complete, classification unchanged, redaction kept, deterministic.
+  - **Validation**:
+    - `pytest tests/test_comparator.py`: 35 passed on Python 3.14.7 and 3.13.
+    - Full suite: pytest 156 passed; plain `python3 -m unittest discover -s tests` OK (27 skipped).
+    - Clean `pip install -e ".[dev]"` OK.
+    - **Mutation check**: 10 deliberate breakages of the comparator were each caught by the tests. One untestable branch (nested brackets in addresses) was simplified away.
+    - **Fuzz**: 20,000 mutated plans (entries and configuration) give 0 unhandled exceptions on both Pythons, after fixing one crash it found (a non-list `configuration.resources`; now a regression test).
+    - `./scripts/validate.sh` passed.
+    - No Terraform, Azure, workflow, schema or model change.
+  - **Limitations**:
+    - (a) "Configured" is decided per **top-level** attribute and per configuration **block**, not per instance or nested argument. A change inside a configured `network_rules` block counts as configured; for a `for_each` instance being deleted while its block remains, its attributes still count as configured.
+    - (b) Lists, such as `ip_rules` and `security_rule`, are compared whole (Task 3.4 behavior), so drift is reported on the list attribute, not the element.
+    - (c) Noise rules are name-based defaults, verified on synthetic cases only. The MVP manages only a resource group, and no Azure timestamp or etag drift has been observed live. Rules should be extended per resource type as resources are added.
+    - (d) The assessment is not yet recorded in the report (spec §9 asks for that eventually). That needs a schema/model change and is left for Task 4.5/4.6 or a later decision.
+    - (e) Expressions only show *which* attributes are set, not their values. Computed `references` are not evaluated.
 
 #### Task 4.5 — Drift Severity Classifier Foundation
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Build deterministic rules-based severity classifier (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`).
 - **Dependencies**: Task 4.4
 - **Files/Areas**: `src/drift_engine/severity.py`
 - **Acceptance Criteria**:
-  - [ ] Classifies security-sensitive resources (Key Vault access policy, NSG inbound rules, public storage access) as `CRITICAL`/`HIGH`.
-  - [ ] Classifies tag/description changes as `LOW`/`INFO`.
+  - [x] Classifies security-sensitive resources (Key Vault access policy, NSG inbound rules, public storage access) as `CRITICAL`/`HIGH`.
+  - [x] Classifies tag/description changes as `LOW`/`INFO`.
 - **Validation**:
-  - [ ] `pytest tests/test_severity.py` passes.
+  - [x] `pytest tests/test_severity.py` passes.
 - **Implementation Notes**:
   - Rules-based fallback classifier prior to AI enrichment.
 - **Completion Notes**:
-  - None.
+  - **Design**: rates the Task 4.4 comparator output. Inputs:
+    - `ResourceComparison`, which gives per-change category and drift class;
+    - optionally `ResourceEvidence`, for whole-object value checks;
+    - optionally the classifier's resource classification.
+
+    The module is stdlib-only, deterministic and annotation-only: every change is rated, nothing is dropped, and no classification or report field changes.
+  - **Change severity**:
+    - proven noise is `INFO`;
+    - otherwise the **highest** severity among matching `SEVERITY_RULES`, so rule order does not matter (tested);
+    - an unmatched significant change is `MEDIUM`, because unknown impact is never rated down.
+  - **Rule format**: declarative `SeverityRule` data: resource-type and path-prefix fnmatch patterns, base severity, optional value-based escalation, and `redacted_only`. Escalation reads the **real and desired** values. Redacted and unknown values are never read; they keep the base severity.
+  - **Rules are path-specific**, so a tag change on a Key Vault is `LOW` while its access policy is `CRITICAL`.
+  - **Resource severity**: the highest change severity, raised to a floor:
+    - `external_deletion`: `HIGH`, or `CRITICAL` for security-sensitive types;
+    - planned `replace`: `HIGH`, because it destroys and recreates the object;
+    - `undetermined`: `MEDIUM`.
+
+    Each result carries `reasons` (rule ids or floor) and `is_drift` per change.
+  - **Default rules**:
+    - Key Vault: access policy (attribute and standalone resource) and RBAC mode `CRITICAL`; network ACLs and public access `HIGH`→`CRITICAL` when Allow or enabled; purge protection / soft delete `HIGH`.
+    - NSG: `security_rule` and standalone rule `HIGH`→`CRITICAL` when an **inbound Allow** rule has an open source (`*`, `Internet`, `0.0.0.0/0`, `Any`, including `source_address_prefixes`; case-insensitive).
+    - Storage: public network access, public blob access, network rules (attribute and standalone) and container access `HIGH`→`CRITICAL` when public or Allow; TLS / HTTPS / shared key `HIGH`.
+    - Any resource: redacted (sensitive) value `HIGH`; `tags` and `description` `LOW`.
+  - **API**:
+    - `change_severity(...)`, `resource_severity(...)`, `plan_severity(parsed, comparisons, classifications)`;
+    - `highest()` / `rank()` and `SEVERITIES` (ascending).
+
+    Mismatched inputs raise `ValueError`.
+  - **Contracts preserved**: `parser.py`, `models.py`, `comparator.py` and `scripts/detect_drift.py` are byte-for-byte unchanged (checksums). Script output is byte-identical to the golden baseline (36 bundles). Rating does not modify comparator results (tested). Not wired into the report, schema or a CLI (Task 4.6 / later).
+  - **Real-data results**:
+    - Tag drift and changes (`external_drift`, `converged_drift`, `drift_and_config_change`, `config_change`): `LOW`.
+    - `in_sync` and `output_only_change`: `INFO`.
+    - `external_deletion`: `HIGH`.
+    - `replace`: `HIGH` (floor; `id`/`managed_by` noise are `INFO`).
+    - Create/delete: `MEDIUM`, with `id` `INFO` and tags `LOW`.
+  - **Tests**: `tests/test_severity.py`, 45 tests (54 subtests), unittest-style, run with and without installation.
+    - **Acceptance 1**: Key Vault access policy (attribute and resource), public access (including desired-on), network ACLs, purge protection; NSG rule change `HIGH`, inbound-open `CRITICAL` (5 source spellings, prefixes list), outbound/deny-open `HIGH`, standalone rule; storage public access, public blob, IP allow list (`HIGH`, Allow→`CRITICAL`), TLS, container access, standalone network rules; unconfigured or undetermined settings not downgraded; external deletion of a security resource `CRITICAL`; planned open inbound rule `CRITICAL`.
+    - **Acceptance 2**: real tag fixtures `LOW`; tags on a Key Vault `LOW`; tags + access policy gives `CRITICAL` with tags `LOW`; description `LOW`; noise `INFO`; in-sync `INFO`.
+    - **Edge cases**: default `MEDIUM`; replace and deletion floors; undetermined floor; no classification means no floor; redacted values; unknown desired value; odd value shapes; resource `type` of any JSON shape; rule-order independence; custom rules; rule validation; unique ids; mismatched inputs; every change rated; comparator output unmodified; classifier output unchanged; deterministic.
+  - **Validation**:
+    - `pytest tests/test_severity.py`: 45 passed on Python 3.14.7 and 3.13.
+    - Full suite: pytest 201 passed; plain `python3 -m unittest discover -s tests` OK (27 skipped).
+    - Clean `pip install -e ".[dev]"` OK.
+    - **Mutation check**: 15 deliberate breakages of the rating logic were each caught.
+    - **Fuzz**: 20,000 mutated real and synthetic plans through parser, comparator, classifier and severity give 0 unhandled exceptions on both Pythons, after fixing the one crash it found (a non-string resource `type` in the security-type lookup; now a regression test).
+    - `./scripts/validate.sh` passed.
+    - No Terraform, Azure, workflow, schema or model change.
+  - **Limitations**:
+    - (a) Default rules cover the three security areas in the criteria plus obvious neighbours. Other types (role assignments, SQL firewall, public IPs, …) fall to `MEDIUM` until rules are added.
+    - (b) Lists are compared whole (Task 3.4/4.4), so an NSG with one open rule among others escalates the whole `security_rule` attribute; it is not rated per rule element.
+    - (c) Rules check names and values from azurerm 4.x/5.x; deprecated aliases (e.g. `allow_blob_public_access`, `enable_https_traffic_only`) are included where known. Rules are verified on synthetic plans only, since the MVP manages only a resource group.
+    - (d) Severity covers changes in a **succeeded** report. A failed detection has no resources to rate and must stay "unknown", never `INFO`; callers must check `outcome` first.
+    - (e) Severity is not yet in the report, schema or models (spec §10). That is a later change.
 
 #### Task 4.6 — Structured Output Generator (JSON/YAML)
 - **Status**: ⬜ NOT STARTED

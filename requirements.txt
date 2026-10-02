@@ -1,0 +1,7 @@
+# Development environment for the Python drift engine.
+# Dependencies are declared once, in pyproject.toml; this file installs the
+# package in editable mode together with its dev extras.
+#
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+-e .[dev]

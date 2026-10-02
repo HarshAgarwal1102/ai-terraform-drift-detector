@@ -12,6 +12,11 @@ Three views of each managed resource are compared (spec §6):
   R  refreshed/real   resource_drift[].change.after  (equals S without a drift entry)
   D  desired          resource_changes[].change.after
 
+Plan loading, the integrity gate and S/R/D extraction live in
+src/drift_engine/parser.py (Task 4.2), and the attribute diff (§6.2 rule and
+Task 3.4 detail) in src/drift_engine/comparator.py (Task 4.4), both imported
+below; this script needs no installation step.
+
 Usage:
   scripts/detect_drift.py ARTIFACT_DIR [--output PATH]
 
@@ -35,6 +40,28 @@ import os
 import sys
 from typing import Any
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+
+from drift_engine.comparator import (  # noqa: E402
+    CONFIG_CHANGED,
+    DRIFTED,
+    DRIFTED_AND_CONFIG_CHANGED,
+    DRIFTED_CONVERGED,
+    UNKNOWN_UNTIL_APPLY,
+    attribute_changes,
+    classify_attributes,
+)
+from drift_engine.parser import (  # noqa: E402
+    EvidenceError,
+    ParsedPlan,
+    ResourceEvidence,
+    extract_plan,
+    load_json,
+    normalize_action,
+    parse_plan_file,
+    resource_evidence,
+)
+
 CLASSIFICATION_VERSION = "1"
 OUTPUT_FILE = "drift_classification.json"
 MANIFEST_FILE = "detection_run.json"
@@ -55,273 +82,6 @@ RESOURCE_REMOVED = "resource_removed"
 DRIFT_AND_CONFIG_CHANGE = "drift_and_config_change"
 UNDETERMINED = "undetermined"
 
-# Attribute classes (spec §6.2)
-DRIFTED = "drifted"
-DRIFTED_CONVERGED = "drifted_converged"
-CONFIG_CHANGED = "config_changed"
-DRIFTED_AND_CONFIG_CHANGED = "drifted_and_config_changed"
-UNKNOWN_UNTIL_APPLY = "unknown_until_apply"
-
-_MISSING = object()  # attribute absent from a view (distinct from JSON null)
-
-
-class EvidenceError(Exception):
-    """The evidence bundle cannot be trusted; drift status is unknown."""
-
-    def __init__(self, stage: str, reason: str) -> None:
-        super().__init__(reason)
-        self.stage = stage
-        self.reason = reason
-
-
-# ---------------------------------------------------------------------------
-# Actions
-# ---------------------------------------------------------------------------
-
-def normalize_action(actions: list[str] | None) -> str | None:
-    """Map Terraform's action list to a single verb."""
-    if actions is None:
-        return None
-    if actions == ["no-op"]:
-        return "no-op"
-    if actions == ["read"]:
-        return "read"
-    if actions == ["create"]:
-        return "create"
-    if actions == ["update"]:
-        return "update"
-    if actions == ["delete"]:
-        return "delete"
-    if sorted(actions) == ["create", "delete"]:
-        return "replace"
-    return "unrecognized"
-
-
-def is_pending(entry: dict) -> bool:
-    """Pending change as defined by spec §5.3."""
-    change = entry["change"]
-    return (
-        change["actions"] not in (["no-op"], ["read"])
-        or entry.get("previous_address") is not None
-        or change.get("importing") is not None
-    )
-
-
-# ---------------------------------------------------------------------------
-# Integrity gate (spec §5.3) - re-applied here, never trusted from upstream
-# ---------------------------------------------------------------------------
-
-def _entries_ok(entries: Any) -> bool:
-    return all(
-        isinstance(e, dict)
-        and isinstance(e.get("address"), str)
-        and isinstance(e.get("change"), dict)
-        and isinstance(e["change"].get("actions"), list)
-        for e in entries
-    )
-
-
-def integrity_violations(plan: Any, plan_rc: int, expected_tf_version: str) -> list[str]:
-    if not isinstance(plan, dict):
-        return ["plan.json is not a JSON object"]
-
-    violations: list[str] = []
-    fmt = plan.get("format_version")
-    if not isinstance(fmt, str):
-        violations.append("format_version missing or not a string")
-    elif fmt.split(".")[0] != "1":
-        violations.append(f"unsupported format_version {fmt} (major must be 1)")
-    if plan.get("terraform_version") != expected_tf_version:
-        violations.append(
-            f"terraform_version {plan.get('terraform_version')!r} != manifest {expected_tf_version!r}"
-        )
-    if plan.get("errored") is not False:
-        violations.append(f"errored is {json.dumps(plan.get('errored'))} (must be false)")
-    if plan.get("complete") is not True:
-        violations.append(f"complete is {json.dumps(plan.get('complete'))} (must be true)")
-    for key in ("resource_changes", "resource_drift"):
-        if key in plan:
-            if not isinstance(plan[key], list):
-                violations.append(f"{key} is not an array")
-            elif not _entries_ok(plan[key]):
-                violations.append(f"{key} contains an entry without address/change.actions")
-    if "output_changes" in plan:
-        oc = plan["output_changes"]
-        if not isinstance(oc, dict):
-            violations.append("output_changes is not an object")
-        elif not all(isinstance(v, dict) and isinstance(v.get("actions"), list) for v in oc.values()):
-            violations.append("output_changes contains an entry without actions")
-    if violations:
-        return violations
-
-    pending = sum(1 for e in plan.get("resource_changes", []) if is_pending(e))
-    pending += sum(1 for v in plan.get("output_changes", {}).values() if v["actions"] != ["no-op"])
-    if plan_rc == 0 and pending > 0:
-        return [f"plan exit 0 but plan.json contains {pending} pending change(s)"]
-    if plan_rc == 2 and pending == 0:
-        return ["plan exit 2 but plan.json contains no pending change"]
-    return []
-
-
-# ---------------------------------------------------------------------------
-# Attribute-level rule (spec §6.2, top-level attributes only)
-# ---------------------------------------------------------------------------
-
-def _contains_true(value: Any) -> bool:
-    if value is True:
-        return True
-    if isinstance(value, dict):
-        return any(_contains_true(v) for v in value.values())
-    if isinstance(value, list):
-        return any(_contains_true(v) for v in value)
-    return False
-
-
-def classify_attributes(
-    state: dict | None, real: dict | None, desired: dict | None, after_unknown: Any
-) -> list[dict]:
-    """Return changed top-level attributes with their §6.2 class.
-
-    Only attribute names and classes are reported; values are Task 3.4 scope
-    (and are withheld here so sensitive values cannot leak).
-    """
-    if not isinstance(state, dict) or not isinstance(real, dict) or not isinstance(desired, dict):
-        return []  # object created or destroyed: no attribute-level comparison
-    unknown = after_unknown if isinstance(after_unknown, dict) else {}
-
-    result = []
-    for name in sorted(set(state) | set(real) | set(desired) | set(unknown)):
-        if _contains_true(unknown.get(name)):
-            result.append({"name": name, "class": UNKNOWN_UNTIL_APPLY})
-            continue
-        cls = _attribute_class(
-            state.get(name, _MISSING), real.get(name, _MISSING), desired.get(name, _MISSING)
-        )
-        if cls is not None:
-            result.append({"name": name, "class": cls})
-    return result
-
-
-def _attribute_class(s: Any, r: Any, d: Any) -> str | None:
-    """The §6.2 rule for one value in the three views; None when unchanged."""
-    if s == r:
-        return None if d == s else CONFIG_CHANGED
-    if d == s:
-        return DRIFTED
-    if d == r:
-        return DRIFTED_CONVERGED
-    return DRIFTED_AND_CONFIG_CHANGED
-
-
-# ---------------------------------------------------------------------------
-# Attribute detail (Task 3.4): nested paths and values, sensitive values redacted
-# ---------------------------------------------------------------------------
-# Each view value is reported as {"status": ...}:
-#   value     {"status": "value", "value": <JSON value, may be null>}
-#   absent    the object or key does not exist in that view
-#   unknown   desired value not known until apply (after_unknown)
-#   redacted  flagged sensitive (before_sensitive / after_sensitive, spec §8.3)
-# Maps/objects are descended key by key; lists are compared as whole values.
-
-def _child(node: Any, key: str) -> Any:
-    return node.get(key, _MISSING) if isinstance(node, dict) else _MISSING
-
-
-def _child_mask(mask: Any, key: str) -> Any:
-    if mask is True:
-        return True  # a flag on a parent covers every child
-    return mask.get(key) if isinstance(mask, dict) else None
-
-
-def _view(value: Any, redacted: bool, unknown: bool = False) -> dict:
-    if unknown:
-        return {"status": "unknown"}
-    if value is _MISSING:
-        return {"status": "absent"}
-    if redacted:
-        return {"status": "redacted"}
-    return {"status": "value", "value": value}
-
-
-def _descend(nodes: tuple, unknown: Any) -> list[str] | None:
-    """Sorted child keys when the path is a map/object in every view where it exists."""
-    if not all(isinstance(v, dict) or v is _MISSING for v in nodes):
-        return None
-    partly_unknown = isinstance(unknown, dict) and _contains_true(unknown)
-    if not any(isinstance(v, dict) for v in nodes) and not partly_unknown:
-        return None
-    keys: set[str] = set()
-    for v in nodes:
-        if isinstance(v, dict):
-            keys |= set(v)
-    if isinstance(unknown, dict):
-        keys |= set(unknown)
-    return sorted(keys)
-
-
-def _walk(path: list[str], nodes: tuple, unknown: Any, masks: list, object_level: bool, out: list) -> None:
-    s, r, d = nodes
-    sensitive = any(m is True for m in masks)
-    is_unknown = unknown is True
-    if not sensitive and not is_unknown:
-        keys = _descend(nodes, unknown)
-        if keys is not None:
-            before = len(out)
-            for key in keys:
-                _walk(
-                    path + [key],
-                    (_child(s, key), _child(r, key), _child(d, key)),
-                    _child_mask(unknown, key),
-                    [_child_mask(m, key) for m in masks],
-                    object_level,
-                    out,
-                )
-            if len(out) > before or s == r == d:
-                return
-            # e.g. {} versus absent: nothing below differs, so report this node itself
-    if not is_unknown and s == r == d:
-        return
-    if object_level:
-        cls = None  # §6.2 applies only when the object exists in all three views
-    elif is_unknown:
-        cls = UNKNOWN_UNTIL_APPLY
-    else:
-        cls = _attribute_class(s, r, d)
-    out.append({
-        "path": path,
-        "attribute": path[0],
-        "class": cls,
-        "state": _view(s, sensitive),
-        "real": _view(r, sensitive),
-        "desired": _view(d, sensitive, is_unknown),
-        "redacted": sensitive and any(v is not _MISSING for v in nodes),
-    })
-
-
-def attribute_changes(
-    state: Any, real: Any, desired: Any, after_unknown: Any, sensitive_masks: list
-) -> list[dict]:
-    """Leaf-level differences between the S, R and D views of one resource.
-
-    `class` reuses the §6.2 rule at the leaf, or is null when the object is absent
-    from a view (create/delete), where §6.2 does not apply. Values flagged
-    sensitive in any mask are redacted in every view.
-    """
-    nodes = tuple(v if isinstance(v, dict) else _MISSING for v in (state, real, desired))
-    object_level = any(v is _MISSING for v in nodes)
-    out: list[dict] = []
-    for key in _descend(nodes, after_unknown) or []:
-        _walk(
-            [key],
-            (_child(nodes[0], key), _child(nodes[1], key), _child(nodes[2], key)),
-            _child_mask(after_unknown, key),
-            [_child_mask(m, key) for m in sensitive_masks],
-            object_level,
-            out,
-        )
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Resource-level classification (spec §6.1)
 # ---------------------------------------------------------------------------
@@ -329,34 +89,22 @@ def attribute_changes(
 def classify_resource(drift: dict | None, change: dict | None) -> dict:
     if drift is None and change is None:
         raise ValueError("classify_resource needs a drift or change entry")
-    entry = change if change is not None else drift
-    c = change["change"] if change is not None else None
-    d = drift["change"] if drift is not None else None
+    return _classify_evidence(resource_evidence(drift, change))
 
-    action = normalize_action(c["actions"]) if c is not None else None
-    drift_action = normalize_action(d["actions"]) if d is not None else None
+
+def _classify_evidence(ev: ResourceEvidence) -> dict:
+    action = normalize_action(ev.actions)
+    drift_action = normalize_action(ev.drift_actions)
     notes: list[str] = []
 
-    state = d.get("before") if d is not None else c.get("before")
-    real = d.get("after") if d is not None else c.get("before")
-    desired = c.get("after") if c is not None else None
-    attributes = classify_attributes(
-        state, real, desired, c.get("after_unknown") if c is not None else None
-    )
+    attributes = classify_attributes(ev.state, ev.real, ev.desired, ev.after_unknown)
     kinds = {a["class"] for a in attributes}
-    sensitive_masks = [
-        part.get(key)
-        for part in (d, c) if part is not None
-        for key in ("before_sensitive", "after_sensitive")
-    ]
-    details = attribute_changes(
-        state, real, desired, c.get("after_unknown") if c is not None else None, sensitive_masks
-    )
+    details = attribute_changes(ev.state, ev.real, ev.desired, ev.after_unknown, list(ev.sensitive_masks))
 
-    moved = change is not None and change.get("previous_address") is not None
-    importing = c is not None and c.get("importing") is not None
+    moved = ev.previous_address is not None
+    importing = ev.importing
 
-    if d is None:
+    if ev.drift_actions is None:
         # No refresh divergence: anything pending comes from the configuration side.
         if action in ("no-op", "read") and not (moved or importing):
             cls = IN_SYNC
@@ -368,7 +116,7 @@ def classify_resource(drift: dict | None, change: dict | None) -> dict:
             cls = CONFIG_CHANGE
         else:
             cls = UNDETERMINED
-            notes.append(f"unrecognized actions {c['actions']}")
+            notes.append(f"unrecognized actions {ev.actions}")
     elif drift_action == "delete":
         # Refresh found the object missing.
         if action == "create":
@@ -400,7 +148,7 @@ def classify_resource(drift: dict | None, change: dict | None) -> dict:
             "so optional attributes not set in configuration can appear as config_changed"
         )
     if moved:
-        notes.append(f"moved from {change['previous_address']} (move-only exit behavior unverified, spec §5.3)")
+        notes.append(f"moved from {ev.previous_address} (move-only exit behavior unverified, spec §5.3)")
     if importing:
         notes.append("import pending (import-only exit behavior unverified, spec §5.3)")
     if UNKNOWN_UNTIL_APPLY in kinds:
@@ -409,20 +157,20 @@ def classify_resource(drift: dict | None, change: dict | None) -> dict:
     ambiguous = cls == UNDETERMINED or DRIFTED_AND_CONFIG_CHANGED in kinds
 
     return {
-        "address": entry["address"],
-        "module_address": entry.get("module_address"),
-        "mode": entry.get("mode"),
-        "type": entry.get("type"),
-        "name": entry.get("name"),
-        "index": entry.get("index"),
-        "provider_name": entry.get("provider_name"),
+        "address": ev.address,
+        "module_address": ev.module_address,
+        "mode": ev.mode,
+        "type": ev.type,
+        "name": ev.name,
+        "index": ev.index,
+        "provider_name": ev.provider_name,
         "classification": cls,
         "action": action,
-        "actions": c["actions"] if c is not None else None,
-        "action_reason": change.get("action_reason") if change is not None else None,
+        "actions": ev.actions,
+        "action_reason": ev.action_reason,
         "drift_action": drift_action,
-        "drift_actions": d["actions"] if d is not None else None,
-        "previous_address": change.get("previous_address") if change is not None else None,
+        "drift_actions": ev.drift_actions,
+        "previous_address": ev.previous_address,
         "importing": importing,
         "attributes": attributes,
         "attribute_changes": details,
@@ -433,16 +181,14 @@ def classify_resource(drift: dict | None, change: dict | None) -> dict:
 
 def classify_plan(plan: dict) -> dict:
     """Classify a plan that has already passed the integrity gate."""
-    drift = {e["address"]: e for e in plan.get("resource_drift", []) if e.get("mode") == "managed"}
-    changes = {e["address"]: e for e in plan.get("resource_changes", []) if e.get("mode") == "managed"}
+    return classify_parsed(extract_plan(plan))
 
-    resources = [
-        classify_resource(drift.get(address), changes.get(address))
-        for address in sorted(set(drift) | set(changes))
-    ]
+
+def classify_parsed(parsed: ParsedPlan) -> dict:
+    resources = [_classify_evidence(ev) for ev in parsed.resources]
     output_changes = [
-        {"name": name, "action": normalize_action(v["actions"]), "actions": v["actions"]}
-        for name, v in sorted(plan.get("output_changes", {}).items())
+        {"name": name, "action": normalize_action(actions), "actions": actions}
+        for name, actions in parsed.output_changes.items()
     ]
 
     counts: dict[str, int] = {}
@@ -463,14 +209,15 @@ def classify_plan(plan: dict) -> dict:
             "addresses": [r["address"] for r in by_type[rtype]],
             "classification_counts": dict(sorted(type_counts.items())),
         })
+    drift = sum(1 for ev in parsed.resources if ev.drift_actions is not None)
     resource_pending = any(r["classification"] != IN_SYNC for r in resources)
     output_pending = any(o["action"] != "no-op" for o in output_changes)
 
     return {
-        "has_drift": bool(drift),
+        "has_drift": drift > 0,
         "summary": {
             "resources_total": len(resources),
-            "drifted_resources": len(drift),
+            "drifted_resources": drift,
             "classification_counts": dict(sorted(counts.items())),
             "ambiguous_resources": sum(1 for r in resources if r["ambiguous"]),
             "has_pending_resource_changes": resource_pending,
@@ -493,16 +240,6 @@ _RUN_FIELDS = (
 )
 
 
-def _load_json(path: str, stage: str) -> Any:
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)  # rejects trailing data / multiple documents
-    except FileNotFoundError:
-        raise EvidenceError(stage, f"{os.path.basename(path)} not found") from None
-    except (OSError, ValueError) as exc:
-        raise EvidenceError(stage, f"{os.path.basename(path)} is not valid JSON: {exc}") from None
-
-
 def classify_bundle(artifact_dir: str) -> dict:
     """Build the classification result for an evidence bundle (pure, deterministic)."""
     result: dict[str, Any] = {
@@ -518,7 +255,7 @@ def classify_bundle(artifact_dir: str) -> dict:
         "output_changes": [],
     }
     try:
-        manifest = _load_json(os.path.join(artifact_dir, MANIFEST_FILE), "manifest")
+        manifest = load_json(os.path.join(artifact_dir, MANIFEST_FILE), "manifest")
         if not isinstance(manifest, dict):
             raise EvidenceError("manifest", "detection_run.json is not a JSON object")
         result["run"] = {k: manifest.get(k) for k in _RUN_FIELDS}
@@ -541,16 +278,9 @@ def classify_bundle(artifact_dir: str) -> dict:
         if not isinstance(tf_version, str) or not tf_version:
             raise EvidenceError("manifest", "terraform_version missing")
 
-        plan = _load_json(os.path.join(artifact_dir, PLAN_FILE), "integrity")
-        violations = integrity_violations(plan, plan_rc, tf_version)
-        if violations:
-            raise EvidenceError("integrity", "; ".join(violations))
-
-        result["plan"] = {
-            k: plan.get(k)
-            for k in ("format_version", "terraform_version", "timestamp", "applyable", "errored", "complete")
-        }
-        result.update(classify_plan(plan))
+        parsed = parse_plan_file(os.path.join(artifact_dir, PLAN_FILE), plan_rc, tf_version)
+        result["plan"] = parsed.header
+        result.update(classify_parsed(parsed))
         result["outcome"] = "succeeded"
         return result
     except EvidenceError as exc:

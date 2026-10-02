@@ -1,0 +1,44 @@
+# -----------------------------------------------
+# Python drift engine (Phase 4)
+# -----------------------------------------------
+# Setup (from the repository root):
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -e ".[dev]"     # or: pip install -r requirements.txt
+# -----------------------------------------------
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drift-engine"
+version = "0.1.0"
+description = "Deterministic Terraform drift detection engine for the AI-Powered Terraform Drift Detector."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Harsh Agarwal" }]
+requires-python = ">=3.11"
+# Runtime dependencies. The CLI (Task 4.6) uses the standard library's argparse,
+# like scripts/detect_drift.py, so no CLI framework is required.
+dependencies = [
+    "pydantic>=2.11,<3",   # 2.11+: validate_by_name / serialize_by_alias (models.py)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "pytest-cov>=5",          # Task 4.7 coverage gate
+    "jsonschema>=4.23,<5",    # validates reports against schemas/drift_report.schema.json
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+drift_engine = ["py.typed"]
+
+[tool.pytest.ini_options]
+# pytest also runs the existing unittest-based suite (tests/test_detect_drift.py).
+testpaths = ["tests"]
+addopts = "-ra"
