@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 5 — Automated Drift Detection Workflow
-- **Current Active Task**: Task 5.1 — Scheduled & Manual GitHub Actions Workflows
+- **Current Active Task**: Task 5.2 — OIDC Authentication & Terraform Setup in Pipeline
 - **Phases Completed**: 4 of 14
 
 ---
@@ -1221,8 +1221,9 @@ Phase 4 modularizes the Python drift engine into a production-grade library with
 Phase 5 automates drift scanning in GitHub Actions on a schedule and manual dispatch trigger.
 
 #### Task 5.1 — Scheduled & Manual GitHub Actions Workflows
-- **Status**: 🟡 WORK IN PROGRESS
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Create `.github/workflows/drift-detection.yml` triggered via `schedule` (cron) and `workflow_dispatch`.
 - **Dependencies**: Tasks 2.6, 4.7
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
@@ -1230,9 +1231,15 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - [x] Workflow contains daily cron trigger (e.g., `0 2 * * *`) and `workflow_dispatch`.
   - [x] Supports inputs for `environment` selection.
 - **Validation**:
-  - [ ] Manual trigger test via GitHub Actions UI / CLI. **PENDING USER ACTION**: requires the workflow to be committed and pushed to `main` (GitHub only offers `workflow_dispatch` for workflows on the default branch); not done per instruction.
+  - [x] Manual trigger test via GitHub Actions UI / CLI. Run **#1**, id `36993949705`, triggered manually from the Actions UI (`gh` not installed) — see Completion Notes.
 - **Implementation Notes**:
   - CI pipeline for continuous drift monitoring.
+- **Completion Notes**:
+  - **Real GitHub validation**: run **#1**, id `36993949705` — <https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/36993949705>. Event `workflow_dispatch`, branch `main`, head `68133e8dcd938f74ecf3929003b33e7f5ff7198d` (commit `feat: add scheduled and manual drift detection workflow`), actor `HarshAgarwal1102`, 2026-10-02T10:10:00Z → 10:10:10Z, **conclusion: success**.
+  - **Verified via the public Actions API** (log download needs auth: HTTP 403): job `Drift Detection (dev)` (id `110796271473`) succeeded — its name is rendered from the input, confirming `environment=dev` was accepted. Steps, all `success`: Set up job, Require main branch, Checkout Code, Resolve Environment, Run Summary, Post Checkout Code, Complete job. The two validation steps exit 1 with `::error::` on failure, so their success means the main-branch guard and the environment/path checks passed; Run Summary succeeding under `set -euo pipefail` means the step summary was written (its rendered text was not retrieved without sign-in).
+  - **No Azure/Terraform access**: the step list contains no login or Terraform step, and the workflow has `permissions: contents: read` only (no `id-token: write`), so no OIDC token could be requested.
+  - **Annotations** (2, neither an error): a warning that `actions/checkout@v4` targets the deprecated Node.js 20 and was forced onto Node.js 24; a notice that `ubuntu-latest` migrates to Ubuntu 26 from 2026-10-19. Not acted on in 5.1; the same `actions/checkout@v4` pin is used by `terraform-auth-test.yml`.
+  - **Scheduled trigger**: the `0 2 * * *` cron is active on `main`; a scheduled run has not yet occurred, so it is validated by configuration (and schema), not by an executed run.
 - **Progress Notes (2026-10-02)**:
   - **File**: `.github/workflows/drift-detection.yml` (new). Triggers: `schedule` cron `0 2 * * *` (daily 02:00 UTC) and `workflow_dispatch` with a required `environment` `choice` input (options: `dev`, the only environment in `terraform/environments/`; default `dev`). Scheduled runs carry no inputs and default to `dev`.
   - **Job `detect-drift`**: (1) fails unless `GITHUB_REF` is `refs/heads/main`; (2) checkout with `persist-credentials: false`; (3) resolves and validates the environment (name regex `^[a-z0-9-]+$`, directory and `<env>.tfvars` must exist) and exposes `environment`, `working_directory`, `var_file` as step and job outputs for Tasks 5.2–5.3; (4) writes a run summary. `timeout-minutes: 30`; per-environment `concurrency` without cancel-in-progress.

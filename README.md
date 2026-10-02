@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 (scheduled/manual drift-detection workflow triggers).
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); next Task 5.2 (OIDC + Terraform setup in that workflow).
 
 | Phase | Status |
 |---|---|
