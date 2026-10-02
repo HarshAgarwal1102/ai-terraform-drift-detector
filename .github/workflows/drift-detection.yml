@@ -8,11 +8,22 @@ name: "Phase 5 - Drift Detection"
 # `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), and failure
 # reporting with the `drift_detected` output (Task 5.5).
 #
+# Jobs: preflight -> plan-and-analyze -> report.
+#   preflight         main-branch guard and environment/path validation.
+#   plan-and-analyze  OIDC, Terraform init/validate, plan evidence, drift-engine
+#                     analyze, and upload of the two-file report artifact. Plan
+#                     generation and analysis share one job on purpose: raw plan
+#                     evidence (tfplan, plan.json, plan.log) must never leave this
+#                     ephemeral runner (spec §8.3), so it is never passed between
+#                     jobs. Only the redacted report and the manifest are uploaded.
+#   report            run summary, also after failures (reporting only).
+#
 # Job status reflects process validity only: detected drift is a valid result and
 # does not fail the job; any detection or classification failure does, and the
 # drift status of that run is UNKNOWN (never "no drift").
 #
-# Job outputs (Task 5.5):
+# Job outputs (Task 5.5), on plan-and-analyze and repeated on report (which also
+# yields "unknown" when plan-and-analyze never ran):
 #   drift_detected  "true" / "false" only for a valid classification; "unknown"
 #                   for any failure or when analysis did not run. Consumers must
 #                   test for the literal "true" or "false", never for emptiness.
@@ -55,15 +66,15 @@ concurrency:
   group: drift-detection-${{ github.event.inputs.environment || 'dev' }}
   cancel-in-progress: false
 
+# Deliberately NO job-level `environment:` key on any job. Setting one changes
+# the OIDC token subject to `...:environment:<name>`, which would not match the
+# only federated credential (`...:ref:refs/heads/main`) and would require a new
+# Azure federated credential. The input selects a Terraform directory only.
 jobs:
-  detect-drift:
-    name: "Drift Detection (${{ github.event.inputs.environment || 'dev' }})"
+  preflight:
+    name: "Preflight (${{ github.event.inputs.environment || 'dev' }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Deliberately NO job-level `environment:` key. Setting one changes the OIDC
-    # token subject to `...:environment:<name>`, which would not match the only
-    # federated credential (`...:ref:refs/heads/main`) and would require a new
-    # Azure federated credential. The input selects a Terraform directory only.
+    timeout-minutes: 5
     env:
       # Scheduled runs carry no inputs, so they default to `dev`.
       DRIFT_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
@@ -72,10 +83,10 @@ jobs:
       environment: ${{ steps.context.outputs.environment }}
       working_directory: ${{ steps.context.outputs.working_directory }}
       var_file: ${{ steps.context.outputs.var_file }}
-      # `||` falls back only when the step output is empty (analysis skipped or
-      # never reached); a valid "false" is a non-empty string and passes through.
-      drift_detected: ${{ steps.analyze.outputs.drift_detected || 'unknown' }}
-      drift_status: ${{ steps.analyze.outputs.drift_status || 'UNKNOWN' }}
+      # Step outcomes for the run summary (success, failure or skipped).
+      guard_outcome: ${{ steps.guard.outcome }}
+      checkout_outcome: ${{ steps.checkout.outcome }}
+      context_outcome: ${{ steps.context.outcome }}
 
     steps:
       # Azure trusts only `ref:refs/heads/main` tokens, and scanning must reflect
@@ -122,8 +133,45 @@ jobs:
             echo "var_file=${var_file}"
           } >> "${GITHUB_OUTPUT}"
 
+  plan-and-analyze:
+    name: "Terraform Plan & Drift Analysis (${{ github.event.inputs.environment || 'dev' }})"
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DRIFT_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+    outputs:
+      # `||` falls back only when the step output is empty (analysis skipped or
+      # never reached); a valid "false" is a non-empty string and passes through.
+      drift_detected: ${{ steps.analyze.outputs.drift_detected || 'unknown' }}
+      drift_status: ${{ steps.analyze.outputs.drift_status || 'UNKNOWN' }}
+      # Reporting values for the run summary (raw plan evidence is never passed).
+      plan_exit_code: ${{ steps.evidence.outputs.plan_exit_code }}
+      classification_counts: ${{ steps.analyze.outputs.classification_counts }}
+      checkout_outcome: ${{ steps.checkout.outcome }}
+      login_outcome: ${{ steps.login.outcome }}
+      auth_outcome: ${{ steps.auth.outcome }}
+      tf_setup_outcome: ${{ steps.tf_setup.outcome }}
+      tf_init_outcome: ${{ steps.tf_init.outcome }}
+      tf_validate_outcome: ${{ steps.tf_validate.outcome }}
+      py_setup_outcome: ${{ steps.py_setup.outcome }}
+      install_outcome: ${{ steps.install.outcome }}
+      evidence_outcome: ${{ steps.evidence.outcome }}
+      analyze_outcome: ${{ steps.analyze.outcome }}
+      upload_outcome: ${{ steps.upload.outcome }}
+
+    steps:
+      # Same commit as preflight (checkout defaults to github.sha); this runner
+      # needs the Terraform configuration, the scripts and the package source.
+      - name: Checkout Code
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       # OIDC only: the token subject is `...:ref:refs/heads/main`, matching the
-      # existing federated credential (enforced by the main-branch guard above).
+      # existing federated credential (enforced by the preflight main-branch guard).
       - name: Azure OIDC Login
         id: login
         uses: azure/login@v3
@@ -157,7 +205,7 @@ jobs:
       - name: Terraform Init (remote backend)
         id: tf_init
         env:
-          WORK_DIR: ${{ steps.context.outputs.working_directory }}
+          WORK_DIR: ${{ needs.preflight.outputs.working_directory }}
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -171,7 +219,7 @@ jobs:
       - name: Terraform Validate
         id: tf_validate
         env:
-          WORK_DIR: ${{ steps.context.outputs.working_directory }}
+          WORK_DIR: ${{ needs.preflight.outputs.working_directory }}
         run: |
           set -euo pipefail
           terraform -chdir="${WORK_DIR}" validate -no-color
@@ -200,8 +248,8 @@ jobs:
       - name: Generate Plan Evidence
         id: evidence
         env:
-          WORK_DIR: ${{ steps.context.outputs.working_directory }}
-          VAR_FILE: ${{ steps.context.outputs.var_file }}
+          WORK_DIR: ${{ needs.preflight.outputs.working_directory }}
+          VAR_FILE: ${{ needs.preflight.outputs.var_file }}
           ARTIFACT_DIR: ${{ runner.temp }}/drift
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -347,36 +395,59 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-      # Runs after failures too (not after cancellation) so every completed run
-      # reports its result. It only reports: the job's red/green status comes from
-      # the steps above, and this step never turns a failed run green.
+  # Runs after failures too (not after cancellation) so every completed run
+  # reports its result. It only reports: the run's red/green status comes from the
+  # jobs above, and this job never turns a failed run green. It reads job outputs
+  # only (no checkout, no Azure access, no plan evidence).
+  report:
+    name: "Report & Summary (${{ github.event.inputs.environment || 'dev' }})"
+    needs: [preflight, plan-and-analyze]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DRIFT_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+    # Same values as the plan-and-analyze outputs, but also "unknown" when that job
+    # never ran (e.g. preflight failed), where its own outputs would be empty.
+    outputs:
+      drift_detected: ${{ needs.plan-and-analyze.outputs.drift_detected || 'unknown' }}
+      drift_status: ${{ needs.plan-and-analyze.outputs.drift_status || 'UNKNOWN' }}
+
+    steps:
       - name: Run Summary
-        if: ${{ !cancelled() }}
         env:
-          WORK_DIR: ${{ steps.context.outputs.working_directory }}
-          VAR_FILE: ${{ steps.context.outputs.var_file }}
-          PLAN_EXIT_CODE: ${{ steps.evidence.outputs.plan_exit_code || 'n/a' }}
-          DRIFT_STATUS: ${{ steps.analyze.outputs.drift_status || 'UNKNOWN' }}
-          DRIFT_DETECTED: ${{ steps.analyze.outputs.drift_detected || 'unknown' }}
-          CLASSIFICATION_COUNTS: ${{ steps.analyze.outputs.classification_counts || 'n/a' }}
-          # Step outcomes in execution order: success, failure or skipped.
+          WORK_DIR: ${{ needs.preflight.outputs.working_directory }}
+          VAR_FILE: ${{ needs.preflight.outputs.var_file }}
+          PLAN_EXIT_CODE: ${{ needs.plan-and-analyze.outputs.plan_exit_code || 'n/a' }}
+          DRIFT_STATUS: ${{ needs.plan-and-analyze.outputs.drift_status || 'UNKNOWN' }}
+          DRIFT_DETECTED: ${{ needs.plan-and-analyze.outputs.drift_detected || 'unknown' }}
+          CLASSIFICATION_COUNTS: ${{ needs.plan-and-analyze.outputs.classification_counts || 'n/a' }}
+          # Step outcomes in execution order: success, failure or skipped (a job
+          # that never ran exposes no outputs, so its steps read as skipped).
           STAGE_OUTCOMES: >-
-            Require main branch=${{ steps.guard.outcome }};
-            Checkout Code=${{ steps.checkout.outcome }};
-            Resolve Environment=${{ steps.context.outcome }};
-            Azure OIDC Login=${{ steps.login.outcome }};
-            Verify Azure OIDC Authentication=${{ steps.auth.outcome }};
-            Setup Terraform=${{ steps.tf_setup.outcome }};
-            Terraform Init (remote backend)=${{ steps.tf_init.outcome }};
-            Terraform Validate=${{ steps.tf_validate.outcome }};
-            Setup Python=${{ steps.py_setup.outcome }};
-            Install drift-engine=${{ steps.install.outcome }};
-            Generate Plan Evidence=${{ steps.evidence.outcome }};
-            Analyze Drift=${{ steps.analyze.outcome }};
-            Upload Drift Report=${{ steps.upload.outcome }}
-          INIT_OUTCOME: ${{ steps.tf_init.outcome }}
-          VALIDATE_OUTCOME: ${{ steps.tf_validate.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+            Require main branch=${{ needs.preflight.outputs.guard_outcome || 'skipped' }};
+            Checkout Code=${{ needs.preflight.outputs.checkout_outcome || 'skipped' }};
+            Resolve Environment=${{ needs.preflight.outputs.context_outcome || 'skipped' }};
+            Checkout Code (plan)=${{ needs.plan-and-analyze.outputs.checkout_outcome || 'skipped' }};
+            Azure OIDC Login=${{ needs.plan-and-analyze.outputs.login_outcome || 'skipped' }};
+            Verify Azure OIDC Authentication=${{ needs.plan-and-analyze.outputs.auth_outcome || 'skipped' }};
+            Setup Terraform=${{ needs.plan-and-analyze.outputs.tf_setup_outcome || 'skipped' }};
+            Terraform Init (remote backend)=${{ needs.plan-and-analyze.outputs.tf_init_outcome || 'skipped' }};
+            Terraform Validate=${{ needs.plan-and-analyze.outputs.tf_validate_outcome || 'skipped' }};
+            Setup Python=${{ needs.plan-and-analyze.outputs.py_setup_outcome || 'skipped' }};
+            Install drift-engine=${{ needs.plan-and-analyze.outputs.install_outcome || 'skipped' }};
+            Generate Plan Evidence=${{ needs.plan-and-analyze.outputs.evidence_outcome || 'skipped' }};
+            Analyze Drift=${{ needs.plan-and-analyze.outputs.analyze_outcome || 'skipped' }};
+            Upload Drift Report=${{ needs.plan-and-analyze.outputs.upload_outcome || 'skipped' }}
+          # Job results, so a job-level failure (e.g. a timeout) with no failed
+          # step is still reported.
+          JOB_RESULTS: >-
+            Preflight job=${{ needs.preflight.result }};
+            Terraform Plan & Drift Analysis job=${{ needs.plan-and-analyze.result }}
+          INIT_OUTCOME: ${{ needs.plan-and-analyze.outputs.tf_init_outcome }}
+          VALIDATE_OUTCOME: ${{ needs.plan-and-analyze.outputs.tf_validate_outcome }}
+          UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.upload_outcome }}
         run: |
           set -euo pipefail
           failed_stage="none"
@@ -385,6 +456,15 @@ jobs:
           for pair in "${pairs[@]}"; do
             if [ "${pair##*=}" = "failure" ]; then failed_stage="${pair%=*}"; break; fi
           done
+          if [ "${failed_stage}" = "none" ]; then
+            jobs="${JOB_RESULTS//; /;}"
+            IFS=';' read -r -a pairs <<< "${jobs}"
+            for pair in "${pairs[@]}"; do
+              case "${pair##*=}" in
+                failure|cancelled) failed_stage="${pair%=*} (${pair##*=})"; break ;;
+              esac
+            done
+          fi
 
           # A result is valid only when no stage failed and drift-engine produced a
           # boolean; anything else is reported as FAILED with drift status UNKNOWN.
