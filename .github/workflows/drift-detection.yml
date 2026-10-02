@@ -3,9 +3,14 @@ name: "Phase 5 - Drift Detection"
 # Continuous drift monitoring: a daily scheduled scan plus on-demand manual runs.
 #
 # Implemented so far: triggers and environment selection (Task 5.1), Azure OIDC
-# login and Terraform init/validate against the remote backend (Task 5.2).
-# Plan generation and `drift-engine analyze` (Task 5.3), artifacts (Task 5.4)
-# and failure reporting (Task 5.5) are added to this workflow by those tasks.
+# login and Terraform init/validate against the remote backend (Task 5.2), plan
+# evidence via scripts/generate_plan_json.sh and classification via
+# `drift-engine analyze` (Task 5.3). Artifacts (Task 5.4) and failure reporting
+# (Task 5.5) are added to this workflow by those tasks.
+#
+# Job status reflects process validity only: detected drift is a valid result and
+# does not fail the job; any detection or classification failure does, and the
+# drift status of that run is UNKNOWN (never "no drift").
 #
 # Detection is read-only: this workflow must never run `terraform apply`.
 
@@ -154,10 +159,159 @@ jobs:
           set -euo pipefail
           terraform -chdir="${WORK_DIR}" validate -no-color
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Runtime dependencies only (pydantic, PyYAML); no dev/test extras.
+      - name: Install drift-engine
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input .
+          drift-engine --version
+
+      # Phase 3 contract (docs/drift-detection-spec.md §4-§5): the script runs
+      # init, `plan -detailed-exitcode -out` (refresh and locking on), then
+      # `show -json` on that same plan file, and applies the integrity gate. It
+      # never applies. Script exit: 0 = valid evidence (plan exit 0 or 2, read
+      # from the manifest), 1 = detection failed, 64 = unusable ARTIFACT_DIR.
+      # The exit code is captured explicitly so plan exit 2 is never a failure.
+      # Evidence lives in RUNNER_TEMP, outside the checkout.
+      - name: Generate Plan Evidence
+        id: evidence
+        env:
+          WORK_DIR: ${{ steps.context.outputs.working_directory }}
+          VAR_FILE: ${{ steps.context.outputs.var_file }}
+          ARTIFACT_DIR: ${{ runner.temp }}/drift
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
+        run: |
+          set -euo pipefail
+          # The script's var-file is fixed to dev.tfvars (Phase 3 MVP scope).
+          if [ "${VAR_FILE}" != "dev.tfvars" ]; then
+            echo "::error::generate_plan_json.sh supports dev.tfvars only (got ${VAR_FILE}). Drift status: UNKNOWN."
+            exit 1
+          fi
+
+          script_rc=0
+          TF_DIR="${GITHUB_WORKSPACE}/${WORK_DIR}" ./scripts/generate_plan_json.sh || script_rc=$?
+
+          manifest="${ARTIFACT_DIR}/detection_run.json"
+          manifest_present=false
+          outcome=missing
+          plan_rc=none
+          failure="no run manifest was written"
+          # Exit 64 = unusable ARTIFACT_DIR: no manifest was written by this run,
+          # so any file already there is stale and must not be read as evidence.
+          if [ "${script_rc}" -eq 64 ]; then
+            failure="unusable ARTIFACT_DIR (script exit 64); no evidence was produced"
+          elif [ -f "${manifest}" ]; then
+            manifest_present=true
+            outcome="$(jq -r '.outcome // "invalid"' "${manifest}" 2>/dev/null || echo invalid)"
+            plan_rc="$(jq -r '.plan_exit_code // "none"' "${manifest}" 2>/dev/null || echo none)"
+            failure="$(jq -r '"[\(.failure_stage // "unknown")] \(.failure_reason // "unknown")"' "${manifest}" 2>/dev/null || echo "manifest unreadable")"
+          fi
+
+          # Task 5.2 initialized with -lockfile=readonly; the script's own init must
+          # not have altered the committed provider lock either.
+          lock_ok=true
+          if ! git diff --quiet -- "${WORK_DIR}/.terraform.lock.hcl"; then
+            lock_ok=false
+            failure="provider lock file was modified during detection"
+          fi
+
+          {
+            echo "script_exit_code=${script_rc}"
+            echo "manifest_present=${manifest_present}"
+            echo "outcome=${outcome}"
+            echo "plan_exit_code=${plan_rc}"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [ "${script_rc}" -eq 0 ] && [ "${outcome}" = "succeeded" ] && [ "${lock_ok}" = true ]; then
+            case "${plan_rc}" in
+              0) echo "Valid plan evidence: terraform plan exit 0 (no pending changes)." ;;
+              2) echo "Valid plan evidence: terraform plan exit 2 (pending changes; classification decides drift)." ;;
+              *) echo "::error::Script succeeded but manifest plan_exit_code is '${plan_rc}'. Drift status: UNKNOWN."
+                 exit 1 ;;
+            esac
+            exit 0
+          fi
+
+          if [ -f "${ARTIFACT_DIR}/plan.log" ]; then
+            echo "::group::plan.log (last 50 lines)"
+            tail -n 50 "${ARTIFACT_DIR}/plan.log"
+            echo "::endgroup::"
+          fi
+          echo "::error::Drift detection FAILED (script exit ${script_rc}, outcome ${outcome}, plan exit ${plan_rc}): ${failure}. Drift status: UNKNOWN."
+          exit 1
+
+      # Classification is entirely drift-engine's (Phase 4); this step only maps
+      # its exit code. It also runs after a failed detection whenever a manifest
+      # exists, so the failed run gets an explicit outcome=failed report
+      # (has_drift null), as spec §8.2 requires. The full integrity gate is
+      # re-applied by the engine because --manifest is always passed.
+      #   engine exit 0 = valid classification (drift or not); anything else
+      #   (1 evidence rejected, 70 internal, 73 write error, ...) = UNKNOWN.
+      - name: Analyze Drift
+        id: analyze
+        if: ${{ !cancelled() && steps.evidence.outputs.manifest_present == 'true' }}
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/drift
+          EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
+        run: |
+          set -euo pipefail
+          report="${ARTIFACT_DIR}/drift_report.json"
+          engine_rc=0
+          drift-engine analyze \
+            --plan "${ARTIFACT_DIR}/plan.json" \
+            --manifest "${ARTIFACT_DIR}/detection_run.json" \
+            --output "${report}" || engine_rc=$?
+          echo "engine_exit_code=${engine_rc}" >> "${GITHUB_OUTPUT}"
+
+          has_drift=unknown
+          report_outcome=missing
+          if [ -f "${report}" ]; then
+            report_outcome="$(jq -r '.outcome // "invalid"' "${report}" 2>/dev/null || echo invalid)"
+            has_drift="$(jq -r 'if (.has_drift | type) == "boolean" then (.has_drift | tostring) else "unknown" end' "${report}" 2>/dev/null || echo unknown)"
+          fi
+
+          if [ "${engine_rc}" -eq 0 ] && [ "${EVIDENCE_OUTCOME}" = "success" ] \
+             && [ "${report_outcome}" = "succeeded" ] && { [ "${has_drift}" = true ] || [ "${has_drift}" = false ]; }; then
+            if [ "${has_drift}" = true ]; then drift_status=detected; else drift_status=none; fi
+            {
+              echo "has_drift=${has_drift}"
+              echo "drift_status=${drift_status}"
+              echo "classification_counts=$(jq -c '.summary.classification_counts' "${report}")"
+            } >> "${GITHUB_OUTPUT}"
+            echo "==> Drift summary"
+            echo "has_drift: ${has_drift}"
+            jq -r '"resources: \(.summary.resources_total), drifted: \(.summary.drifted_resources), ambiguous: \(.summary.ambiguous_resources), pending output changes: \(.summary.has_pending_output_changes)"' "${report}"
+            jq -r '.resources[] | "  \(.classification)\t\(.address)"' "${report}"
+            if [ "${has_drift}" = true ]; then
+              echo "::warning::Drift detected in ${DRIFT_ENVIRONMENT} (a valid result, not a pipeline failure)."
+            fi
+            exit 0
+          fi
+
+          echo "has_drift=unknown" >> "${GITHUB_OUTPUT}"
+          echo "drift_status=UNKNOWN" >> "${GITHUB_OUTPUT}"
+          if [ -f "${report}" ]; then
+            jq -r '"report outcome: \(.outcome); failure: \(.failure // {} | "\(.source // "-")/\(.stage // "-"): \(.reason // "-")")"' "${report}" 2>/dev/null || true
+          fi
+          echo "::error::Drift classification not valid (engine exit ${engine_rc}, evidence ${EVIDENCE_OUTCOME}, report ${report_outcome}). Drift status: UNKNOWN."
+          exit 1
+
       - name: Run Summary
         env:
           WORK_DIR: ${{ steps.context.outputs.working_directory }}
           VAR_FILE: ${{ steps.context.outputs.var_file }}
+          PLAN_EXIT_CODE: ${{ steps.evidence.outputs.plan_exit_code }}
+          DRIFT_STATUS: ${{ steps.analyze.outputs.drift_status }}
+          CLASSIFICATION_COUNTS: ${{ steps.analyze.outputs.classification_counts }}
         run: |
           set -euo pipefail
           {
@@ -172,6 +326,9 @@ jobs:
             echo "| Terraform | \`${TERRAFORM_VERSION}\` |"
             echo "| Azure auth | OIDC (no client secret) |"
             echo "| Backend | AzureRM remote state, initialized and validated |"
+            echo "| Plan exit code | \`${PLAN_EXIT_CODE}\` (0 = no pending changes, 2 = pending changes) |"
+            echo "| Drift status | **${DRIFT_STATUS}** |"
+            echo "| Classification | \`${CLASSIFICATION_COUNTS}\` |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
-          echo "Drift detection context resolved for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME})."
+          echo "Drift detection completed for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME}): drift status ${DRIFT_STATUS}."

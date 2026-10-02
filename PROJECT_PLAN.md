@@ -1311,20 +1311,48 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
     - A linux/amd64 container check was not run (Docker daemon not running), so the linux fix is confirmed only by the next real GitHub run.
 
 #### Task 5.3 — Automated Drift Engine Execution
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS
+- **Started**: 2026-10-02
 - **Objective**: Execute plan generation and Python `drift-engine` inside GitHub Actions step.
 - **Dependencies**: Task 5.2
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
 - **Acceptance Criteria**:
-  - [ ] Plan output generated and converted to JSON.
-  - [ ] Python engine produces `drift_report.json`.
-  - [ ] Step captures exit codes accurately.
+  - [ ] Plan output generated and converted to JSON. *(Implemented; pending real run.)*
+  - [ ] Python engine produces `drift_report.json`. *(Implemented; pending real run.)*
+  - [ ] Step captures exit codes accurately. *(Implemented and tested locally; pending real run.)*
 - **Validation**:
-  - [ ] Workflow step succeeds and outputs drift summary in job logs.
+  - [ ] Workflow step succeeds and outputs drift summary in job logs. **PENDING**: needs the workflow pushed to `main` and a `workflow_dispatch` run with `environment=dev`.
 - **Implementation Notes**:
   - Pipeline distinguishes between process errors and valid drift findings.
-- **Completion Notes**:
-  - None.
+- **Progress Notes (2026-10-02)**:
+  - **New steps** in `.github/workflows/drift-detection.yml`, after Terraform Validate (only that file changed for 5.3; README lines updated):
+    1. `Setup Python` (`actions/setup-python@v5`, 3.12).
+    2. `Install drift-engine`: `pip install .`, runtime deps only.
+    3. `Generate Plan Evidence` (id `evidence`): runs the existing Phase 3 `scripts/generate_plan_json.sh`, unchanged, with `TF_DIR` set to the resolved directory and `ARTIFACT_DIR=$RUNNER_TEMP/drift` (outside the checkout).
+       - The script does init, `plan -detailed-exitcode -out` (refresh and lock on, `-lock-timeout=120s`), `show -json` of that same plan file, and the integrity gate.
+       - `ARM_USE_OIDC`/`ARM_USE_AZUREAD` are set on this step and the 5.2 init step only.
+    4. `Analyze Drift` (id `analyze`): `drift-engine analyze --plan … --manifest … --output $RUNNER_TEMP/drift/drift_report.json`. All classification is the engine's; the workflow only maps exit codes and prints the summary.
+    5. `Run Summary` adds the plan exit code, drift status and classification counts.
+  - **Exit-code handling**: each exit code is captured with `|| rc=$?` under GitHub's `bash -eo pipefail`.
+    - **Script**: 0 = valid evidence. The plan exit code (0 or 2) is read from the manifest; any other value with exit 0 is rejected. 1 = detection failed. 64 = unusable `ARTIFACT_DIR`; any manifest found then is treated as stale and ignored.
+    - **Terraform plan exit codes** are mapped by the script: 0/2 valid; 1 and other codes (e.g. 137) mean FAILED.
+    - **Engine**: 0 = valid classification, drift or not. Anything else (1 rejected, 70 internal, 73 write, …) = UNKNOWN.
+  - **Process failure vs drift**:
+    - The job fails only for process failures: the evidence step on script ≠ 0, manifest outcome ≠ `succeeded`, or a modified provider lock; the analyze step on engine ≠ 0, an evidence failure, report outcome ≠ `succeeded` or a non-boolean `has_drift`. Each emits `::error:: … Drift status: UNKNOWN`.
+    - Detected drift (`has_drift=true`) ends the step successfully with a `::warning::`.
+    - Analyze also runs after a failed detection whenever a manifest exists, so a failed run gets an explicit `outcome: failed` / `has_drift: null` report (spec §8.2). It never reports "no drift".
+    - Step outputs: `script_exit_code`, `manifest_present`, `outcome`, `plan_exit_code`, `engine_exit_code`, `has_drift`, `drift_status` (`detected` / `none` / `UNKNOWN`), `classification_counts`. No job-level `drift_detected` output (Task 5.5).
+  - **`-lockfile=readonly` preserved**: the 5.2 init step still uses it. The script's own init has no such flag and the script refuses `TF_CLI_ARGS_init`, so the evidence step fails if `git diff` shows the committed `.terraform.lock.hcl` changed. The Phase 3 script is unchanged.
+  - **On failure**, the last 50 lines of `plan.log` are printed in a collapsed group. This is Terraform's own `-no-color` output, which redacts sensitive values; `terraform-auth-test.yml` already prints full plans.
+  - **Local validation**:
+    - `check-jsonschema` and `actionlint` 1.7.12 with shellcheck 0.11.0 pass on both workflows.
+    - Structure and security assertions pass: permissions unchanged; no job `environment:`; ARM env only on the init and evidence steps; the workflow's own `terraform` calls are `version`/`init`/`validate` only; no `apply`/`-auto-approve`/`-refresh=false`/`-target`/`-lock=false`/`TF_CLI_ARGS`/secrets/`continue-on-error`; no inline classification (`resource_drift`/`resource_changes`/`change.actions` absent).
+    - **Step harness** (15 cases): the real evidence/analyze/summary scripts, extracted from the YAML and run with `bash --noprofile --norc -eo pipefail` like GitHub, against the real `generate_plan_json.sh` (in a scratch clone), the installed `drift-engine` and a fake `terraform` fed Phase 3 fixtures.
+      - **Valid**: rc0 in_sync → none; rc2 external_drift → detected (warning, step green); rc2 config_change → none; rc0 converged_drift → detected. The summary renders for all four.
+      - **Failed → UNKNOWN, job red**: rc1 with an errored plan; rc137; rc2 with `errored:true` JSON; rc2 with malformed JSON; rc0 with pending changes; rc2 with no changes; show exit 1; provider lock modified (engine 0 but still UNKNOWN); plan.json corrupted between steps (engine re-gate → 1); stale non-empty `ARTIFACT_DIR` (64, stale manifest ignored, analyze skipped); non-dev var file.
+      - All logged Terraform calls are `version`/`init`/`plan -var-file=dev.tfvars -input=false -no-color -lock-timeout=120s -detailed-exitcode -out=…`/`show -no-color -json`. No forbidden flags.
+    - `pytest --cov=src/drift_engine tests/`: 319 passed, 99.87% coverage (Python 3.13). `./scripts/validate.sh` passed.
+  - **Not exercised locally**: real Azure plan/OIDC inside the script, Python 3.12 on the runner, and `pip install .` on Linux.
 
 #### Task 5.4 — Structured Artifact Storage & Pipeline Handling
 - **Status**: ⬜ NOT STARTED
