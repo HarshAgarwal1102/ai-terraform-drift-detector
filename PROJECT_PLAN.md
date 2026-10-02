@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 5 — Automated Drift Detection Workflow
-- **Current Active Task**: Task 5.2 — OIDC Authentication & Terraform Setup in Pipeline
+- **Current Active Task**: Task 5.3 — Automated Drift Engine Execution
 - **Phases Completed**: 4 of 14
 
 ---
@@ -1249,19 +1249,30 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - **README**: workflow tree and status line updated.
 
 #### Task 5.2 — OIDC Authentication & Terraform Setup in Pipeline
-- **Status**: 🟡 WORK IN PROGRESS
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Integrate Azure OIDC login and Terraform CLI setup steps into drift detection workflow.
 - **Dependencies**: Task 5.1
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
 - **Acceptance Criteria**:
-  - [ ] `azure/login@v2` authenticates via OIDC. *(Implemented with `azure/login@v3` — v2 is maintenance-only, see Task 2.6; pending real run.)*
-  - [ ] `hashicorp/setup-terraform` installs Terraform. *(Implemented; pending real run.)*
-  - [ ] `terraform init` connects to AzureRM remote backend. *(Implemented; pending real run.)*
+  - [x] `azure/login@v2` authenticates via OIDC. *(Implemented with `azure/login@v3`; v2 is maintenance-only, see Task 2.6.)*
+  - [x] `hashicorp/setup-terraform` installs Terraform.
+  - [x] `terraform init` connects to AzureRM remote backend.
 - **Validation**:
-  - [ ] Pipeline logs confirm successful backend initialization. **PENDING**: needs the workflow pushed to `main` and a `workflow_dispatch` run with `environment=dev`.
+  - [x] Pipeline confirms successful backend initialization: run #3 `36995803123`, see Completion Notes.
 - **Implementation Notes**:
   - Non-interactive Terraform execution.
+- **Completion Notes**:
+  - **Real GitHub validation**: run **#3**, id `36995803123`, <https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/36995803123>.
+    - Event `workflow_dispatch`, branch `main`, head `03f87d708f53d9e2290601af0ee559c24c0326b0` (`fix: add linux terraform provider lock checksum`), `ubuntu-latest`, 2026-10-02T10:30:03Z → 10:30:27Z. **Conclusion: success.**
+    - Job `Drift Detection (dev)` (id `110802131397`). All 13 steps `success`: Set up job, Require main branch, Checkout Code, Resolve Environment, **Azure OIDC Login**, **Verify Azure OIDC Authentication**, **Setup Terraform**, **Terraform Init (remote backend)**, **Terraform Validate**, Run Summary, Post Azure OIDC Login, Post Checkout Code, Complete job.
+    - Terraform Validate passing on the Linux runner confirms the `linux_amd64` `h1:` lock fix; run #2 failed there.
+  - **Evidence basis**: step conclusions come from the public Actions API. Raw log text was not downloaded (it needs auth).
+    - Backend initialization is established by the init step's success: under `set -euo pipefail`, against the AzureRM backend (no `-backend=false`), with `ARM_USE_OIDC`/`ARM_USE_AZUREAD`.
+    - Validate and Run Summary ran after it, and Run Summary reports "AzureRM remote state, initialized and validated".
+  - **Security**: OIDC only (no client secret, storage key or SAS); `permissions` `id-token: write` + `contents: read`; no job `environment:` key, so the token subject still matches the existing `ref:refs/heads/main` FIC. No GitHub/Azure configuration changed, and no `plan`/`apply`.
+  - **Annotations** (not errors): a Node.js 20 deprecation warning (`actions/checkout@v4`, `hashicorp/setup-terraform@v3` forced onto Node 24), and the `ubuntu-latest` → Ubuntu 26 migration notice (2026-10-19).
 - **Progress Notes (2026-10-02)**:
   - **Workflow** (`.github/workflows/drift-detection.yml`): `permissions` now `id-token: write` + `contents: read` (workflow level, nothing at job level). Workflow `env`: `TERRAFORM_VERSION: "1.14.7"` (same pin as `terraform-auth-test.yml` and `generate_plan_json.sh`; `dev.tfstate` was written by 1.14.7), `TF_IN_AUTOMATION`, `TF_INPUT=0`.
   - **New steps after `Resolve Environment`** (so the main-branch guard and path validation run before any credential is used):
