@@ -1,0 +1,116 @@
+name: "Phase 5 - Drift Detection"
+
+# Continuous drift monitoring: a daily scheduled scan plus on-demand manual runs.
+#
+# Task 5.1 scope: triggers, environment selection and run context only.
+# Azure OIDC login and Terraform setup (Task 5.2), plan generation and
+# `drift-engine analyze` (Task 5.3), artifacts (Task 5.4) and failure reporting
+# (Task 5.5) are added to this workflow by those tasks.
+#
+# Detection is read-only: this workflow must never run `terraform apply`.
+
+on:
+  schedule:
+    # Daily at 02:00 UTC. GitHub runs scheduled workflows from the default
+    # branch only, which matches the existing `ref:refs/heads/main` OIDC subject.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Terraform environment to scan (terraform/environments/<name>)"
+        type: choice
+        required: true
+        default: dev
+        options:
+          - dev
+
+# Least privilege for Task 5.1: no Azure access yet. Task 5.2 adds
+# `id-token: write` for OIDC; no client secret or storage key is ever used.
+permissions:
+  contents: read
+
+# One scan per environment at a time; a queued run waits rather than cancelling
+# a scan that is already reading state.
+concurrency:
+  group: drift-detection-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  detect-drift:
+    name: "Drift Detection (${{ github.event.inputs.environment || 'dev' }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Deliberately NO job-level `environment:` key. Setting one changes the OIDC
+    # token subject to `...:environment:<name>`, which would not match the only
+    # federated credential (`...:ref:refs/heads/main`) and would require a new
+    # Azure federated credential. The input selects a Terraform directory only.
+    env:
+      # Scheduled runs carry no inputs, so they default to `dev`.
+      DRIFT_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+
+    outputs:
+      environment: ${{ steps.context.outputs.environment }}
+      working_directory: ${{ steps.context.outputs.working_directory }}
+      var_file: ${{ steps.context.outputs.var_file }}
+
+    steps:
+      # Azure trusts only `ref:refs/heads/main` tokens, and scanning must reflect
+      # the reviewed configuration on main, not an arbitrary branch.
+      - name: Require main branch
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Drift detection runs only from refs/heads/main (got ${GITHUB_REF})."
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve Environment
+        id: context
+        run: |
+          set -euo pipefail
+          env_name="${DRIFT_ENVIRONMENT}"
+          # Defense in depth: the choice input already restricts values, but a
+          # name reaching a path must never contain separators or traversal.
+          if ! printf '%s' "${env_name}" | grep -Eq '^[a-z0-9-]+$'; then
+            echo "::error::Invalid environment name: '${env_name}'."
+            exit 1
+          fi
+          work_dir="terraform/environments/${env_name}"
+          var_file="${env_name}.tfvars"
+          if [ ! -d "${work_dir}" ]; then
+            echo "::error::Environment directory not found: ${work_dir}"
+            exit 1
+          fi
+          if [ ! -f "${work_dir}/${var_file}" ]; then
+            echo "::error::Variable file not found: ${work_dir}/${var_file}"
+            exit 1
+          fi
+          {
+            echo "environment=${env_name}"
+            echo "working_directory=${work_dir}"
+            echo "var_file=${var_file}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Run Summary
+        env:
+          WORK_DIR: ${{ steps.context.outputs.working_directory }}
+          VAR_FILE: ${{ steps.context.outputs.var_file }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Drift detection run"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Trigger | \`${GITHUB_EVENT_NAME}\` |"
+            echo "| Environment | \`${DRIFT_ENVIRONMENT}\` |"
+            echo "| Working directory | \`${WORK_DIR}\` |"
+            echo "| Variable file | \`${VAR_FILE}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Drift detection context resolved for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME})."

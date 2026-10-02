@@ -1216,24 +1216,30 @@ Phase 4 modularizes the Python drift engine into a production-grade library with
 ---
 
 ### PHASE 5 — Automated Drift Detection Workflow
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS
 
 Phase 5 automates drift scanning in GitHub Actions on a schedule and manual dispatch trigger.
 
 #### Task 5.1 — Scheduled & Manual GitHub Actions Workflows
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS
+- **Started**: 2026-10-02
 - **Objective**: Create `.github/workflows/drift-detection.yml` triggered via `schedule` (cron) and `workflow_dispatch`.
 - **Dependencies**: Tasks 2.6, 4.7
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
 - **Acceptance Criteria**:
-  - [ ] Workflow contains daily cron trigger (e.g., `0 2 * * *`) and `workflow_dispatch`.
-  - [ ] Supports inputs for `environment` selection.
+  - [x] Workflow contains daily cron trigger (e.g., `0 2 * * *`) and `workflow_dispatch`.
+  - [x] Supports inputs for `environment` selection.
 - **Validation**:
-  - [ ] Manual trigger test via GitHub Actions UI / CLI.
+  - [ ] Manual trigger test via GitHub Actions UI / CLI. **PENDING USER ACTION**: requires the workflow to be committed and pushed to `main` (GitHub only offers `workflow_dispatch` for workflows on the default branch); not done per instruction.
 - **Implementation Notes**:
   - CI pipeline for continuous drift monitoring.
-- **Completion Notes**:
-  - None.
+- **Progress Notes (2026-10-02)**:
+  - **File**: `.github/workflows/drift-detection.yml` (new). Triggers: `schedule` cron `0 2 * * *` (daily 02:00 UTC) and `workflow_dispatch` with a required `environment` `choice` input (options: `dev`, the only environment in `terraform/environments/`; default `dev`). Scheduled runs carry no inputs and default to `dev`.
+  - **Job `detect-drift`**: (1) fails unless `GITHUB_REF` is `refs/heads/main`; (2) checkout with `persist-credentials: false`; (3) resolves and validates the environment (name regex `^[a-z0-9-]+$`, directory and `<env>.tfvars` must exist) and exposes `environment`, `working_directory`, `var_file` as step and job outputs for Tasks 5.2–5.3; (4) writes a run summary. `timeout-minutes: 30`; per-environment `concurrency` without cancel-in-progress.
+  - **Security model preserved**: `permissions: contents: read` only — no Azure access in 5.1; Task 5.2 adds `id-token: write` and `azure/login@v3` with the existing OIDC secrets. **No job-level `environment:` key**: a GitHub Environment changes the OIDC `sub` to `...:environment:<name>`, which does not match the only federated credential (`...:ref:refs/heads/main`, Task 2.6) and would need a new Azure FIC. Schedules run on the default branch, and the main-only guard keeps manual runs on the trusted subject and the reviewed configuration. No `terraform apply`, client secret, storage key or SAS token.
+  - **Not in 5.1 (by plan)**: Azure login/Terraform setup (5.2), plan + `drift-engine analyze` (5.3), artifacts (5.4), drift/failure semantics (5.5). The workflow is currently a trigger and context skeleton.
+  - **Local validation**: `check-jsonschema --builtin-schema vendor.github-workflows` passes for both workflows; parsed YAML confirms the cron, dispatch input, permissions and absence of a job `environment:` key; no `terraform apply`/secret/key strings outside comments. Each `run:` step was extracted and executed under simulated runner variables: main ref passes, `refs/heads/feat` fails; `dev` resolves to `terraform/environments/dev` + `dev.tfvars`; `../../x` and missing `prod` fail with `::error::`; the summary renders. `actionlint` was not available locally.
+  - **README**: workflow tree and status line updated.
 
 #### Task 5.2 — OIDC Authentication & Terraform Setup in Pipeline
 - **Status**: ⬜ NOT STARTED

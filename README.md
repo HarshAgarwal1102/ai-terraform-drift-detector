@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Next: Phase 5, Task 5.1 (scheduled drift detection in GitHub Actions).
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 (scheduled/manual drift-detection workflow triggers).
 
 | Phase | Status |
 |---|---|
@@ -158,7 +158,8 @@ planned for a later infrastructure-expansion phase.
 
 ```
 .github/workflows/
-└── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
+├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
+└── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan skeleton (Phase 5, in progress)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
