@@ -1249,20 +1249,38 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - **README**: workflow tree and status line updated.
 
 #### Task 5.2 — OIDC Authentication & Terraform Setup in Pipeline
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS
+- **Started**: 2026-10-02
 - **Objective**: Integrate Azure OIDC login and Terraform CLI setup steps into drift detection workflow.
 - **Dependencies**: Task 5.1
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
 - **Acceptance Criteria**:
-  - [ ] `azure/login@v2` authenticates via OIDC.
-  - [ ] `hashicorp/setup-terraform` installs Terraform.
-  - [ ] `terraform init` connects to AzureRM remote backend.
+  - [ ] `azure/login@v2` authenticates via OIDC. *(Implemented with `azure/login@v3` — v2 is maintenance-only, see Task 2.6; pending real run.)*
+  - [ ] `hashicorp/setup-terraform` installs Terraform. *(Implemented; pending real run.)*
+  - [ ] `terraform init` connects to AzureRM remote backend. *(Implemented; pending real run.)*
 - **Validation**:
-  - [ ] Pipeline logs confirm successful backend initialization.
+  - [ ] Pipeline logs confirm successful backend initialization. **PENDING**: needs the workflow pushed to `main` and a `workflow_dispatch` run with `environment=dev`.
 - **Implementation Notes**:
   - Non-interactive Terraform execution.
-- **Completion Notes**:
-  - None.
+- **Progress Notes (2026-10-02)**:
+  - **Workflow** (`.github/workflows/drift-detection.yml`): `permissions` now `id-token: write` + `contents: read` (workflow level, nothing at job level). Workflow `env`: `TERRAFORM_VERSION: "1.14.7"` (same pin as `terraform-auth-test.yml` and `generate_plan_json.sh`; `dev.tfstate` was written by 1.14.7), `TF_IN_AUTOMATION`, `TF_INPUT=0`.
+  - **New steps after `Resolve Environment`** (so the main-branch guard and path validation run before any credential is used):
+    1. `Azure OIDC Login`: `azure/login@v3` with only `client-id`/`tenant-id`/`subscription-id` from the existing secrets.
+    2. `Verify Azure OIDC Authentication`: `az account show`, which fails the job at the auth boundary.
+    3. `Setup Terraform`: `hashicorp/setup-terraform@v3`, `terraform_wrapper: false`, so Task 5.3 sees real exit codes and unmodified stdout.
+    4. `Terraform Init (remote backend)`: `init -input=false -lockfile=readonly` in the resolved directory. `ARM_USE_OIDC` + `ARM_USE_AZUREAD` are set on this step only, so state access uses Entra ID and never a storage key. The committed lock file is used and never rewritten.
+    5. `Terraform Validate`.
+  - **Run summary**: adds the Terraform version, the auth mode and the backend status.
+  - **Unchanged**: triggers, the `environment` input (choice `dev`, schedule default `dev`), the main-branch guard and environment resolution. There is still no job-level `environment:` key, so the OIDC subject stays `...:ref:refs/heads/main`, the existing FIC. No GitHub or Azure configuration changes are needed.
+  - **`dev.tfvars`**: the resolve step checks that it exists and exposes it as `var_file`; `init`/`validate` take no var file, and it is first consumed by `plan` in Task 5.3.
+  - **Not in 5.2**: no `plan`, `drift-engine analyze`, artifacts or drift semantics; no `apply`.
+  - **Local validation**:
+    - `check-jsonschema` (GitHub workflow schema) passes for both workflows.
+    - YAML structure and security assertions all pass: exact permissions; no job `environment:`/`permissions`; `azure/login@v3` with exactly the three IDs; wrapper off; version 1.14.7; OIDC + AzureAD env on init; `-lockfile=readonly` and no `-backend=false`; step order guard → login → init → validate; no `apply`/`plan`/`destroy`/`import`/`drift-engine`/secret/key/SAS/password outside comments.
+    - Offline `init -backend=false -lockfile=readonly` + `validate` on a scratch copy of `dev` with Terraform 1.14.7: OK, and the lock file is unchanged (its registry `zh:` hashes cover the linux runner).
+    - `./scripts/validate.sh` passed.
+    - The Run Summary step was executed locally and renders correctly.
+    - Backend init with OIDC cannot be exercised locally (it needs a GitHub OIDC token).
 
 #### Task 5.3 — Automated Drift Engine Execution
 - **Status**: ⬜ NOT STARTED

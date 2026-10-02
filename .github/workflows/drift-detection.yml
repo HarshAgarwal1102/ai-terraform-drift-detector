@@ -2,10 +2,10 @@ name: "Phase 5 - Drift Detection"
 
 # Continuous drift monitoring: a daily scheduled scan plus on-demand manual runs.
 #
-# Task 5.1 scope: triggers, environment selection and run context only.
-# Azure OIDC login and Terraform setup (Task 5.2), plan generation and
-# `drift-engine analyze` (Task 5.3), artifacts (Task 5.4) and failure reporting
-# (Task 5.5) are added to this workflow by those tasks.
+# Implemented so far: triggers and environment selection (Task 5.1), Azure OIDC
+# login and Terraform init/validate against the remote backend (Task 5.2).
+# Plan generation and `drift-engine analyze` (Task 5.3), artifacts (Task 5.4)
+# and failure reporting (Task 5.5) are added to this workflow by those tasks.
 #
 # Detection is read-only: this workflow must never run `terraform apply`.
 
@@ -24,10 +24,19 @@ on:
         options:
           - dev
 
-# Least privilege for Task 5.1: no Azure access yet. Task 5.2 adds
-# `id-token: write` for OIDC; no client secret or storage key is ever used.
+# Least privilege: `id-token: write` lets azure/login request the GitHub OIDC
+# token (exchanged for a short-lived Azure token); `contents: read` for checkout.
+# No client secret, storage account key or SAS token is used anywhere.
 permissions:
+  id-token: write
   contents: read
+
+env:
+  # Same pin as terraform-auth-test.yml and scripts/generate_plan_json.sh; the
+  # remote dev.tfstate was written by this version.
+  TERRAFORM_VERSION: "1.14.7"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
 
 # One scan per environment at a time; a queued run waits rather than cancelling
 # a scan that is already reading state.
@@ -96,6 +105,55 @@ jobs:
             echo "var_file=${var_file}"
           } >> "${GITHUB_OUTPUT}"
 
+      # OIDC only: the token subject is `...:ref:refs/heads/main`, matching the
+      # existing federated credential (enforced by the main-branch guard above).
+      - name: Azure OIDC Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Fail at the auth boundary rather than as a confusing backend error later.
+      - name: Verify Azure OIDC Authentication
+        run: |
+          set -euo pipefail
+          echo "==> Confirming Azure authentication context (OIDC, no client secret)..."
+          az account show --output json \
+            --query '{subscriptionId:id, tenantId:tenantId, principalType:user.type}'
+
+      # Wrapper disabled so later steps see Terraform's real exit codes and
+      # unmodified stdout (needed for `plan -detailed-exitcode` and JSON output).
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      # Remote AzureRM backend (dev.tfstate), authenticated end to end with OIDC:
+      #   ARM_USE_OIDC    - exchange the GitHub ID token for an Azure token
+      #   ARM_USE_AZUREAD - Entra ID for the state blob instead of storage keys
+      # -lockfile=readonly: use the committed provider lock as-is; never rewrite it.
+      - name: Terraform Init (remote backend)
+        env:
+          WORK_DIR: ${{ steps.context.outputs.working_directory }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
+        run: |
+          set -euo pipefail
+          terraform version
+          terraform -chdir="${WORK_DIR}" init -input=false -lockfile=readonly -no-color
+
+      - name: Terraform Validate
+        env:
+          WORK_DIR: ${{ steps.context.outputs.working_directory }}
+        run: |
+          set -euo pipefail
+          terraform -chdir="${WORK_DIR}" validate -no-color
+
       - name: Run Summary
         env:
           WORK_DIR: ${{ steps.context.outputs.working_directory }}
@@ -111,6 +169,9 @@ jobs:
             echo "| Environment | \`${DRIFT_ENVIRONMENT}\` |"
             echo "| Working directory | \`${WORK_DIR}\` |"
             echo "| Variable file | \`${VAR_FILE}\` |"
+            echo "| Terraform | \`${TERRAFORM_VERSION}\` |"
+            echo "| Azure auth | OIDC (no client secret) |"
+            echo "| Backend | AzureRM remote state, initialized and validated |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "Drift detection context resolved for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME})."
