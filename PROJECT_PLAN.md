@@ -1281,6 +1281,23 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
     - `./scripts/validate.sh` passed.
     - The Run Summary step was executed locally and renders correctly.
     - Backend init with OIDC cannot be exercised locally (it needs a GitHub OIDC token).
+  - **Real run #2 — FAILED** (id `36995005632`, `workflow_dispatch`, `main`, head `229e686`): <https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/36995005632>.
+    - **Passed**: Require main branch, Checkout, Resolve Environment, **Azure OIDC Login**, **Verify Azure OIDC Authentication**, Setup Terraform, **Terraform Init (remote backend)**. This is real evidence that OIDC login and remote-backend init work; init log text was not yet reviewed.
+    - **Failed**: `Terraform Validate`, with `the cached package for registry.terraform.io/hashicorp/azurerm 5.7.0 (in .terraform/providers) does not match any of the checksums recorded in the dependency lock file`. Run Summary was skipped.
+    - **Root cause**: the committed `terraform/environments/dev/.terraform.lock.hcl` held a single `h1:` hash (darwin_arm64) plus registry `zh:` hashes.
+      - `init` verifies the downloaded zip against `zh:` (passes on Linux). It would normally record the platform's `h1:`, but `-lockfile=readonly` forbids it.
+      - `validate` then checks the installed package against `h1:` only, finds no linux entry, and fails.
+      - The local check missed it because it ran on darwin_arm64. `terraform-auth-test.yml` never hit it because its init is not readonly.
+      - Reproduced locally: with this platform's `h1:` removed, readonly init exits 0 and validate fails with the identical error.
+  - **Fix (approved 2026-10-02)**: ran `terraform -chdir=terraform/environments/dev providers lock -platform=linux_amd64 -platform=darwin_arm64 -platform=darwin_amd64` (registry download and checksum only; no Azure access).
+    - The lock diff is exactly +2 `h1:` lines: linux_amd64 `h1:qLCQoAAScE4EqdO9QanAzdhTFFhtCX5LlvsPTevqpds=` and darwin_amd64 `h1:Cf19TigA8GkMlsJPRw+gMuypB45vk4/zmhhxQzOGVaU=`. Each was mapped by locking one platform at a time.
+    - Unchanged: provider version `5.7.0`, constraint `~> 5.0`, all `zh:` hashes and the existing darwin_arm64 `h1:`.
+    - The workflow is unchanged: `-lockfile=readonly` kept, same auth model.
+  - **Re-validation (local)**:
+    - Readonly `init -backend=false` + `validate` on a scratch copy pass, and the lock is not rewritten.
+    - `./scripts/validate.sh` passed (lock unchanged afterwards).
+    - Workflow schema and security assertions pass.
+    - A linux/amd64 container check was not run (Docker daemon not running), so the linux fix is confirmed only by the next real GitHub run.
 
 #### Task 5.3 — Automated Drift Engine Execution
 - **Status**: ⬜ NOT STARTED
