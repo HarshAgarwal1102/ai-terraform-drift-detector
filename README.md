@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 (plan evidence + `drift-engine analyze` in the workflow) implemented, awaiting a real GitHub run.
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); next Task 5.4 (report artifacts).
 
 | Phase | Status |
 |---|---|
@@ -518,8 +518,8 @@ registration holds zero credentials.
 
 - Only one Azure resource type (resource group) is managed and drift-tested. Rules for Key
   Vault, NSG and storage are verified on synthetic plans only.
-- Scheduled detection (`drift-detection.yml`, daily 02:00 UTC) is implemented but not yet
-  validated by a real GitHub run (Task 5.3); the report is not yet uploaded as an artifact (Task 5.4).
+- Scheduled detection (`drift-detection.yml`, daily 02:00 UTC) runs plan + `drift-engine analyze`,
+  but the report is not yet uploaded as an artifact (Task 5.4).
 - Terraform reports drift only for resources and attributes it manages. Unmanaged resources
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.

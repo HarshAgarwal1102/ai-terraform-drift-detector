@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 5 — Automated Drift Detection Workflow
-- **Current Active Task**: Task 5.3 — Automated Drift Engine Execution
+- **Current Active Task**: Task 5.4 — Structured Artifact Storage & Pipeline Handling
 - **Phases Completed**: 4 of 14
 
 ---
@@ -1311,19 +1311,33 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
     - A linux/amd64 container check was not run (Docker daemon not running), so the linux fix is confirmed only by the next real GitHub run.
 
 #### Task 5.3 — Automated Drift Engine Execution
-- **Status**: 🟡 WORK IN PROGRESS
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Execute plan generation and Python `drift-engine` inside GitHub Actions step.
 - **Dependencies**: Task 5.2
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
 - **Acceptance Criteria**:
-  - [ ] Plan output generated and converted to JSON. *(Implemented; pending real run.)*
-  - [ ] Python engine produces `drift_report.json`. *(Implemented; pending real run.)*
-  - [ ] Step captures exit codes accurately. *(Implemented and tested locally; pending real run.)*
+  - [x] Plan output generated and converted to JSON.
+  - [x] Python engine produces `drift_report.json`.
+  - [x] Step captures exit codes accurately. Exit 0 was proven in the real run; exit 2 and failure paths were proven by the local step harness (see Progress Notes).
 - **Validation**:
-  - [ ] Workflow step succeeds and outputs drift summary in job logs. **PENDING**: needs the workflow pushed to `main` and a `workflow_dispatch` run with `environment=dev`.
+  - [x] Workflow step succeeds and outputs drift summary in job logs: run #5 `36998087535`, see Completion Notes.
 - **Implementation Notes**:
   - Pipeline distinguishes between process errors and valid drift findings.
+- **Completion Notes**:
+  - **Real GitHub/Azure validation**: run **#5**, id `36998087535`, <https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/36998087535>.
+    - Event `workflow_dispatch`, branch `main`, commit `ed84bac73dacd36a2cbef16b32a97a3827df0a34` (`feat: run plan evidence and drift-engine analyze in drift workflow`).
+    - Job `Drift Detection (dev)` (id `110809307594`), 2026-10-02T10:54:47Z → 10:55:29Z. **Conclusion: success.** All 18 steps succeeded, including Setup Python, Install drift-engine, Generate Plan Evidence, Analyze Drift and Run Summary.
+  - **Read from the job logs** (signed-in browser):
+    - **Terraform Init (remote backend)**: "Successfully configured the backend "azurerm"!" and "Terraform has been successfully initialized!". This also closes the Task 5.2 log-confirmation gap.
+    - **Generate Plan Evidence**: evidence directory `/home/runner/work/_temp/drift` (outside the checkout); `terraform plan (-detailed-exitcode)` → `terraform show -json` → "Plan succeeded: no pending changes (exit 0)" → "Valid plan evidence: terraform plan exit 0".
+    - **Analyze Drift**: `has_drift=false [in_sync=1] severity=INFO`, `Report: /home/runner/work/_temp/drift/drift_report.json`; "resources: 1, drifted: 0, ambiguous: 0, pending output changes: false"; `in_sync module.resource_group.azurerm_resource_group.this["main"]`.
+    - **Run Summary**: plan exit code `0`, drift status **none**, classification `{"in_sync":1}`, commit `ed84bac…`.
+  - **Result**: the real `dev` resource group is in sync, so the workflow is green with drift status `none`.
+    - A real exit-2 run (drift or a configuration change) has not been executed in CI. That path, and all failure paths, are covered by the local 15-case harness running the same step scripts.
+  - **Annotations** (not errors): Node.js 20 deprecation (`actions/checkout@v4`, `actions/setup-python@v5`, `hashicorp/setup-terraform@v3` forced to Node 24); `ubuntu-latest` → Ubuntu 26 from 2026-10-19.
+  - **No artifacts are uploaded yet** (Task 5.4). The evidence and the report exist only on the runner during the job.
 - **Progress Notes (2026-10-02)**:
   - **New steps** in `.github/workflows/drift-detection.yml`, after Terraform Validate (only that file changed for 5.3; README lines updated):
     1. `Setup Python` (`actions/setup-python@v5`, 3.12).
