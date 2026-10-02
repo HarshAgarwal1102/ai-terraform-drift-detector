@@ -383,6 +383,273 @@ class TestResourceRule(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Task 3.4: attribute detail and resource-type grouping
+# ---------------------------------------------------------------------------
+
+# Task 3.3 output fields; Task 3.4 may only add `attribute_changes` / `resource_types`.
+TASK33_RESOURCE_KEYS = {
+    "address", "module_address", "mode", "type", "name", "index", "provider_name",
+    "classification", "action", "actions", "action_reason", "drift_action", "drift_actions",
+    "previous_address", "importing", "attributes", "ambiguous", "notes",
+}
+TASK33_TOP_KEYS = {
+    "classification_version", "outcome", "has_drift", "failure", "run", "plan",
+    "summary", "resources", "output_changes",
+}
+
+
+def changes_by_path(resource: dict) -> dict:
+    return {".".join(c["path"]): c for c in resource["attribute_changes"]}
+
+
+def value(view: dict):
+    assert view["status"] == "value", view
+    return view["value"]
+
+
+def res(address, rtype, actions, before, after, **change):
+    """A managed resource_changes / resource_drift entry for synthetic plans."""
+    body = {"actions": actions, "before": before, "after": after, "after_unknown": {},
+            "before_sensitive": {}, "after_sensitive": {}}
+    body.update(change)
+    return {"address": address, "mode": "managed", "type": rtype, "name": address.split(".")[-1],
+            "index": None, "module_address": None, "provider_name": "registry.terraform.io/hashicorp/x",
+            "change": body}
+
+
+class TestAttributeChangesRealEvidence(unittest.TestCase):
+    def test_no_relevant_attribute_changes(self):  # 1
+        r = classify("in_sync")
+        main = by_index(r)["main"]
+        self.assertEqual(main["classification"], dd.IN_SYNC)
+        self.assertEqual(main["attribute_changes"], [])
+
+    def test_map_key_change_external_drift(self):  # 4
+        main = by_index(classify("external_drift"))["main"]
+        self.assertEqual(main["classification"], dd.EXTERNAL_DRIFT)
+        changes = changes_by_path(main)
+        self.assertEqual(list(changes), ["tags.probe"], "only the changed tag key, not the whole map")
+        probe = changes["tags.probe"]
+        self.assertEqual(probe["path"], ["tags", "probe"])
+        self.assertEqual(probe["attribute"], "tags")
+        self.assertEqual(probe["class"], dd.DRIFTED)
+        self.assertEqual(value(probe["state"]), "1")
+        self.assertEqual(probe["real"], {"status": "absent"})
+        self.assertEqual(value(probe["desired"]), "1")
+        self.assertFalse(probe["redacted"])
+
+    def test_map_key_change_config_and_ambiguous_and_converged(self):  # 4
+        expected = {
+            "config_change": (dd.CONFIG_CHANGE, dd.CONFIG_CHANGED, "absent", "absent", "1"),
+            "drift_and_config_change": (dd.DRIFT_AND_CONFIG_CHANGE, dd.DRIFTED_AND_CONFIG_CHANGED, "1", "absent", "2"),
+            "converged_drift": (dd.CONVERGED_DRIFT, dd.DRIFTED_CONVERGED, "1", "absent", "absent"),
+        }
+        for name, (rcls, acls, s, r_, d) in expected.items():
+            with self.subTest(name):
+                main = by_index(classify(name))["main"]
+                self.assertEqual(main["classification"], rcls)
+                probe = changes_by_path(main)["tags.probe"]
+                self.assertEqual(probe["class"], acls)
+                for view, exp in (("state", s), ("real", r_), ("desired", d)):
+                    got = probe[view]
+                    self.assertEqual(got["status"] if exp == "absent" else got.get("value"), exp, view)
+
+    def test_scalar_change_multiple_attributes_unknown_and_null(self):  # 2, 5, 9, 10
+        main = by_index(classify("replace"))["main"]
+        self.assertEqual((main["classification"], main["action"]), (dd.CONFIG_CHANGE, "replace"))
+        changes = changes_by_path(main)
+        self.assertEqual(sorted(changes), ["id", "location", "managed_by"])
+        loc = changes["location"]  # scalar
+        self.assertEqual((loc["class"], value(loc["state"]), value(loc["real"]), value(loc["desired"])),
+                         (dd.CONFIG_CHANGED, "centralindia", "centralindia", "westeurope"))
+        rid = changes["id"]  # unknown until apply: no value invented
+        self.assertEqual(rid["class"], dd.UNKNOWN_UNTIL_APPLY)
+        self.assertEqual(rid["desired"], {"status": "unknown"})
+        mb = changes["managed_by"]  # null is a value, distinct from absent
+        self.assertEqual(mb["desired"], {"status": "value", "value": None})
+        self.assertEqual(value(mb["state"]), "")
+
+    def test_resource_added(self):  # 11
+        r = classify("resource_added")
+        extra = by_index(r)["extra"]
+        self.assertEqual(extra["classification"], dd.RESOURCE_ADDED)
+        changes = changes_by_path(extra)
+        self.assertIn("tags.environment", changes)
+        for c in changes.values():
+            self.assertIsNone(c["class"], "§6.2 does not apply to object-level create")
+            self.assertEqual(c["state"], {"status": "absent"})
+            self.assertEqual(c["real"], {"status": "absent"})
+        self.assertEqual(value(changes["name"]["desired"]), "aitdd-dev-extra-rg")
+        self.assertEqual(changes["id"]["desired"], {"status": "unknown"})
+        self.assertEqual(by_index(r)["main"]["attribute_changes"], [])
+
+    def test_resource_removed(self):  # 12
+        main = by_index(classify("resource_removed"))["main"]
+        self.assertEqual(main["classification"], dd.RESOURCE_REMOVED)
+        changes = changes_by_path(main)
+        self.assertEqual(value(changes["name"]["state"]), "aitdd-dev-main-rg")
+        for c in changes.values():
+            self.assertIsNone(c["class"])
+            self.assertEqual(c["desired"], {"status": "absent"})
+
+    def test_external_deletion_values(self):
+        ghost = by_index(classify("external_deletion"))["ghost"]
+        self.assertEqual(ghost["classification"], dd.EXTERNAL_DELETION)
+        name = changes_by_path(ghost)["name"]
+        self.assertEqual((value(name["state"]), name["real"]["status"], value(name["desired"])),
+                         ("aitdd-dev-ghost-rg", "absent", "aitdd-dev-ghost-rg"))
+
+    def test_multiple_resources_same_type(self):  # 6
+        r = classify("resource_removed")
+        self.assertEqual(r["resource_types"], [{
+            "type": "azurerm_resource_group",
+            "resource_count": 2,
+            "addresses": [
+                'module.resource_group.azurerm_resource_group.this["main"]',
+                'module.resource_group.azurerm_resource_group.this["other"]',
+            ],
+            "classification_counts": {dd.RESOURCE_ADDED: 1, dd.RESOURCE_REMOVED: 1},
+        }])
+
+    def test_output_only_change_has_no_attribute_changes(self):  # 16
+        r = classify("output_only_change")
+        self.assertIs(r["has_drift"], False)
+        self.assertTrue(r["summary"]["output_only_change"])
+        for x in r["resources"]:
+            self.assertEqual(x["classification"], dd.IN_SYNC)
+            self.assertEqual(x["attribute_changes"], [])
+        self.assertEqual(r["resource_types"][0]["classification_counts"], {dd.IN_SYNC: 1})
+
+    def test_failed_run_has_no_enrichment(self):  # 15
+        r = classify("failed_run")
+        self.assertEqual((r["outcome"], r["has_drift"]), ("failed", None))
+        self.assertEqual((r["resources"], r["resource_types"]), ([], []))
+
+    def test_task33_contract_preserved(self):  # 13
+        for name in sorted(os.listdir(FIXTURES)):
+            with self.subTest(name):
+                r = classify(name)
+                self.assertEqual(set(r), TASK33_TOP_KEYS | {"resource_types"})
+                for x in r["resources"]:
+                    self.assertEqual(set(x), TASK33_RESOURCE_KEYS | {"attribute_changes"})
+                    for a in x["attributes"]:
+                        self.assertEqual(set(a), {"name", "class"})
+
+    def test_task33_and_task34_agree_on_changed_attributes(self):  # 13
+        for name in sorted(os.listdir(FIXTURES)):
+            for x in classify(name)["resources"]:
+                if x["attributes"]:  # object present in all three views
+                    with self.subTest(f"{name}:{x['index']}"):
+                        self.assertEqual({a["name"] for a in x["attributes"]},
+                                         {c["attribute"] for c in x["attribute_changes"]})
+
+
+class TestAttributeChangesSynthetic(unittest.TestCase):
+    def test_nested_object_change(self):  # 3
+        before = {"site_config": {"always_on": False, "tls": "1.2"}, "name": "app"}
+        after = {"site_config": {"always_on": True, "tls": "1.2"}, "name": "app"}
+        out = dd.classify_resource(None, res("x.app", "azurerm_linux_web_app", ["update"], before, after))
+        self.assertEqual(out["classification"], dd.CONFIG_CHANGE)
+        changes = changes_by_path(out)
+        self.assertEqual(list(changes), ["site_config.always_on"])
+        c = changes["site_config.always_on"]
+        self.assertEqual((c["class"], value(c["state"]), value(c["desired"])), (dd.CONFIG_CHANGED, False, True))
+
+    def test_multiple_resource_types_grouped(self):  # 7
+        rg_a = res("rg.a", "azurerm_resource_group", ["update"], {"tags": {"env": "dev"}}, {"tags": {"env": "prd"}})
+        rg_b = res("rg.b", "azurerm_resource_group", ["no-op"], {"tags": {}}, {"tags": {}})
+        vnet_before = {"address_space": ["10.0.0.0/16"]}
+        vnet_drift = res("vnet.c", "azurerm_virtual_network", ["update"], vnet_before, {"address_space": ["10.1.0.0/16"]})
+        vnet_change = res("vnet.c", "azurerm_virtual_network", ["update"], {"address_space": ["10.1.0.0/16"]}, vnet_before)
+        out = dd.classify_plan({"resource_changes": [vnet_change, rg_b, rg_a], "resource_drift": [vnet_drift]})
+        self.assertEqual({x["address"]: x["classification"] for x in out["resources"]},
+                         {"rg.a": dd.CONFIG_CHANGE, "rg.b": dd.IN_SYNC, "vnet.c": dd.EXTERNAL_DRIFT})
+        self.assertEqual([(t["type"], t["addresses"], t["classification_counts"]) for t in out["resource_types"]], [
+            ("azurerm_resource_group", ["rg.a", "rg.b"], {dd.CONFIG_CHANGE: 1, dd.IN_SYNC: 1}),
+            ("azurerm_virtual_network", ["vnet.c"], {dd.EXTERNAL_DRIFT: 1}),
+        ])
+        space = changes_by_path(by_address(out)["vnet.c"])["address_space"]  # lists compared whole
+        self.assertEqual((space["class"], value(space["real"])), (dd.DRIFTED, ["10.1.0.0/16"]))
+
+    def test_sensitive_values_redacted(self):  # 8
+        secrets = ("old-secret-value", "new-secret-value", "tag-secret-1", "tag-secret-2", "conn-a", "conn-b")
+        before = {"admin_password": secrets[0], "tags": {"secret": secrets[2], "env": "dev"},
+                  "conn": {"a": secrets[4]}, "same_secret": "unchanged-secret"}
+        after = {"admin_password": secrets[1], "tags": {"secret": secrets[3], "env": "prd"},
+                 "conn": {"a": secrets[5]}, "same_secret": "unchanged-secret"}
+        mask = {"admin_password": True, "tags": {"secret": True}, "conn": True, "same_secret": True}
+        out = dd.classify_resource(None, res("x.db", "azurerm_example", ["update"], before, after,
+                                             before_sensitive=mask, after_sensitive=mask))
+        self.assertEqual(out["classification"], dd.CONFIG_CHANGE)
+        changes = changes_by_path(out)
+        self.assertEqual(sorted(changes), ["admin_password", "conn", "tags.env", "tags.secret"],
+                         "sensitive subtree reported once, unchanged sensitive value omitted")
+        for path in ("admin_password", "conn", "tags.secret"):
+            c = changes[path]
+            self.assertTrue(c["redacted"])
+            self.assertEqual(c["class"], dd.CONFIG_CHANGED)
+            for view in ("state", "real", "desired"):
+                self.assertEqual(c[view], {"status": "redacted"})
+        self.assertFalse(changes["tags.env"]["redacted"])
+        self.assertEqual(value(changes["tags.env"]["desired"]), "prd")
+        dumped = json.dumps(out)
+        for s in secrets + ("unchanged-secret",):
+            self.assertNotIn(s, dumped)
+
+    def test_sensitive_in_drift_mask_only_redacts_every_view(self):  # 8
+        drift = res("x.k", "t", ["update"], {"key": "s1"}, {"key": "s2"}, after_sensitive={"key": True})
+        change = res("x.k", "t", ["update"], {"key": "s2"}, {"key": "s1"})
+        out = dd.classify_resource(drift, change)
+        self.assertEqual(out["classification"], dd.EXTERNAL_DRIFT)
+        c = changes_by_path(out)["key"]
+        self.assertEqual((c["class"], c["redacted"]), (dd.DRIFTED, True))
+        self.assertNotIn("s1", json.dumps(out["attribute_changes"]))
+        self.assertNotIn("s2", json.dumps(out["attribute_changes"]))
+
+    def test_nested_unknown_and_null_versus_absent(self):  # 9, 10
+        before = {"cfg": {"a": 1, "b": None}, "opt": None}
+        after = {"cfg": {"a": 1}, "opt": None}
+        out = dd.classify_resource(None, res("x.u", "t", ["update"], before, after,
+                                             after_unknown={"cfg": {"c": True}}))
+        changes = changes_by_path(out)
+        self.assertEqual(sorted(changes), ["cfg.b", "cfg.c"])
+        self.assertEqual((changes["cfg.b"]["state"], changes["cfg.b"]["desired"]),
+                         ({"status": "value", "value": None}, {"status": "absent"}))
+        self.assertEqual(changes["cfg.c"]["class"], dd.UNKNOWN_UNTIL_APPLY)
+        self.assertEqual(changes["cfg.c"]["desired"], {"status": "unknown"})
+        self.assertEqual(out["attributes"], [{"name": "cfg", "class": dd.UNKNOWN_UNTIL_APPLY}],
+                         "Task 3.3 top-level result unchanged")
+
+    def test_empty_map_versus_absent_is_reported(self):
+        out = dd.classify_resource(None, res("x.e", "t", ["update"], {"name": "n"}, {"name": "n", "tags": {}}))
+        self.assertEqual(changes_by_path(out)["tags"]["desired"], {"status": "value", "value": {}})
+
+    def test_invalid_evidence_has_no_enrichment(self):  # 14
+        d = os.path.join(tempfile.mkdtemp(prefix="detect-drift-34-"), "bundle")
+        try:
+            shutil.copytree(os.path.join(FIXTURES, "external_drift"), d)
+            with open(os.path.join(d, "plan.json"), "w") as fh:
+                fh.write('{"truncated": ')
+            r = dd.classify_bundle(d)
+            self.assertEqual((r["outcome"], r["has_drift"], r["resources"], r["resource_types"]),
+                             ("failed", None, [], []))
+        finally:
+            shutil.rmtree(os.path.dirname(d), ignore_errors=True)
+
+    def test_attribute_changes_deterministic(self):
+        plan_path = os.path.join(FIXTURES, "resource_removed", "plan.json")
+        with open(plan_path) as fh:
+            plan = json.load(fh)
+        first = json.dumps(dd.classify_plan(plan), sort_keys=True)
+        plan["resource_changes"].reverse()
+        self.assertEqual(first, json.dumps(dd.classify_plan(plan), sort_keys=True))
+
+
+def by_address(result: dict) -> dict:
+    return {r["address"]: r for r in result["resources"]}
+
+
+# ---------------------------------------------------------------------------
 # CLI and determinism
 # ---------------------------------------------------------------------------
 

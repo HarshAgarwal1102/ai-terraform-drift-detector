@@ -85,9 +85,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 3 — Deterministic Terraform Drift Detection
-- **Current Active Task**: Task 3.4 — Resource Identification & Categorization
-- **Phases Completed**: 2 of 14
+- **Current Active Phase**: Phase 4 — Python Drift Engine
+- **Current Active Task**: Task 4.1 — Python Project Structure & Environment
+- **Phases Completed**: 3 of 14
 
 ---
 
@@ -576,7 +576,7 @@ The application Resource Group `aitdd-dev-main-rg` is managed by `terraform/envi
 ---
 
 ### PHASE 3 — Deterministic Terraform Drift Detection
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 3 builds the core deterministic drift detection engine using Terraform state files, machine-readable `terraform plan` JSON outputs, and resource diff parsing prior to AI involvement.
 
@@ -596,6 +596,8 @@ The first end-to-end drift scenario uses ONLY `aitdd-dev-main-rg`. No VNet, Subn
 7. AI analysis is added only after deterministic drift detection succeeds.
 
 > **Note**: Which Resource Group property is used has not been proven yet. Tags are the candidate, but it must be empirically verified that an external tag change is detected by `terraform plan` before the scenario is implemented.
+>
+> **Verified 2026-10-02 (Task 3.6):** an external tag addition on the real `aitdd-dev-main-rg` (Azure CLI, approved) was detected by `terraform plan` (`resource_drift` update, exit 2). Tags are the verified mutable property for the MVP scenario.
 
 #### Task 3.1 — Drift Detection Strategy & Execution Plan
 - **Status**: 🟢 COMPLETED
@@ -681,65 +683,113 @@ The first end-to-end drift scenario uses ONLY `aitdd-dev-main-rg`. No VNet, Subn
   - **Limitations**: (a) Comparison is per **top-level** attribute; nested diffs (individual tag keys) and before/after values are Task 3.4. (b) For `replace`, D describes the *new* object, so optional attributes not set in configuration can show as `config_changed` (observed: `managed_by` `""` → `null`). This is recorded in the resource `notes`, not suppressed; noise rules are later, declarative work (spec §9). (c) `resource_drift` means remote ≠ recorded; provider normalization can also produce it. (d) Move/import classification and `undetermined` are exercised only by synthetic tests; move/import exit behavior remains unverified (spec §5.3). (e) Drift was simulated by altering a state copy; a real external Azure change is Task 3.6/3.7 (requires approval).
 
 #### Task 3.4 — Resource Identification & Categorization
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Map detected changes to resource addresses, types, names, and exact attribute diffs.
 - **Dependencies**: Task 3.3
-- **Files/Areas**: `scripts/detect_drift.py`
+- **Files/Areas**: `scripts/detect_drift.py`, `tests/test_detect_drift.py`, `docs/drift-detection-spec.md` (§8.2)
 - **Acceptance Criteria**:
-  - [ ] Captures before and after states for changed attributes.
-  - [ ] Group drifts by resource type (initially `azurerm_resource_group`).
+  - [x] Captures before and after states for changed attributes. (As the three spec §6 views — `state`/`real`/`desired` — because a single before/after pair cannot separate drift from configuration change.)
+  - [x] Group drifts by resource type (initially `azurerm_resource_group`).
 - **Validation**:
-  - [ ] Verify attribute diff outputs against test drift plans.
+  - [x] Verify attribute diff outputs against test drift plans.
 - **Implementation Notes**:
   - Extracts `before` and `after` dictionaries from JSON schema.
 - **Completion Notes**:
-  - None.
+  - **Boundary verified before coding**: Task 3.3 already emitted the resource identity (`address`, `module_address`, `mode`, `type`, `name`, `index`, `provider_name`), the resource classification and the top-level attribute names/classes. These were preserved, not re-implemented. Genuinely missing: values, nested paths, redaction, grouping. `docs/MASTER_PROJECT_GUIDE.md` agreed with the spec and code; no discrepancy.
+  - **Implemented** by extending `scripts/detect_drift.py`; no new module, no new dependency (stdlib only):
+    - Per resource **`attribute_changes`**: one entry per changed leaf path. Maps/objects are descended key by key (e.g. `tags.probe`), generically for any resource type; lists are compared whole. Each entry has `path`, `attribute`, `class`, and `state` / `real` / `desired` as `{"status": "value"|"absent"|"unknown"|"redacted"}`, with `null` kept distinct from absent, plus `redacted`.
+    - `class` reuses the spec §6.2 rule at the leaf via a shared `_attribute_class()` (refactored out of Task 3.3 code; output proven byte-identical), so there is no second classifier. It is `null` for create/delete, where §6.2 is undefined.
+    - **Redaction (§8.3)**: a path flagged in any drift/change `before_sensitive`/`after_sensitive` mask is redacted in every view, and a sensitive subtree is reported once. Unknown desired values are reported as `unknown`, never invented.
+    - Top-level **`resource_types`**: resources grouped by Terraform `type`, sorted, with `resource_count`, `addresses` and `classification_counts`. Failed or rejected evidence yields `resource_types: []` and `resources: []` (existing failure semantics unchanged).
+  - **Task 3.3 contract preserved**: for all 11 real fixtures, the new output minus `attribute_changes`/`resource_types` is **byte-identical** to the Task 3.3 golden output captured before any change. All 43 existing tests pass **unmodified** (0 test lines removed). Every classification is unchanged.
+  - **Spec synced**: `docs/drift-detection-spec.md` §8.2 replaced "attribute values are withheld (Task 3.4 scope)" with the Task 3.4 output description and the value/redaction format. §8.3 had defined no format.
+  - **Tests**: 20 new (63 total, all passing, ResourceWarnings as errors). On real fixtures: in_sync (no changes), tag-key change (external_drift / config_change / drift_and_config_change / converged_drift), scalar + multiple attributes + unknown + null (replace), resource_added, resource_removed, external_deletion values, same-type grouping, output-only (no attribute changes, still `in_sync`), failed run, Task 3.3 key-set preservation, and Task 3.3/3.4 agreement on changed attributes. Synthetic: nested object, multiple resource types, sensitive values (whole attribute, map key, subtree, unchanged secret, drift-mask-only; no secret string anywhere in the output), nested unknown, null vs absent, `{}` vs absent, invalid evidence, ordering determinism.
+  - **Validation**: `./scripts/validate.sh` passed. CLI output valid JSON and byte-identical across two runs for 11/11 fixtures. CLI redaction check on a scratch bundle with a sensitive-flagged tag: 0 secret occurrences. Task 3.2 stub regression 16/16 (scratch harness rebuilt from committed fixtures after the earlier scratch copy was cleared); chained Task 3.2 → 3.4 run OK. Classifier imports only `argparse`, `json`, `os`, `sys`, `typing`: no Azure, Activity Log, network, LLM, randomness or time. No `terraform apply`, no Azure change, no live plan run in this task. Sensitive scan of all changed lines clean. `tests/fixtures` unchanged.
+  - **Limitations**: (a) Lists/sets are compared as whole values (no element-level diff). (b) Create/delete entries list every leaf of the object with `class: null`, including null-valued optional attributes (e.g. `timeouts`). (c) Non-sensitive identifiers such as resource `id` values (which contain the subscription ID) are emitted as values; the output must stay outside the repository like all evidence. (d) The replace quirk from Task 3.3 is now visible at value level (`managed_by` `""` → `null`). (e) `classification_version` stays `"1"`; the change is additive. Task 3.5 will define the formal schema.
 
 #### Task 3.5 — Structured Drift Schema Definition
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Create standard JSON schema (`drift_report.json`) representing normalized drift findings.
 - **Dependencies**: Task 3.4
-- **Files/Areas**: `schemas/drift_report.schema.json`
+- **Files/Areas**: `schemas/drift_report.schema.json`, `schemas/examples/drift_report.json`, `docs/drift-detection-spec.md` (§8.2)
 - **Acceptance Criteria**:
-  - [ ] Schema defines header (timestamp, environment, target), summary counts, and detailed resource drift list.
-  - [ ] Each drift item includes address, type, action, attribute_changes array.
+  - [x] Schema defines header (timestamp, environment, target), summary counts, and detailed resource drift list. (Header items map to existing fields; see Completion Notes.)
+  - [x] Each drift item includes address, type, action, attribute_changes array.
 - **Validation**:
-  - [ ] Validate sample `drift_report.json` against JSON schema.
+  - [x] Validate sample `drift_report.json` against JSON schema.
 - **Implementation Notes**:
   - Contract for Python engine and AI analysis pipeline.
+  - 2026-10-02: paused for two decisions (Execution Rule 14); resolved by the user the same day. (1) The schema describes the **existing classifier output**: no new artifact, no converter, no change to `scripts/detect_drift.py`. (2) Validation uses `jsonschema` in a temporary venv **outside** the repository; it is not a project dependency.
 - **Completion Notes**:
-  - None.
+  - **Naming mapping (documented, not resolved by renaming)**: the plan's `drift_report.json` is the document `scripts/detect_drift.py` writes as `drift_classification.json`. One document, one contract: `schemas/drift_report.schema.json`. Recorded in spec §8.2. The plan still uses `drift_report.json` in Tasks 3.7, 5.3, 5.4, 6.2, 6.7 and 13.3. Read those as this same file. The output file was not renamed, because that would change the Task 3.3 contract.
+  - **No header/target object invented**: timestamp = `plan.timestamp` (run times: `run.started_at` / `run.finished_at`), environment = `run.environment`, target = `run.working_dir` + `run.backend_key`. Summary counts = `summary`. Detailed resource list = `resources[]`, each requiring `address`, `type`, `action` and `attribute_changes` (plus every other existing Task 3.3/3.4 field).
+  - **Schema** (JSON Schema Draft 2020-12): mirrors the existing output exactly. `additionalProperties: false` throughout; enums for the 9 resource classes, 5 attribute classes and normalized actions; `classification_version` const `"1"`; view values as `value` (may be null) / `absent` / `unknown` / `redacted`, where a redacted view cannot carry a value.
+  - Outcome invariants: `succeeded` ⇒ boolean `has_drift`, null `failure`, `run`/`plan`/`summary` present, and `plan.errored` false / `complete` true. `failed` ⇒ `has_drift: null`, a `failure` object, and empty `resources` / `resource_types` / `output_changes`, so a failed run can never validate as "no drift".
+  - **Sample**: `schemas/examples/drift_report.json`, generated by the **unchanged** classifier from the committed `external_drift` real-evidence fixture (not hand-written): `external_drift`, attribute change `tags.probe` = `drifted`.
+  - **Validation** (jsonschema 4.26.0 `Draft202012Validator`, scratch venv): schema meta-validation OK; sample VALID; classifier output for all 11 real-evidence fixtures VALID; 5 failure/rejected-evidence/redaction outputs (missing manifest, truncated plan, errored plan, exit-code mismatch, sensitive tag) VALID, with the secret absent; **19/19 invalid structures rejected** (each required drift-item field removed, unknown class names, redacted view with a value, value view without a value, empty path, failed outcome with `has_drift: false` or with results, errored plan, data-source mode, extra top-level `header`, wrong version).
+  - Existing test suite (63) passes unchanged. `./scripts/validate.sh` passed. Sensitive scan of the schema, the sample and changed lines: clean. No Terraform, Python code, test, workflow or dependency file changed by this task. The Task 3.4 contract is intact (`scripts/detect_drift.py` diff unchanged since Task 3.4). No Azure action.
+  - **Limitations**: (a) The sample's `run.backend_key` is `null` because the source fixture came from the local-backend scratch copy; live runs record `dev.tfstate`. (b) Schema validation is **not** part of the committed test suite, because the project has no JSON Schema validator dependency (Task 4.1 owns dependencies). The sample can therefore go stale if the classifier output changes; re-validate then. (c) The naming difference above remains until a future task chooses to rename the output or the plan wording.
 
 #### Task 3.6 — Reproducible Drift Scenarios Suite
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Create reproducible test scenarios, starting with an external change to a verified mutable property of `aitdd-dev-main-rg` (candidate: tags, subject to empirical verification). Scenarios for other resource types are added only if those resources are introduced in a later infrastructure-expansion phase.
 - **Dependencies**: Task 3.5
 - **Files/Areas**: `tests/scenarios/`
 - **Acceptance Criteria**:
-  - [ ] Azure CLI / Azure PowerShell scripts to introduce controlled drift into non-production sandbox.
-  - [ ] Scripts to revert manual drift.
+  - [x] Azure CLI / Azure PowerShell scripts to introduce controlled drift into non-production sandbox.
+  - [x] Scripts to revert manual drift.
 - **Validation**:
-  - [ ] Execute script -> run detection -> confirm expected drift captured.
+  - [x] Execute script -> run detection -> confirm expected drift captured.
 - **Implementation Notes**:
   - Test suite for validating detection accuracy.
+  - 2026-10-02: paused for explicit user approval of the Azure change (Execution Rules 10, 13); approved by the user the same day before any mutation.
 - **Completion Notes**:
-  - None.
+  - **Scripts** (`tests/scenarios/`, Azure CLI + bash, no new dependency):
+    - `rg_tag_drift_common.sh`: shared settings and guards.
+    - `rg_tag_drift_inject.sh`: `az tag update --operation Merge --tags aitdd_drift_probe=task-3.6`.
+    - `rg_tag_drift_revert.sh`: `--operation Delete` of the probe key with its current value; idempotent.
+    - `run_rg_tag_drift_scenario.sh`: baseline → inject → detect → verify → revert → detect, using `scripts/generate_plan_json.sh` + `scripts/detect_drift.py`.
+  - **Safety design**: dry-run by default (`--apply` required to change Azure). Only the dedicated probe tag is touched; the Terraform-managed tags (`environment`, `managed_by`, `project`) are verified unchanged after every change, and the probe key may never be one of them. Merge/Delete only, never Replace. The inject refuses if the probe is already present. The resource ID is looked up at runtime and the subscription is masked in all output. The runner arms the revert **before** injecting and runs it on success, failure or interrupt. Evidence is written outside the repository. No `terraform apply` anywhere.
+  - **Offline tests** against a stub `az`: 15/15 (dry-run makes no call, Merge-only, managed tags preserved, exact baseline restored, idempotent revert, revert of an unexpected probe value, double-inject refused, bad flag / logged-out refused, subscription masked).
+  - **Real execution (approved by user, 2026-10-02)**: `tests/scenarios/run_rg_tag_drift_scenario.sh --apply` → **SCENARIO PASSED, 18/18 checks**.
+    - Baseline `in_sync` (plan exit 0).
+    - After inject: `has_drift: true`, plan exit 2, `external_drift`, `drift_action`/`action` `update`, `attributes` `[tags = drifted]`, exactly one `attribute_changes` entry `tags.aitdd_drift_probe` = `drifted` (state absent, real `"task-3.6"`, desired absent, not redacted). Raw evidence: `resource_drift` update on `this["main"]` with the probe absent → `"task-3.6"`, and `resource_changes` update proposing its removal.
+    - After revert: `in_sync` (plan exit 0) again.
+    - All 3 live reports validate against `schemas/drift_report.schema.json` (scratch-venv jsonschema). `backend_key` = `dev.tfstate` in every manifest.
+  - **Azure end state**: `aitdd-dev-main-rg` tags back to exactly `{environment, managed_by, project}`, `provisioningState: Succeeded`. The only Azure mutations were the approved tag add and its removal.
+  - Regression: 63 unit tests pass; `./scripts/validate.sh` passed. Sensitive scan of `tests/scenarios/`: no IDs, UPNs, paths or keys. No other project file changed by this task (`PROJECT_PLAN.md` only for status/notes).
+  - **Limitations**: (a) One scenario only (external tag **addition** on the single MVP resource). Tag modification/removal, deletion, and other resource types are not scripted; per the objective, other types wait for an infrastructure-expansion phase. (b) The scenario is run manually; it is not wired into CI (Phase 5). (c) Overlap noted: Task 3.7 (real-drift validation, `drift_report.json` = `drift_classification.json` per Task 3.5) repeats this run's essence; Task 3.7 can reuse these scripts and their evidence format.
 
 #### Task 3.7 — Validation Against Real Azure Drift Scenarios
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Validate deterministic detection engine against live Azure drift scenario in `dev` environment.
 - **Dependencies**: Task 3.6
 - **Files/Areas**: `scripts/detect_drift.py`
 - **Acceptance Criteria**:
-  - [ ] Introduce real drift in Azure dev environment (external change to the verified mutable property of `aitdd-dev-main-rg` via Azure CLI).
-  - [ ] Run drift detection script.
-  - [ ] Confirm `drift_report.json` accurately reflects exact modified attribute.
+  - [x] Introduce real drift in Azure dev environment (external change to the verified mutable property of `aitdd-dev-main-rg` via Azure CLI).
+  - [x] Run drift detection script.
+  - [x] Confirm `drift_report.json` accurately reflects exact modified attribute.
 - **Validation**:
-  - [ ] Verify `drift_report.json` matches manual Azure CLI modification.
+  - [x] Verify `drift_report.json` matches manual Azure CLI modification.
 - **Implementation Notes**:
   - Revert manual change immediately after test.
 - **Completion Notes**:
-  - None.
+  - Satisfied by the approved Task 3.6 live run (`tests/scenarios/run_rg_tag_drift_scenario.sh --apply`, 2026-10-02 05:24Z, remote `dev.tfstate`). Not re-run, to avoid duplicating an Azure change; reviewed and approved by the user. **No Azure change was made by Task 3.7.**
+  - Criteria mapped to that evidence:
+    - Real drift introduced via Azure CLI: `az tag update --operation Merge` added `aitdd_drift_probe=task-3.6` to `aitdd-dev-main-rg`; tags are the property verified in Task 3.6.
+    - Detection run: `scripts/generate_plan_json.sh` → `scripts/detect_drift.py`, plan exit 2.
+    - The report (`drift_report.json` = `drift_classification.json`, per Task 3.5) reflects exactly the modified attribute: `external_drift`, `has_drift: true`, one and only one `attribute_changes` entry, `tags.aitdd_drift_probe` = `drifted`.
+    - Matches the manual CLI modification: key `aitdd_drift_probe`, real value `"task-3.6"` (the value set and read back from Azure), state and desired absent. Raw `resource_drift` shows absent → `"task-3.6"`.
+    - Immediate revert: rollback ran straight after the check; detection returned `in_sync` (plan exit 0); Azure tags back to `{environment, managed_by, project}`.
+  - Optional, not required by the criteria (not done): modifying an existing tag value, so that state, real and desired all hold values. The scenario evidence lives in a temp directory outside the repository; these notes and Task 3.6's are the durable record.
 
 ---
 

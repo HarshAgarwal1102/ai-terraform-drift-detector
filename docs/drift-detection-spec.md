@@ -297,17 +297,59 @@ and refusing `TF_CLI_ARGS*`, which could inject forbidden flags.
 - **Must** classify per §6 using only `plan.json` fields, so the same `plan.json` always
   yields the same report.
 - **Must not** call Azure, Terraform, or an LLM to decide drift.
-- Normalized report schema = Task 3.5 (`schemas/drift_report.schema.json`).
+- Report schema = Task 3.5 (`schemas/drift_report.schema.json`). It describes the
+  classifier output below directly. There is no separate normalized artifact.
 
 **Classifier (Task 3.3):** `scripts/detect_drift.py ARTIFACT_DIR` writes
 `ARTIFACT_DIR/drift_classification.json`, containing `outcome`, `has_drift`
 (`true`/`false`, or `null` when evidence failed or was rejected), `failure`, run and plan
 metadata, `summary`, per-resource `classification`, `action`/`drift_action`,
 `action_reason`, attribute **names** with their §6.2 class, `ambiguous` and `notes`.
-Attribute values are withheld (Task 3.4 scope, and keeps sensitive values out).
+`attributes` carries names only. Values are in Task 3.4's `attribute_changes` (below).
 `has_drift` is `true` exactly when `resource_drift` contains a managed resource. Exit
-status: `0` classified, `1` failed/rejected, `64` usage error. This is the input Task 3.5
-normalizes into the report schema.
+status: `0` classified, `1` failed/rejected, `64` usage error.
+
+**Drift report contract (Task 3.5):** the classifier output **is** the project's drift
+report. `PROJECT_PLAN.md` calls it `drift_report.json` (Tasks 3.5, 3.7, 5.3, 5.4, 6.2,
+6.7, 13.3). The file `scripts/detect_drift.py` writes today is named
+`drift_classification.json`. Both names refer to the same document, and its contract is
+`schemas/drift_report.schema.json` (JSON Schema Draft 2020-12). A sample generated from
+the `external_drift` fixture is in `schemas/examples/drift_report.json`.
+
+There is no separate `header` object. The report header in Task 3.5 maps to existing
+fields:
+
+| Header item | Field |
+|---|---|
+| timestamp | `plan.timestamp` (`run.started_at` / `run.finished_at` for the run itself) |
+| environment | `run.environment` |
+| target | `run.working_dir` + `run.backend_key` |
+
+The file name is a known, unresolved naming difference. The output file was deliberately
+not renamed, because that would change the Task 3.3 contract.
+
+**Attribute detail (Task 3.4):** the same output gains two fields. No Task 3.3 field is
+changed.
+
+- Per resource, `attribute_changes`: one entry per changed **leaf path**. Maps and objects
+  are descended key by key (e.g. `["tags", "owner"]`); lists are compared as whole values.
+  Each entry has `path`, `attribute` (top-level name), `class`, `state` / `real` /
+  `desired` (the S/R/D views of §6), and `redacted`.
+  - `class` is the §6.2 rule applied at that leaf. It is `null` when the object is absent
+    from a view (create/delete), because §6.2 is defined only for objects present in all
+    three views.
+  - Each view value is `{"status": "value", "value": …}` (`null` is a value),
+    `{"status": "absent"}`, `{"status": "unknown"}` (desired value unknown until apply),
+    or `{"status": "redacted"}`.
+  - **Redaction (§8.3):** a path flagged in any `before_sensitive` / `after_sensitive`
+    mask of the resource's drift or change entry is redacted in **every** view, and a
+    sensitive subtree is reported once without descending. No sensitive value is
+    emitted. This is the redaction format; §8.3 previously defined none.
+- Top level, `resource_types`: resources grouped by Terraform `type`, sorted, each with
+  `resource_count`, `addresses` and `classification_counts`.
+- Non-sensitive identifiers (e.g. resource `id` values containing the subscription ID)
+  are emitted as values. Like every evidence artifact, the output stays outside the
+  repository (§4.1).
 
 ### 8.3 Handling Sensitive Data
 

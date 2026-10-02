@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic drift classification (Task 3.3).
+"""Deterministic drift classification (Task 3.3) with attribute detail (Task 3.4).
 
 Classifies the evidence bundle produced by scripts/generate_plan_json.sh
 according to docs/drift-detection-spec.md (§5.3 integrity gate, §6
@@ -16,6 +16,10 @@ Usage:
   scripts/detect_drift.py ARTIFACT_DIR [--output PATH]
 
 Writes ARTIFACT_DIR/drift_classification.json (or PATH).
+
+Task 3.4 adds, without changing any Task 3.3 field: per-resource
+`attribute_changes` (nested paths with S/R/D values; sensitive values
+redacted) and top-level `resource_types` (resources grouped by Terraform type).
 
 Exit status (process outcome only - drift is a valid result, not an error):
   0   evidence valid and classified (has_drift true or false)
@@ -190,21 +194,132 @@ def classify_attributes(
         if _contains_true(unknown.get(name)):
             result.append({"name": name, "class": UNKNOWN_UNTIL_APPLY})
             continue
-        s = state.get(name, _MISSING)
-        r = real.get(name, _MISSING)
-        d = desired.get(name, _MISSING)
-        if s == r:
-            if d == s:
-                continue  # unchanged
-            cls = CONFIG_CHANGED
-        elif d == s:
-            cls = DRIFTED
-        elif d == r:
-            cls = DRIFTED_CONVERGED
-        else:
-            cls = DRIFTED_AND_CONFIG_CHANGED
-        result.append({"name": name, "class": cls})
+        cls = _attribute_class(
+            state.get(name, _MISSING), real.get(name, _MISSING), desired.get(name, _MISSING)
+        )
+        if cls is not None:
+            result.append({"name": name, "class": cls})
     return result
+
+
+def _attribute_class(s: Any, r: Any, d: Any) -> str | None:
+    """The §6.2 rule for one value in the three views; None when unchanged."""
+    if s == r:
+        return None if d == s else CONFIG_CHANGED
+    if d == s:
+        return DRIFTED
+    if d == r:
+        return DRIFTED_CONVERGED
+    return DRIFTED_AND_CONFIG_CHANGED
+
+
+# ---------------------------------------------------------------------------
+# Attribute detail (Task 3.4): nested paths and values, sensitive values redacted
+# ---------------------------------------------------------------------------
+# Each view value is reported as {"status": ...}:
+#   value     {"status": "value", "value": <JSON value, may be null>}
+#   absent    the object or key does not exist in that view
+#   unknown   desired value not known until apply (after_unknown)
+#   redacted  flagged sensitive (before_sensitive / after_sensitive, spec §8.3)
+# Maps/objects are descended key by key; lists are compared as whole values.
+
+def _child(node: Any, key: str) -> Any:
+    return node.get(key, _MISSING) if isinstance(node, dict) else _MISSING
+
+
+def _child_mask(mask: Any, key: str) -> Any:
+    if mask is True:
+        return True  # a flag on a parent covers every child
+    return mask.get(key) if isinstance(mask, dict) else None
+
+
+def _view(value: Any, redacted: bool, unknown: bool = False) -> dict:
+    if unknown:
+        return {"status": "unknown"}
+    if value is _MISSING:
+        return {"status": "absent"}
+    if redacted:
+        return {"status": "redacted"}
+    return {"status": "value", "value": value}
+
+
+def _descend(nodes: tuple, unknown: Any) -> list[str] | None:
+    """Sorted child keys when the path is a map/object in every view where it exists."""
+    if not all(isinstance(v, dict) or v is _MISSING for v in nodes):
+        return None
+    partly_unknown = isinstance(unknown, dict) and _contains_true(unknown)
+    if not any(isinstance(v, dict) for v in nodes) and not partly_unknown:
+        return None
+    keys: set[str] = set()
+    for v in nodes:
+        if isinstance(v, dict):
+            keys |= set(v)
+    if isinstance(unknown, dict):
+        keys |= set(unknown)
+    return sorted(keys)
+
+
+def _walk(path: list[str], nodes: tuple, unknown: Any, masks: list, object_level: bool, out: list) -> None:
+    s, r, d = nodes
+    sensitive = any(m is True for m in masks)
+    is_unknown = unknown is True
+    if not sensitive and not is_unknown:
+        keys = _descend(nodes, unknown)
+        if keys is not None:
+            before = len(out)
+            for key in keys:
+                _walk(
+                    path + [key],
+                    (_child(s, key), _child(r, key), _child(d, key)),
+                    _child_mask(unknown, key),
+                    [_child_mask(m, key) for m in masks],
+                    object_level,
+                    out,
+                )
+            if len(out) > before or s == r == d:
+                return
+            # e.g. {} versus absent: nothing below differs, so report this node itself
+    if not is_unknown and s == r == d:
+        return
+    if object_level:
+        cls = None  # §6.2 applies only when the object exists in all three views
+    elif is_unknown:
+        cls = UNKNOWN_UNTIL_APPLY
+    else:
+        cls = _attribute_class(s, r, d)
+    out.append({
+        "path": path,
+        "attribute": path[0],
+        "class": cls,
+        "state": _view(s, sensitive),
+        "real": _view(r, sensitive),
+        "desired": _view(d, sensitive, is_unknown),
+        "redacted": sensitive and any(v is not _MISSING for v in nodes),
+    })
+
+
+def attribute_changes(
+    state: Any, real: Any, desired: Any, after_unknown: Any, sensitive_masks: list
+) -> list[dict]:
+    """Leaf-level differences between the S, R and D views of one resource.
+
+    `class` reuses the §6.2 rule at the leaf, or is null when the object is absent
+    from a view (create/delete), where §6.2 does not apply. Values flagged
+    sensitive in any mask are redacted in every view.
+    """
+    nodes = tuple(v if isinstance(v, dict) else _MISSING for v in (state, real, desired))
+    object_level = any(v is _MISSING for v in nodes)
+    out: list[dict] = []
+    for key in _descend(nodes, after_unknown) or []:
+        _walk(
+            [key],
+            (_child(nodes[0], key), _child(nodes[1], key), _child(nodes[2], key)),
+            _child_mask(after_unknown, key),
+            [_child_mask(m, key) for m in sensitive_masks],
+            object_level,
+            out,
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +344,14 @@ def classify_resource(drift: dict | None, change: dict | None) -> dict:
         state, real, desired, c.get("after_unknown") if c is not None else None
     )
     kinds = {a["class"] for a in attributes}
+    sensitive_masks = [
+        part.get(key)
+        for part in (d, c) if part is not None
+        for key in ("before_sensitive", "after_sensitive")
+    ]
+    details = attribute_changes(
+        state, real, desired, c.get("after_unknown") if c is not None else None, sensitive_masks
+    )
 
     moved = change is not None and change.get("previous_address") is not None
     importing = c is not None and c.get("importing") is not None
@@ -302,6 +425,7 @@ def classify_resource(drift: dict | None, change: dict | None) -> dict:
         "previous_address": change.get("previous_address") if change is not None else None,
         "importing": importing,
         "attributes": attributes,
+        "attribute_changes": details,
         "ambiguous": ambiguous,
         "notes": notes,
     }
@@ -324,6 +448,21 @@ def classify_plan(plan: dict) -> dict:
     counts: dict[str, int] = {}
     for r in resources:
         counts[r["classification"]] = counts.get(r["classification"], 0) + 1
+
+    by_type: dict[str, list[dict]] = {}
+    for r in resources:
+        by_type.setdefault(str(r["type"]), []).append(r)
+    resource_types = []
+    for rtype in sorted(by_type):
+        type_counts: dict[str, int] = {}
+        for r in by_type[rtype]:
+            type_counts[r["classification"]] = type_counts.get(r["classification"], 0) + 1
+        resource_types.append({
+            "type": rtype,
+            "resource_count": len(by_type[rtype]),
+            "addresses": [r["address"] for r in by_type[rtype]],
+            "classification_counts": dict(sorted(type_counts.items())),
+        })
     resource_pending = any(r["classification"] != IN_SYNC for r in resources)
     output_pending = any(o["action"] != "no-op" for o in output_changes)
 
@@ -339,6 +478,7 @@ def classify_plan(plan: dict) -> dict:
             "output_only_change": output_pending and not resource_pending and not drift,
         },
         "resources": resources,
+        "resource_types": resource_types,
         "output_changes": output_changes,
     }
 
@@ -374,6 +514,7 @@ def classify_bundle(artifact_dir: str) -> dict:
         "plan": None,
         "summary": None,
         "resources": [],
+        "resource_types": [],
         "output_changes": [],
     }
     try:
