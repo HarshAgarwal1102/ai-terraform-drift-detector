@@ -11,14 +11,14 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** 🟡 In progress (Tasks 4.1–4.5 complete; next: Task 4.6, structured output / CLI)
+**Phase 4 — Python Drift Engine** 🟡 In progress (Tasks 4.1–4.6 complete; next: Task 4.7, logging / error handling / coverage)
 
 | Phase | Status |
 |---|---|
 | 1 — Minimal Terraform foundation | ✅ Complete |
 | 2 — Remote state & OIDC authentication (plan-only CI) | ✅ Complete |
 | 3 — Deterministic drift detection, validated against a real Azure change | ✅ Complete |
-| 4 — Python drift engine | 🟡 5 of 7 tasks complete |
+| 4 — Python drift engine | 🟡 6 of 7 tasks complete |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -46,9 +46,10 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 - **Validated against real Azure drift**: a scripted external tag change on the `dev`
   resource group was detected exactly (one attribute, `tags.aitdd_drift_probe`) and
   reverted (Tasks 3.6–3.7).
-- **Python drift engine library** (`src/drift_engine/`): plan parser, strict Pydantic report
-  models, attribute comparator with noise and user-configured assessment, and a rules-based
-  severity rating. See [Python drift engine](#-python-drift-engine).
+- **Python drift engine** (`src/drift_engine/`): plan parser, classifier, strict Pydantic
+  report models, attribute comparator with noise and user-configured assessment, a
+  rules-based severity rating, and the `drift-engine analyze` command with JSON, YAML and
+  console output. See [Python drift engine](#-python-drift-engine).
 - **Plan-only CI with OIDC**: GitHub Actions authenticates to Azure without stored secrets
   and runs `terraform plan`; the identity has no write permissions.
 
@@ -56,8 +57,7 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Engine CLI with JSON/YAML/console output (Task 4.6), plus logging and a coverage gate
-  (Task 4.7)
+- Structured logging, error-handling review and a coverage gate for the engine (Task 4.7)
 - Scheduled drift detection in GitHub Actions (Phase 5)
 - **AI-powered analysis with LangGraph + an LLM** (Phase 6)
 - Azure Activity Log investigation of who or what changed a resource (Phase 7)
@@ -96,11 +96,13 @@ flowchart TD
         GEN["scripts/generate_plan_json.sh<br/>init · plan · show (read-only)"] --> BUNDLE["Evidence bundle<br/>detection_run.json · plan.json · plan.log"]
         BUNDLE --> DETECT["scripts/detect_drift.py<br/>integrity gate + classification"]
         DETECT --> REPORT["drift_classification.json<br/>(schemas/drift_report.schema.json)"]
-        ENGINE["src/drift_engine<br/>parser · comparator · models · severity"] -.->|"imported by"| DETECT
+        ENGINE["src/drift_engine<br/>parser · classifier · comparator · models · severity"] -.->|"imported by"| DETECT
+        BUNDLE --> CLI["drift-engine analyze<br/>JSON · YAML · console (with severity)"]
+        ENGINE -.-> CLI
     end
 
     DEV_ENV -.->|"read-only plan"| GEN
-    REPORT -.-> FUTURE["Planned: CLI output, scheduled CI,<br/>AI analysis, issues/PRs"]
+    REPORT -.-> FUTURE["Planned: scheduled CI,<br/>AI analysis, issues/PRs"]
 ```
 
 The [drift detection spec](docs/drift-detection-spec.md) defines the detection contract:
@@ -119,11 +121,13 @@ security controls, OIDC flow). It predates Phases 3–4 and has not been updated
 | Azure CLI | 2.x | Local authentication; drift scenario scripts |
 | Python | `>= 3.11` (tested on 3.13 and 3.14) | Drift classification and engine |
 | Pydantic | `>= 2.11, < 3` | Strict report models |
+| PyYAML | `>= 6.0, < 7` | `--format yaml` output |
 | pytest, pytest-cov, jsonschema | dev extras | Tests and schema validation |
 | GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3` | Plan-only CI with OIDC |
 
 `scripts/detect_drift.py` and the engine modules it imports use only the Python standard
-library, so they run with plain `python3`. Pydantic is needed only for `drift_engine.models`.
+library, so they run with plain `python3`. Pydantic and PyYAML are needed only for
+`drift_engine.models` and the installed `drift-engine` command.
 
 ---
 
@@ -165,14 +169,17 @@ terraform/
 
 scripts/
 ├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
-├── detect_drift.py               # Deterministic drift classification (Tasks 3.3–3.4)
+├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
 └── validate.sh                   # terraform fmt -check + validate (no Azure auth)
 
 src/drift_engine/                 # Python drift engine (Phase 4)
 ├── parser.py                     # plan.json loading, integrity gate, S/R/D extraction (4.2)
 ├── models.py                     # Strict Pydantic report models (4.3)
 ├── comparator.py                 # Attribute diff, noise and configuration assessment (4.4)
-└── severity.py                   # Rules-based severity rating (4.5)
+├── severity.py                   # Rules-based severity rating (4.5)
+├── classifier.py                 # Resource classification and report building (moved in 4.6)
+├── formatters.py                 # JSON / YAML / console rendering (4.6)
+└── cli.py                        # drift-engine command (4.6)
 
 schemas/
 ├── drift_report.schema.json      # Report contract (JSON Schema 2020-12)
@@ -207,7 +214,8 @@ python3 scripts/detect_drift.py "$ARTIFACT_DIR"
 ```
 
 `detect_drift.py` writes `$ARTIFACT_DIR/drift_classification.json` and prints a summary,
-for example `has_drift=true  [external_drift=1]`.
+for example `has_drift=true  [external_drift=1]`. The installed `drift-engine analyze`
+command produces the same report (see below).
 
 **Exit codes** describe the process, not the drift verdict:
 
@@ -223,15 +231,17 @@ Evidence bundles and reports can contain resource IDs and must stay outside the 
 
 ## 🐍 Python Drift Engine
 
-`src/drift_engine/` is the Phase 4 library. The plan-parsing and attribute-diff code was
-**moved out of** `scripts/detect_drift.py` (not rewritten), and the script imports it. The
-script's output is unchanged.
+`src/drift_engine/` is the Phase 4 package. The parsing, diff and classification code was
+**moved out of** `scripts/detect_drift.py` (not rewritten), and the script now imports it.
+The script's output is unchanged.
 
 | Module | Task | What it does |
 |---|---|---|
-| `parser.py` | 4.2 | Loads `plan.json` (50 MiB limit) and re-applies the integrity gate. It extracts recorded / real / desired views per managed resource. Bad input raises `EvidenceError`, never another exception. |
+| `parser.py` | 4.2 | Loads `plan.json` (50 MiB limit) and re-applies the integrity gate, including checks that each resource entry's identity fields (address, mode, type, name, index, …) have the shapes Terraform writes. It extracts recorded / real / desired views per managed resource. Bad input raises `EvidenceError`, never another exception. |
 | `models.py` | 4.3 | Strict, immutable Pydantic models (`DriftReport`, `DriftSummary`, `DriftItem`, `AttributeChange`) that mirror `schemas/drift_report.schema.json`. They round-trip the classifier JSON exactly. |
 | `comparator.py` | 4.4 | Deep attribute diff, plus an assessment of each changed path as `configured` (set in the Terraform configuration), `noise` (declarative rules: computed IDs, timeouts, timestamps, read-only metadata), `unconfigured` or `undetermined`. It annotates only: nothing is dropped and only proven noise is excluded from "significant". |
+| `classifier.py` | 4.6 | Resource classification (spec §6) and report building, moved from the script so the CLI and the script share one implementation. |
+| `formatters.py`, `cli.py` | 4.6 | `drift-engine analyze`: JSON (default), YAML or console output. See below. |
 | `severity.py` | 4.5 | Deterministic, rules-based `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` per change and per resource. Examples: Key Vault access policies, NSG inbound rules open to any source and public storage access rate `CRITICAL`/`HIGH`; tags and descriptions rate `LOW`; proven noise rates `INFO`; changes no rule covers default to `MEDIUM`. |
 
 Install for development (a virtual environment is recommended):
@@ -242,7 +252,41 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Library use (there is no engine CLI yet; that is Task 4.6):
+### `drift-engine analyze`
+
+```bash
+# JSON report to a file (the run manifest enables the full integrity gate)
+drift-engine analyze --plan "$ARTIFACT_DIR/plan.json" --manifest "$ARTIFACT_DIR/detection_run.json" --output report.json
+
+# Human-readable view in the terminal
+drift-engine analyze --plan "$ARTIFACT_DIR/plan.json" --manifest "$ARTIFACT_DIR/detection_run.json" --format console
+```
+
+| Option | Meaning |
+|---|---|
+| `--plan PATH` | `plan.json` from `terraform show -json` (required) |
+| `--manifest PATH` | Run manifest (`detection_run.json`). Without it, the plan exit-code and Terraform-version checks are skipped, `run` holds only nulls, and a warning is printed. |
+| `--output PATH` | Write to a file instead of standard output; a one-line summary is printed |
+| `--format json\|yaml\|console` | `json` (default) and `yaml` are the report itself; `console` is a readable view |
+| `--color auto\|always\|never` | ANSI colors for `console` (`auto`: terminal only, honours `NO_COLOR`) |
+
+- **JSON and YAML** are the report defined by
+  [`schemas/drift_report.schema.json`](schemas/drift_report.schema.json), checked against the
+  Pydantic models before writing. With `--manifest`, the JSON is byte-identical to what
+  `scripts/detect_drift.py` writes for the same bundle.
+- **Console** adds, for reading only, the deterministic severity and the configured/noise
+  assessment per change. Noise is listed, not hidden. A failed run is shown as
+  "drift status UNKNOWN", never as "no drift".
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Evidence valid and classified (drift or not) |
+| `1` | Evidence failed or rejected: drift status unknown. The failed report is still written. |
+| `2` | Usage error |
+| `70` | The report would break the report contract. Nothing is written and drift status is unknown. Defense in depth: the integrity gate rejects malformed input first, so this indicates an engine defect. |
+| `73` | The output file could not be written |
+
+### Library use
 
 ```python
 from drift_engine import comparator, parser, severity
@@ -258,10 +302,10 @@ with open("/path/outside/repo/drift_classification.json", encoding="utf-8") as f
     report = DriftReport.model_validate_json(fh.read())
 ```
 
-**Not yet connected:** the comparator assessment and severity ratings are computed by the
-library but are **not written into `drift_classification.json`**, and the report schema and
-models do not contain them yet. All engine rules are deterministic. None of this uses an
-LLM.
+**Not in the report:** severity and the configured/noise assessment appear in the console
+view and the library only. They are **not written into the JSON/YAML report**, because the
+report schema and models do not contain them yet. All engine rules are deterministic. None
+of this uses an LLM.
 
 ---
 
@@ -278,16 +322,18 @@ python3 -m unittest discover -s tests
 ./scripts/validate.sh
 ```
 
-State after Task 4.5: **201 tests pass** with `pytest` (Python 3.13 and 3.14). With plain
-`python3` and no installation, the same 201 run and 27 are skipped (they need Pydantic).
+State after Task 4.6: **243 tests pass** with `pytest` (Python 3.13 and 3.14). With plain
+`python3` and no installation, the same 243 run and 62 are skipped (they need Pydantic and
+PyYAML).
 
 | Test file | Covers | Tests |
 |---|---|---|
 | `test_detect_drift.py` | Classification, integrity gate, attribute detail, redaction, CLI exit codes | 63 |
-| `test_parser.py` | Parser: real fixtures, missing/null/unknown fields, malformed input, 50 MiB limit | 31 |
+| `test_parser.py` | Parser: real fixtures, missing/null/unknown fields, malformed input and identity fields, 50 MiB limit | 38 |
 | `test_models.py` | Models: strict types, JSON round trip, agreement with the JSON Schema | 25 |
 | `test_comparator.py` | Diff, configured vs noise assessment, Azure-shaped acceptance cases | 35 |
 | `test_severity.py` | Severity rules, escalation, floors, edge cases | 45 |
+| `test_cli.py` | `drift-engine analyze`: every format, plan-only and manifest modes, failures, exit codes, console view | 35 |
 | `test_package.py` | Package installation smoke test | 2 |
 
 **Live drift scenario** (changes Azure, then reverts it; explicit opt-in):
@@ -423,7 +469,7 @@ registration holds zero credentials.
 | 1 | Terraform + Azure foundation (minimal baseline) | ✅ Complete |
 | 2 | Remote state backend + secure auth (plan-only CI) | ✅ Complete |
 | 3 | Deterministic Terraform drift detection | ✅ Complete |
-| **4** | **Python drift engine** | 🟡 In progress (4.1–4.5 done; 4.6 output/CLI and 4.7 logging/coverage remaining) |
+| **4** | **Python drift engine** | 🟡 In progress (4.1–4.6 done; 4.7 logging/coverage remaining) |
 | 5 | Scheduled GitHub Actions drift detection | ⬜ Planned |
 | 6 | LangGraph AI analysis | ⬜ Planned |
 | 7 | Azure Activity Log investigation | ⬜ Planned |

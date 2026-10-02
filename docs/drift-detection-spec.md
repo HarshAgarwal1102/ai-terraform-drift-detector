@@ -195,6 +195,21 @@ reading), when an action list contains non-strings, when a `resource_changes` or
 100 levels. Terraform does not produce any of these. Before Task 4.2 they crashed the
 classifier or, for a repeated address, silently dropped an entry.
 
+**Identity checks (follow-up to Task 4.6).** Every `resource_changes` /
+`resource_drift` entry must also carry what Terraform always writes and the report
+schema requires:
+- a non-empty `address`;
+- `mode` `managed` or `data`;
+- string `type` and `name`;
+- a non-empty action list;
+- an `index` that is absent, `null`, an integer or a string;
+- `module_address`, `provider_name`, `action_reason` and `previous_address` that are
+  absent, `null` or strings.
+
+`output_changes` action lists must be non-empty. Before this check, such entries passed
+the gate. A missing `mode` silently dropped the resource, and other malformed fields
+produced a report that broke the schema.
+
 ## 6. Drift vs Configuration Change
 
 `terraform plan` compares **three** views of each resource:
@@ -312,8 +327,26 @@ and refusing `TF_CLI_ARGS*`, which could inject forbidden flags.
   reject whole-number floats such as `1.0` where the schema expects an integer.
 
 **Plan parsing (Task 4.2):** loading `plan.json`, the §5.3 gate and S/R/D extraction live
-in `src/drift_engine/parser.py`. `scripts/detect_drift.py` imports it from `src/` (no
-installation needed) and keeps the classification; output is unchanged.
+in `src/drift_engine/parser.py`. Classification lives in `src/drift_engine/classifier.py`
+(moved there in Task 4.6). `scripts/detect_drift.py` is a thin wrapper that imports both
+from `src/` (no installation needed); its output is unchanged.
+
+**Engine CLI (Task 4.6):** `drift-engine analyze --plan PLAN [--manifest MANIFEST]
+[--output PATH] [--format json|yaml|console]`.
+- JSON (default) and YAML are this report, validated against the Task 4.3 models before
+  writing. With `--manifest`, the JSON is byte-identical to `scripts/detect_drift.py`
+  output for the same bundle.
+- `console` is a readable view that also shows the Task 4.4 assessment and Task 4.5
+  severity. Neither is part of the report.
+- **Without `--manifest`**, the two manifest-based gate checks (plan exit-code consistency,
+  Terraform version) are skipped, every `run` field is `null`, and a warning is printed.
+  All other gate checks still apply. Pass the manifest whenever one exists.
+- Exit codes: `0` classified, `1` evidence failed or rejected (report still written, drift
+  status unknown), `2` usage, `70` the report would break the contract (nothing written),
+  `73` output not writable.
+- Exit `70` is defense in depth. The identity checks in §5.3 reject the malformed resource
+  fields that previously reached the report, so for gate-passing input it indicates an
+  engine defect.
 
 **Classifier (Task 3.3):** `scripts/detect_drift.py ARTIFACT_DIR` writes
 `ARTIFACT_DIR/drift_classification.json`, containing `outcome`, `has_drift`

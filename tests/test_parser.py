@@ -58,7 +58,11 @@ def minimal_plan(**extra) -> dict:
 
 
 def entry(address: str = "a.b", actions=("update",), **change) -> dict:
-    return {"address": address, "mode": "managed", "change": {"actions": list(actions), **change}}
+    """A resource entry with only the fields Terraform always writes."""
+    rtype, name = address.split(".")[-2:]
+    mode = "data" if address.startswith("data.") else "managed"
+    return {"address": address, "mode": mode, "type": rtype, "name": name,
+            "change": {"actions": list(actions), **change}}
 
 
 class TempDirTestCase(unittest.TestCase):
@@ -171,7 +175,8 @@ class TestMissingAndNullFields(unittest.TestCase):
 
     def test_entry_with_only_required_fields(self):
         r = p.parse_plan(minimal_plan(resource_changes=[entry()])).resources[0]
-        for field in ("module_address", "type", "name", "index", "provider_name",
+        self.assertEqual((r.address, r.mode, r.type, r.name), ("a.b", "managed", "a", "b"))
+        for field in ("module_address", "index", "provider_name",
                       "action_reason", "previous_address", "state", "real", "desired", "after_unknown"):
             self.assertIsNone(getattr(r, field), field)
         self.assertEqual(r.sensitive_masks, (None, None))
@@ -320,6 +325,117 @@ class TestInvalidPlans(TempDirTestCase):
     def test_load_json_keeps_caller_stage(self):
         err = self.assertEvidenceError(p.load_json, os.path.join(self.tmp, "detection_run.json"), "manifest")
         self.assertEqual(err.stage, "manifest")
+
+
+def _with(field: str, value, array: str = "resource_changes") -> dict:
+    e = entry()
+    if value is _DROP:
+        e.pop(field, None)  # absent from the entry
+    else:
+        e[field] = value
+    return minimal_plan(**{array: [e]})
+
+
+_DROP = object()
+
+# (field, bad value, expected message fragment)
+IDENTITY_CASES = (
+    ("address", "", "an empty address"),
+    ("mode", _DROP, "a mode other than managed or data"),
+    ("mode", "unmanaged", "a mode other than managed or data"),
+    ("mode", None, "a mode other than managed or data"),
+    ("type", _DROP, "a missing or non-string type"),
+    ("type", None, "a missing or non-string type"),
+    ("type", 7, "a missing or non-string type"),
+    ("name", _DROP, "a missing or non-string name"),
+    ("name", ["b"], "a missing or non-string name"),
+    ("index", True, "an index that is not a string or integer"),
+    ("index", 1.0, "an index that is not a string or integer"),
+    ("index", ["main"], "an index that is not a string or integer"),
+    ("index", {"k": 1}, "an index that is not a string or integer"),
+    ("module_address", 3, "a non-string module_address"),
+    ("provider_name", [], "a non-string provider_name"),
+    ("action_reason", False, "a non-string action_reason"),
+    ("previous_address", {}, "a non-string previous_address"),
+)
+
+
+class TestIdentityFields(unittest.TestCase):
+    """Gap found in Task 4.6: identity fields reached the report unchecked."""
+
+    def test_malformed_identity_fields_rejected_in_both_arrays(self):
+        for array in ("resource_changes", "resource_drift"):
+            for field, value, message in IDENTITY_CASES:
+                with self.subTest(array=array, field=field, value=repr(value)):
+                    with self.assertRaises(p.EvidenceError) as ctx:
+                        p.parse_plan(_with(field, value, array))
+                    self.assertEqual(ctx.exception.stage, p.PLAN_STAGE)
+                    self.assertIn(f"{array} contains an entry with {message}", ctx.exception.reason)
+
+    def test_empty_actions_rejected(self):
+        for array in ("resource_changes", "resource_drift"):
+            with self.subTest(array):
+                with self.assertRaises(p.EvidenceError) as ctx:
+                    p.parse_plan(minimal_plan(**{array: [entry(actions=())]}))
+                self.assertIn(f"{array} contains an entry with empty actions", ctx.exception.reason)
+        with self.assertRaises(p.EvidenceError) as ctx:
+            p.parse_plan(minimal_plan(output_changes={"o": {"actions": []}}))
+        self.assertIn("output_changes contains an entry with empty actions", ctx.exception.reason)
+
+    def test_data_source_entries_are_checked_too(self):
+        data = entry("data.azurerm_client_config.current", actions=("read",))
+        data["name"] = None
+        with self.assertRaises(p.EvidenceError):
+            p.parse_plan(minimal_plan(resource_changes=[data]))
+
+    def test_several_problems_reported_once_each_in_fixed_order(self):
+        bad = [entry("a.x"), entry("a.y"), entry("a.z")]
+        bad[0]["type"] = None
+        bad[1]["type"] = 1
+        bad[2]["index"] = True
+        with self.assertRaises(p.EvidenceError) as ctx:
+            p.parse_plan(minimal_plan(resource_changes=bad))
+        self.assertEqual(ctx.exception.reason,
+                         "resource_changes contains an entry with a missing or non-string type; "
+                         "resource_changes contains an entry with an index that is not a string or integer")
+
+    def test_every_valid_terraform_shape_accepted(self):
+        valid = (
+            ("index", _DROP), ("index", None), ("index", 0), ("index", 12), ("index", "main"), ("index", ""),
+            ("module_address", _DROP), ("module_address", None), ("module_address", 'module.a["x"]'),
+            ("provider_name", _DROP), ("provider_name", "registry.terraform.io/hashicorp/azurerm"),
+            ("action_reason", None), ("action_reason", "replace_because_cannot_update"),
+            ("previous_address", None), ("previous_address", "a.old"),
+            ("mode", "data"), ("name", ""),
+        )
+        for field, value in valid:
+            with self.subTest(field=field, value=repr(value)):
+                self.assertIsInstance(p.parse_plan(_with(field, value)), p.ParsedPlan)
+
+    def test_real_fixtures_unaffected(self):
+        source = os.path.join(ROOT, "tests", "fixtures", "plan_evidence")
+        for name in sorted(os.listdir(source)):
+            path = os.path.join(source, name, "plan.sanitized.json")
+            if os.path.exists(path):
+                with self.subTest(name):
+                    self.assertIsInstance(p.parse_plan_file(path), p.ParsedPlan)
+
+    def test_classifier_reports_rejected_identity_as_failed_evidence(self):
+        # The stdlib path used by scripts/detect_drift.py: a failed report, never a
+        # report whose resources break the schema.
+        from drift_engine import classifier
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "plan.json")
+            for field, value, message in IDENTITY_CASES:
+                with self.subTest(field=field, value=repr(value)):
+                    with open(path, "w", encoding="utf-8") as fh:
+                        json.dump(_with(field, value), fh)
+                    report = classifier.evaluate(path).report
+                    self.assertEqual((report["outcome"], report["has_drift"], report["resources"]),
+                                     ("failed", None, []))
+                    self.assertEqual(report["failure"]["stage"], "integrity")
+                    self.assertIn(message, report["failure"]["reason"])
 
 
 class TestFuzzedPlans(unittest.TestCase):

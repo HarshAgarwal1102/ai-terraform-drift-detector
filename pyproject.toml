@@ -23,7 +23,11 @@ requires-python = ">=3.11"
 # like scripts/detect_drift.py, so no CLI framework is required.
 dependencies = [
     "pydantic>=2.11,<3",   # 2.11+: validate_by_name / serialize_by_alias (models.py)
+    "PyYAML>=6.0,<7",      # --format yaml (formatters.py)
 ]
+
+[project.scripts]
+drift-engine = "drift_engine.cli:main"
 
 [project.optional-dependencies]
 dev = [

@@ -102,7 +102,10 @@ STORAGE_STATE = {
 
 class TestMigratedDiff(unittest.TestCase):
     def test_classifier_uses_the_comparator(self):
-        self.assertIs(dd.attribute_changes, c.attribute_changes)
+        from drift_engine import classifier  # classification moved here in Task 4.6
+
+        self.assertIs(classifier.attribute_changes, c.attribute_changes)
+        self.assertIs(classifier.classify_attributes, c.classify_attributes)
         self.assertIs(dd.classify_attributes, c.classify_attributes)
         self.assertEqual(dd.DRIFTED, c.DRIFTED)
 

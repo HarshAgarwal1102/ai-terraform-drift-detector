@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 4 — Python Drift Engine
-- **Current Active Task**: Task 4.6 — Structured Output Generator (JSON/YAML)
+- **Current Active Task**: Task 4.7 — Logging, Error Handling & Unit Tests
 - **Phases Completed**: 3 of 14
 
 ---
@@ -848,6 +848,7 @@ Phase 4 modularizes the Python drift engine into a production-grade library with
     - A repeated address within an array: the old script silently dropped an entry, turning `external_drift` into `converged_drift`.
     - Entries nested deeper than `MAX_VALUE_DEPTH` (100): the old script raised `RecursionError` in classification from about 1,000 levels.
     - Plans over 50 MiB.
+    - **Extended 2026-10-02 (follow-up to Task 4.6):** resource identity fields are now checked as well; see Task 4.6 "Gate gap resolved".
   - **Contract preserved**: script output is **byte-identical** before and after (output, exit code and message) across 36 bundles: all 11 real fixtures and 25 malformed, sensitive and unknown-value variants. `tests/test_detect_drift.py` is unmodified (63 passing). `tests/test_package.py` (Task 4.1) now detects installation from package metadata, because the script makes `src/` importable.
   - **Tests**: `tests/test_parser.py`, 31 tests (52 subtests), unittest-style so they run under both pytest and plain unittest:
     - all real fixtures, with and without the manifest;
@@ -1056,19 +1057,100 @@ Phase 4 modularizes the Python drift engine into a production-grade library with
     - (e) Severity is not yet in the report, schema or models (spec §10). That is a later change.
 
 #### Task 4.6 — Structured Output Generator (JSON/YAML)
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Implement CLI output formatters for console human readability and machine JSON/YAML output.
 - **Dependencies**: Task 4.5
 - **Files/Areas**: `src/drift_engine/cli.py`, `src/drift_engine/formatters.py`
 - **Acceptance Criteria**:
-  - [ ] CLI command `drift-engine analyze --plan plan.json --output report.json` produces formatted report.
-  - [ ] CLI command supports `--format console` for rich terminal output.
+  - [x] CLI command `drift-engine analyze --plan plan.json --output report.json` produces formatted report.
+  - [x] CLI command supports `--format console` for rich terminal output.
 - **Validation**:
-  - [ ] Test CLI invocation with sample plan JSON files.
+  - [x] Test CLI invocation with sample plan JSON files.
 - **Implementation Notes**:
   - Use rich or standard formatting for terminal output.
 - **Completion Notes**:
-  - None.
+  - **Integration**: `drift-engine analyze` connects the components as follows:
+    - `classifier.evaluate` builds the report from parser + comparator;
+    - `models.DriftReport` validates it before anything is written;
+    - for the console view, `comparator.compare_plan` and `severity.plan_severity` add the assessment and severity.
+    - The installed `drift-engine` entry point and `python -m drift_engine.cli` both work.
+    - No LLM or network use; Terraform's plan stays the only source of truth.
+  - **Classification moved, outside the listed Files/Areas** (necessary): resource classification still lived only in `scripts/detect_drift.py`, which a package command cannot import.
+    - It moved verbatim into `src/drift_engine/classifier.py`, the same pattern as Tasks 4.2/4.4.
+    - `classify_bundle` is now a wrapper over the new `evaluate(plan_path, manifest_path=None)`, which also returns the parsed and raw plan.
+    - The script is a ~110-line wrapper that re-exports its former names (declared in `__all__`).
+    - Script output is **byte-identical** to the golden baseline (36 bundles).
+    - One Task 4.4 test was repointed: its identity check now targets `classifier` instead of the script, because the script no longer calls the diff itself.
+  - **Formats** (`formatters.py`):
+    - `json` (default) and `yaml` are the unchanged report contract. JSON is byte-identical to the script output when `--manifest` is given. YAML uses `yaml.safe_dump` and loads back equal to the JSON.
+    - `console` is a deterministic standard-library view: header (outcome, drift, highest severity, plan, run, counts, pending), resources sorted by severity then address, per-change class / category / severity / rule ids, state / real / desired values (`(absent)`, `(known after apply)`, `(sensitive)`, truncated at 60 characters), noise **listed not hidden**, severity-floor reasons, ambiguity and notes. Optional ANSI color (`--color auto|always|never`; auto means terminal only and honours `NO_COLOR`).
+    - A failed run is shown as "drift status UNKNOWN", never "no drift".
+    - Severity and assessment appear in the console only. The report, schema and models are unchanged.
+  - **CLI semantics**:
+    - `--plan` is required, as in the acceptance command.
+    - `--manifest` is optional and enables the full integrity gate. Without it, the exit-code and Terraform-version checks are skipped, `run` is all null, and a warning goes to stderr.
+    - With `--output`, a one-line summary is printed (`has_drift=… [counts] severity=…`).
+    - Exit codes: `0` classified; `1` evidence failed or rejected (failed report still written); `2` usage; `70` the report would break the contract (nothing written); `73` output not writable.
+  - **Dependency**: `PyYAML>=6.0,<7` added (runtime) for `--format yaml`, plus the `[project.scripts] drift-engine` entry point. No `rich`; standard formatting per the implementation note.
+  - **Known gap found (pre-existing, needs a decision)**: the CLI fuzz showed the §5.3 gate does not type-check resource identity fields (`type`, `name`, `index`, `module_address`, `provider_name`, `action_reason`) or reject empty `address`/`actions`.
+    - For such malformed plans (not produced by Terraform), the classifier's report breaks the schema; this already applied to `scripts/detect_drift.py` since Task 3.3.
+    - The CLI refuses those reports (exit `70`, nothing written, drift UNKNOWN); covered by a regression test.
+    - The proper fix is to extend the parser's gate, which changes the Task 4.2 parser contract and was **not** done here (constraint: preserve established contracts). Documented in spec §8.2 and README known limitations.
+  - **Gate gap resolved (2026-10-02, approved follow-up)**:
+    - **What changed**: `src/drift_engine/parser.py` integrity gate. Every `resource_changes` / `resource_drift` entry (managed and data) must have:
+      - a non-empty `address`;
+      - `mode` `managed` or `data`;
+      - string `type` and `name`;
+      - a non-empty action list;
+      - `index` absent, null, integer (not bool or float) or string;
+      - `module_address`, `provider_name`, `action_reason` and `previous_address` absent, null or string.
+
+      `output_changes` action lists must be non-empty. Violations are reported once per kind, in a fixed order, as `integrity` failures: a failed report with drift unknown.
+    - **Rules came from evidence**: an inventory of all 17 real fixture entries (all identity fields strings, `action_reason` present on 2, every action list non-empty) and the report schema's field requirements.
+    - **Valid input unchanged**:
+      - script golden output: byte-identical for all 36 bundles;
+      - all 66 CLI outputs on real fixtures (11 fixtures × with/without manifest × 3 formats): byte-identical;
+      - `models.py`, `comparator.py`, `severity.py`, `classifier.py`, `formatters.py` and the schema: unchanged (checksums).
+    - **Behavior change for malformed input only**: such plans now get a failed, schema-valid report (exit 1) from both the script and the CLI. Previously the script wrote a schema-invalid "succeeded" report and the CLI exited 70. A missing `mode` silently dropped the resource. CLI exit `70` remains as defense in depth, and its message now names an engine defect.
+    - **Tests**:
+      - `tests/test_parser.py` +7 tests (`TestIdentityFields`): 17 malformed shapes × both arrays; empty actions in all three arrays; data entries checked; multi-problem ordering; 17 valid Terraform shapes accepted; real fixtures accepted; classifier gives a failed report.
+      - The `entry()` helper now builds entries with `type`/`name`, as Terraform does. `test_entry_with_only_required_fields` now expects them.
+      - `tests/test_cli.py`: the malformed-identity test now expects exit 1 with a failed report (6 cases); the mocked exit-70 test is kept.
+    - **Validation**:
+      - Full suite 243 passed on Python 3.14.7 and 3.13 (ResourceWarnings and unraisable exceptions as errors); plain unittest OK (62 skipped).
+      - **Mutation check**: 10 breakages of the new checks, including 2 that make the gate over-strict (`module_address` required, `data` mode rejected), were each caught.
+      - **Fuzz**: pipeline contract violations went from 288 to **0** (5,000 plans, both Pythons). Parser (20k ×2), comparator (20k), severity (20k) and CLI-pipeline fuzzers all show 0 unhandled. Models and schema agree on 60k mutations.
+      - `pyflakes` clean; Python 3.11 grammar OK; `./scripts/validate.sh` passed.
+    - **Docs**: spec §5.3 (identity checks) and §8.2 (exit 70 is defense in depth, gap removed); README parser row, exit-code row, test counts, and the known limitation removed.
+  - **Contracts preserved**: `parser.py`, `models.py`, `comparator.py`, `severity.py` and `schemas/drift_report.schema.json` are byte-for-byte unchanged (checksums). The report contract is unchanged (tested: top-level keys, schema validation of every CLI output).
+  - **Tests**: `tests/test_cli.py`, 35 tests (87 subtests); they skip without pydantic/PyYAML.
+    - **Acceptance**: the exact command on every fixture, with a contract-valid report and summary line.
+    - **Equivalence**: with `--manifest`, byte-identical to the script and the same exit code for all 11 fixtures, including the failed run.
+    - **Schema validation** of every output, with and without a manifest.
+    - **Plan-only mode**: warning, null run, other gate checks still apply; manifest checks apply when given.
+    - *(Pre-follow-up result, superseded by "Gate gap resolved" above.)* **Failures**: failed manifest, missing or invalid plan in all three formats (console never says "none detected"), unwritable output (73), contract violation (70) including malformed identity fields, five usage errors (2).
+    - **Formats**: JSON default; YAML equal to JSON for every fixture; ambiguous YAML strings; deterministic in every format; file output equal to stdout.
+    - **Console**: drift, in-sync, replace (noise listed, floor reason, outputs), external deletion, severity matches `severity.py` for every fixture, sort by severity before address, failed run, plan-only line, sensitive value never printed in any format, unknown value, truncation, color rules.
+    - **Real process**: `python -m drift_engine.cli` and the installed `drift-engine` executable, including `--version`.
+  - **Validation**:
+    - Fresh `pip install -e ".[dev]"` on Python 3.14.7 and 3.13: `drift-engine --version` works, and the acceptance command was run by hand on a real fixture.
+    - *(Pre-follow-up result, superseded by "Gate gap resolved" above.)* `pytest tests/test_cli.py`: 35 passed on both Pythons. Full suite: 236 passed on both, with ResourceWarnings and unraisable exceptions as errors (4 file-handle leaks in the new tests were found and fixed).
+    - Plain `python3 -m unittest discover -s tests`: OK (62 skipped).
+    - **Mutation check**: 10 deliberate breakages of the CLI and formatters were each caught; 0 tests skipped.
+    - *(Pre-follow-up result, superseded by "Gate gap resolved" above.)* **Pipeline fuzz** (5,000 mutated plans through evaluate, models, comparator, severity and all three renderers): 0 unhandled exceptions; 288 contract violations, all on the known gap above.
+    - `pyflakes` clean; all files parse with the Python 3.11 grammar.
+    - `./scripts/validate.sh` passed.
+    - README and spec links and anchors resolve; the README commands and library example were run for real.
+    - No Terraform, Azure, workflow, schema or model change.
+  - **Docs updated**: `README.md` (status 4.1–4.6, CLI usage, options, exit codes, formats, dependency, tree, test counts, known limitation) and spec §8.2 (classifier location, CLI, plan-only semantics, exit codes, known gap).
+  - **Limitations**:
+    - (a) ~~The known gate gap above~~: resolved (see "Gate gap resolved").
+    - (b) Severity and assessment are not in the JSON/YAML report (schema change, later).
+    - (c) Plan-only mode is weaker than manifest mode by design; `--manifest` is optional because the acceptance command omits it.
+    - (d) No structured logging yet (Task 4.7).
+    - (e) Python 3.11/3.12 still not executed locally (syntax checked).
 
 #### Task 4.7 — Logging, Error Handling & Unit Tests
 - **Status**: ⬜ NOT STARTED

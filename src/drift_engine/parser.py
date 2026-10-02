@@ -156,6 +156,34 @@ def _entries_ok(entries: Any) -> bool:
     )
 
 
+_MODES = ("managed", "data")
+_REQUIRED_STRINGS = ("type", "name")
+_OPTIONAL_STRINGS = ("module_address", "provider_name", "action_reason", "previous_address")
+
+
+def _identity_problems(entry: dict) -> list[str]:
+    """Identity fields that are not what Terraform writes (and the report schema requires).
+
+    Terraform always writes a non-empty `address`, `mode` managed/data, string `type`
+    and `name`, a non-empty action list; `index` is absent, an integer (count) or a
+    string (for_each); `module_address`, `provider_name`, `action_reason` and
+    `previous_address` are absent or strings.
+    """
+    problems = []
+    if not entry["address"]:
+        problems.append("an empty address")
+    if entry.get("mode") not in _MODES:
+        problems.append("a mode other than managed or data")
+    problems += [f"a missing or non-string {f}" for f in _REQUIRED_STRINGS if not isinstance(entry.get(f), str)]
+    problems += [f"a non-string {f}" for f in _OPTIONAL_STRINGS if entry.get(f) is not None and not isinstance(entry[f], str)]
+    index = entry.get("index")
+    if index is not None and not isinstance(index, str) and (type(index) is not int):
+        problems.append("an index that is not a string or integer")
+    if not entry["change"]["actions"]:
+        problems.append("empty actions")
+    return problems
+
+
 def _depth_exceeds(value: Any, limit: int) -> bool:
     """True when containers nest deeper than `limit` (iterative, so it cannot recurse)."""
     stack = [(value, 0)]
@@ -208,6 +236,8 @@ def integrity_violations(
             else:
                 if not all(_is_actions(e["change"]["actions"]) for e in entries):
                     violations.append(f"{key} contains actions that are not all strings")
+                problems = {p for e in entries for p in _identity_problems(e)}
+                violations += [f"{key} contains an entry with {p}" for p in sorted(problems)]
                 addresses = [e["address"] for e in entries]
                 if len(set(addresses)) != len(addresses):
                     violations.append(f"{key} contains a duplicate address")
@@ -221,6 +251,8 @@ def integrity_violations(
             violations.append("output_changes contains an entry without actions")
         elif not all(_is_actions(v["actions"]) for v in oc.values()):
             violations.append("output_changes contains actions that are not all strings")
+        elif not all(v["actions"] for v in oc.values()):
+            violations.append("output_changes contains an entry with empty actions")
     if violations:
         return violations
 
