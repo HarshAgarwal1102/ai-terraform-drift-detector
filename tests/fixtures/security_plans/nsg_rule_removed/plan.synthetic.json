@@ -1,0 +1,180 @@
+{
+  "applyable": true,
+  "complete": true,
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "network": {
+          "module": {
+            "resources": [
+              {
+                "address": "azurerm_network_security_group.this",
+                "expressions": {
+                  "location": {
+                    "constant_value": null
+                  },
+                  "name": {
+                    "constant_value": null
+                  },
+                  "resource_group_name": {
+                    "constant_value": null
+                  },
+                  "security_rule": {
+                    "constant_value": null
+                  },
+                  "tags": {
+                    "constant_value": null
+                  }
+                },
+                "mode": "managed",
+                "name": "this",
+                "type": "azurerm_network_security_group"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "errored": false,
+  "format_version": "1.2",
+  "output_changes": {},
+  "resource_changes": [
+    {
+      "address": "module.network.azurerm_network_security_group.this[\"app\"]",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Network/networkSecurityGroups/aitdd-dev-main-app-nsg",
+          "location": "centralindia",
+          "name": "aitdd-dev-main-app-nsg",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "security_rule": [
+            {
+              "access": "Deny",
+              "description": "",
+              "destination_address_prefix": "*",
+              "destination_address_prefixes": [],
+              "destination_application_security_group_ids": [],
+              "destination_port_range": "3389",
+              "destination_port_ranges": [],
+              "direction": "Inbound",
+              "name": "deny-rdp-internet",
+              "priority": 200,
+              "protocol": "Tcp",
+              "source_address_prefix": "Internet",
+              "source_address_prefixes": [],
+              "source_application_security_group_ids": [],
+              "source_port_range": "*",
+              "source_port_ranges": []
+            }
+          ],
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Network/networkSecurityGroups/aitdd-dev-main-app-nsg",
+          "location": "centralindia",
+          "name": "aitdd-dev-main-app-nsg",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "security_rule": [],
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "index": "app",
+      "mode": "managed",
+      "module_address": "module.network",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_network_security_group"
+    }
+  ],
+  "resource_drift": [
+    {
+      "address": "module.network.azurerm_network_security_group.this[\"app\"]",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Network/networkSecurityGroups/aitdd-dev-main-app-nsg",
+          "location": "centralindia",
+          "name": "aitdd-dev-main-app-nsg",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "security_rule": [],
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Network/networkSecurityGroups/aitdd-dev-main-app-nsg",
+          "location": "centralindia",
+          "name": "aitdd-dev-main-app-nsg",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "security_rule": [
+            {
+              "access": "Deny",
+              "description": "",
+              "destination_address_prefix": "*",
+              "destination_address_prefixes": [],
+              "destination_application_security_group_ids": [],
+              "destination_port_range": "3389",
+              "destination_port_ranges": [],
+              "direction": "Inbound",
+              "name": "deny-rdp-internet",
+              "priority": 200,
+              "protocol": "Tcp",
+              "source_address_prefix": "Internet",
+              "source_address_prefixes": [],
+              "source_application_security_group_ids": [],
+              "source_port_range": "*",
+              "source_port_ranges": []
+            }
+          ],
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "index": "app",
+      "mode": "managed",
+      "module_address": "module.network",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_network_security_group"
+    }
+  ],
+  "terraform_version": "1.14.7",
+  "timestamp": "2026-10-02T12:00:00Z"
+}

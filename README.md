@@ -264,7 +264,8 @@ Install for development (a virtual environment is recommended):
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"      # drift engine only
+# pip install -e ".[dev,ai]" # also the Phase 6 AI engine (same as: pip install -r requirements.txt)
 ```
 
 ### `drift-engine analyze`
@@ -291,9 +292,9 @@ drift-engine analyze --plan "$ARTIFACT_DIR/plan.json" --manifest "$ARTIFACT_DIR/
   [`schemas/drift_report.schema.json`](schemas/drift_report.schema.json), checked against the
   Pydantic models before writing. With `--manifest`, the JSON is byte-identical to what
   `scripts/detect_drift.py` writes for the same bundle.
-- **Console** adds, for reading only, the deterministic severity and the configured/noise
-  assessment per change. Noise is listed, not hidden. A failed run is shown as
-  "drift status UNKNOWN", never as "no drift".
+- **Console** is a readable view of the same report, with the deterministic severity and
+  the configured/noise assessment per change. Noise is listed, not hidden. A failed run is
+  shown as "drift status UNKNOWN", never as "no drift".
 
 | Exit code | Meaning |
 |---|---|
@@ -345,10 +346,12 @@ with open("/path/outside/repo/drift_classification.json", encoding="utf-8") as f
     report = DriftReport.model_validate_json(fh.read())
 ```
 
-**Not in the report:** severity and the configured/noise assessment appear in the console
-view and the library only. They are **not written into the JSON/YAML report**, because the
-report schema and models do not contain them yet. All engine rules are deterministic. None
-of this uses an LLM.
+**Severity in the report (`classification_version` 2):** every attribute change carries
+`severity` `{level, rules}` and `assessment` `{category, noise_rule}`, every resource a
+`severity` `{level, reasons}`, and `summary` adds `highest_severity` and `severity_counts`.
+They are computed by the classifier from the raw plan with the rules above, and they are
+authoritative: report consumers, including the AI engine, read them and never re-derive
+them. All engine rules are deterministic. None of this uses an LLM.
 
 ---
 

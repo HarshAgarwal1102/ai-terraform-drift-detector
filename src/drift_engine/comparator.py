@@ -107,7 +107,9 @@ def _attribute_class(s: Any, r: Any, d: Any) -> str | None:
 #   value     {"status": "value", "value": <JSON value, may be null>}
 #   absent    the object or key does not exist in that view
 #   unknown   desired value not known until apply (after_unknown)
-#   redacted  flagged sensitive (before_sensitive / after_sensitive, spec §8.3)
+#   redacted  flagged sensitive (before_sensitive / after_sensitive, spec §8.3); a
+#             value reported whole (lists, incl. nested blocks) is redacted when the
+#             mask flags it or anything inside it
 # Maps/objects are descended key by key; lists are compared as whole values.
 
 def _child(node: Any, key: str) -> Any:
@@ -168,6 +170,10 @@ def _walk(path: list[str], nodes: tuple, unknown: Any, masks: list, object_level
             # e.g. {} versus absent: nothing below differs, so report this node itself
     if not is_unknown and s == r == d:
         return
+    # This node is emitted whole (a list, a scalar, or an object not descended), so its
+    # value carries every flagged path below it: a mask flagging anything inside it
+    # (e.g. one field of a nested block, which plan JSON encodes as a list) redacts it.
+    sensitive = any(_contains_true(m) for m in masks)
     if object_level:
         cls = None  # §6.2 applies only when the object exists in all three views
     elif is_unknown:

@@ -114,13 +114,14 @@ class TestEvents(LoggingTestCase):
         with self.assertLogs(logs.LOGGER_NAME, logging.DEBUG) as cm:
             classifier.evaluate(plan_path("external_drift"), manifest_path("external_drift"))
         self.assertEqual(events(cm.records), ["evidence_loaded", "evidence_loaded", "plan_parsed",
-                                              "classification_finished"])
+                                              "comparison_finished", "severity_rated", "classification_finished"])
         done = by_event(cm.records, "classification_finished")
         self.assertEqual(done.levelno, logging.INFO)
         self.assertEqual(done.name, "drift_engine.classifier")
         self.assertEqual(done.fields, {
             "outcome": "succeeded", "has_drift": True, "resources": 1, "drifted_resources": 1,
-            "classification_counts": {"external_drift": 1}, "ambiguous_resources": 0, "manifest": True})
+            "classification_counts": {"external_drift": 1}, "ambiguous_resources": 0,
+            "highest_severity": "LOW", "manifest": True})
         loaded = [r.fields for r in cm.records if r.event == "evidence_loaded"]
         self.assertEqual([f["stage"] for f in loaded], ["manifest", "integrity"])
         self.assertEqual(by_event(cm.records, "plan_parsed").fields["manifest_checks"], True)
@@ -190,7 +191,8 @@ class TestEvents(LoggingTestCase):
         with self.assertLogs(logs.LOGGER_NAME, logging.DEBUG) as cm:
             ev = classifier.evaluate(plan_path("external_deletion"), manifest_path("external_deletion"))
             comparator.compare_plan(ev.parsed, comparator.configured_attributes(ev.plan))
-        self.assertEqual(len(cm.records), 5)  # 2 loads, parsed, finished, compared - for 2 resources
+        # 2 loads, parsed, compared + rated (for the report), finished, compared again - for 2 resources
+        self.assertEqual(len(cm.records), 7)
 
 
 # ---------------------------------------------------------------------------

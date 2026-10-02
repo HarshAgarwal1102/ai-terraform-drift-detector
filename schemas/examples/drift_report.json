@@ -1,5 +1,5 @@
 {
-  "classification_version": "1",
+  "classification_version": "2",
   "failure": null,
   "has_drift": true,
   "outcome": "succeeded",
@@ -43,6 +43,10 @@
       "ambiguous": false,
       "attribute_changes": [
         {
+          "assessment": {
+            "category": "configured",
+            "noise_rule": null
+          },
           "attribute": "tags",
           "class": "drifted",
           "desired": {
@@ -57,6 +61,12 @@
             "status": "absent"
           },
           "redacted": false,
+          "severity": {
+            "level": "LOW",
+            "rules": [
+              "tags"
+            ]
+          },
           "state": {
             "status": "value",
             "value": "1"
@@ -82,6 +92,12 @@
       "notes": [],
       "previous_address": null,
       "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "severity": {
+        "level": "LOW",
+        "reasons": [
+          "tags.probe: tags"
+        ]
+      },
       "type": "azurerm_resource_group"
     }
   ],
@@ -106,7 +122,11 @@
     "drifted_resources": 1,
     "has_pending_output_changes": false,
     "has_pending_resource_changes": true,
+    "highest_severity": "LOW",
     "output_only_change": false,
-    "resources_total": 1
+    "resources_total": 1,
+    "severity_counts": {
+      "LOW": 1
+    }
   }
 }

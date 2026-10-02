@@ -9,6 +9,9 @@ contract, and these models are its Python form, not a second format.
   DriftSummary     `summary`
   DriftItem        one entry of `resources`
   AttributeChange  one entry of `resources[].attribute_changes`
+  ChangeSeverity, ChangeAssessment, ResourceSeverity
+                   the deterministic severity (drift_engine.severity) and the
+                   comparator assessment it rests on (classification_version 2)
 
 Every model is strict (no type coercion: "1" is not 1, 1 is not True), rejects
 unknown fields and is immutable. Reports load with `DriftReport.model_validate_json`
@@ -23,7 +26,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-CLASSIFICATION_VERSION = "1"
+CLASSIFICATION_VERSION = "2"
 
 ResourceClass = Literal[
     "in_sync",
@@ -45,11 +48,14 @@ AttributeClass = Literal[
 ]
 Action = Literal["no-op", "read", "create", "update", "delete", "replace", "unrecognized"]
 Outcome = Literal["succeeded", "failed"]
+Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+AssessmentCategory = Literal["configured", "unconfigured", "noise", "undetermined"]
 FailureSource = Literal["detection_run", "classifier"]
 
 Count = Annotated[int, Field(ge=0)]
 TerraformActions = Annotated[list[str], Field(min_length=1)]
 ClassificationCounts = dict[ResourceClass, Count]
+SeverityCounts = dict[Severity, Count]
 
 
 def _exactly(expected: bool):
@@ -96,6 +102,29 @@ class StatusView(_Model):
 ViewValue = Annotated[Union[ValueView, StatusView], Field(discriminator="status")]
 
 
+class ChangeSeverity(_Model):
+    """Deterministic severity of one change (drift_engine.severity). Authoritative:
+    consumers may explain it but never re-derive, lower or replace it.
+
+    `rules` are the ids of the SEVERITY_RULES that set the level; empty for proven
+    noise (INFO) and for a significant change no rule matches (MEDIUM).
+    """
+
+    level: Severity
+    rules: list[str]
+
+
+class ChangeAssessment(_Model):
+    """The comparator's assessment of one change (Task 4.4) that the severity rests on.
+
+    `noise_rule` is the matching noise rule id, recorded even when configuration
+    overrides it (then `category` is "configured").
+    """
+
+    category: AssessmentCategory
+    noise_rule: str | None
+
+
 class AttributeChange(_Model):
     """One changed leaf path with its state (S), real (R) and desired (D) views.
 
@@ -109,6 +138,8 @@ class AttributeChange(_Model):
     real: ViewValue
     desired: ViewValue
     redacted: bool
+    severity: ChangeSeverity
+    assessment: ChangeAssessment
 
 
 class AttributeSummary(_Model):
@@ -121,6 +152,15 @@ class AttributeSummary(_Model):
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
+
+class ResourceSeverity(_Model):
+    """Deterministic severity of a resource: its highest change severity, raised to
+    the classification/action floor (drift_engine.severity). `reasons` name the
+    floor and the rules behind the level."""
+
+    level: Severity
+    reasons: list[str]
+
 
 class DriftItem(_Model):
     """One managed resource address and its classification."""
@@ -144,6 +184,7 @@ class DriftItem(_Model):
     attribute_changes: list[AttributeChange]
     ambiguous: bool
     notes: list[str]
+    severity: ResourceSeverity
 
 
 class ResourceTypeGroup(_Model):
@@ -205,6 +246,8 @@ class DriftSummary(_Model):
     drifted_resources: Count
     classification_counts: ClassificationCounts
     ambiguous_resources: Count
+    highest_severity: Severity
+    severity_counts: SeverityCounts
     has_pending_resource_changes: bool
     has_pending_output_changes: bool
     output_only_change: bool
@@ -213,7 +256,7 @@ class DriftSummary(_Model):
 class DriftReport(_Model):
     """The drift report. `has_drift` is None when evidence failed: unknown, never "no drift"."""
 
-    classification_version: Literal["1"]
+    classification_version: Literal["2"]
     outcome: Outcome
     has_drift: bool | None
     failure: Failure | None

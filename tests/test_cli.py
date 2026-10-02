@@ -33,7 +33,8 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 try:
     import yaml
 
-    from drift_engine import cli, formatters, severity
+    from drift_engine import cli, comparator, formatters, severity
+    from drift_engine.classifier import evaluate
     from drift_engine.models import DriftReport
 except ImportError:  # pydantic / PyYAML not installed
     cli = None
@@ -165,10 +166,29 @@ class TestAnalyzeToFile(CliTestCase):
 
     def test_report_contract_unchanged(self):
         _, stdout, _ = self.run_cli("analyze", "--plan", plan_path("external_drift"))
-        self.assertEqual(set(json.loads(stdout)), {
+        report = json.loads(stdout)
+        self.assertEqual(set(report), {
             "classification_version", "outcome", "has_drift", "failure", "run", "plan", "summary",
             "resources", "resource_types", "output_changes"})
-        self.assertNotIn("severity", stdout)
+        # classification_version 2 (Task 6.2A): deterministic severity is part of the report.
+        self.assertEqual(report["classification_version"], "2")
+        self.assertEqual(report["resources"][0]["severity"], {"level": "LOW", "reasons": ["tags.probe: tags"]})
+        self.assertEqual(report["summary"]["highest_severity"], "LOW")
+
+    def test_console_ratings_match_report_severity(self):
+        # The console view rates the plan itself (same function, same evidence); it must
+        # agree with the severity the report carries.
+        for name in fixture_names():
+            with self.subTest(name):
+                evaluation = evaluate(plan_path(name), manifest_path(name))
+                comparisons = comparator.compare_plan(evaluation.parsed,
+                                                      comparator.configured_attributes(evaluation.plan))
+                classes = {r["address"]: r["classification"] for r in evaluation.report["resources"]}
+                rated = severity.plan_severity(evaluation.parsed, comparisons, classes)
+                for resource, rating in zip(evaluation.report["resources"], rated, strict=True):
+                    self.assertEqual(resource["severity"], {"level": rating.severity, "reasons": list(rating.reasons)})
+                    self.assertEqual([ch["severity"]["level"] for ch in resource["attribute_changes"]],
+                                     [ch.severity for ch in rating.changes])
 
 
 class TestPlanOnlyMode(CliTestCase):
@@ -481,7 +501,9 @@ class TestCliLogging(CliTestCase):
                                        "--log-format", "json")
         self.assertEqual(code, 0)
         records = [json.loads(line) for line in stderr.splitlines() if line.startswith("{")]
+        # The classifier rates the plan for the report (Task 6.2A); the console view rates it again.
         self.assertEqual([r["event"] for r in records], ["manifest_not_given", "evidence_loaded", "plan_parsed",
+                                                         "comparison_finished", "severity_rated",
                                                          "classification_finished", "comparison_finished",
                                                          "severity_rated"])
         self.assertEqual(records[-1]["fields"]["highest"], "HIGH")

@@ -531,7 +531,8 @@ class TestAttributeChangesRealEvidence(unittest.TestCase):
                 r = classify(name)
                 self.assertEqual(set(r), TASK33_TOP_KEYS | {"resource_types"})
                 for x in r["resources"]:
-                    self.assertEqual(set(x), TASK33_RESOURCE_KEYS | {"attribute_changes"})
+                    # Task 3.4 added attribute_changes; Task 6.2A added severity.
+                    self.assertEqual(set(x), TASK33_RESOURCE_KEYS | {"attribute_changes", "severity"})
                     for a in x["attributes"]:
                         self.assertEqual(set(a), {"name", "class"})
 

@@ -115,10 +115,15 @@ class TestMigratedDiff(unittest.TestCase):
                 plan = fixture_plan(name)
                 report = {r["address"]: r for r in dd.classify_plan(plan)["resources"]}
                 for comparison in c.compare_plan(parser.parse_plan(plan), c.configured_attributes(plan)):
+                    reported = report[comparison.address]["attribute_changes"]
+                    # Since classification_version 2 each reported change also carries the
+                    # severity/assessment annotations; the diff itself is identical.
                     self.assertEqual(
                         [a.change for a in comparison.changes],
-                        report[comparison.address]["attribute_changes"],
+                        [{k: v for k, v in ch.items() if k not in ("severity", "assessment")} for ch in reported],
                     )
+                    self.assertEqual([ch["assessment"]["category"] for ch in reported],
+                                     [a.category for a in comparison.changes])
 
     def test_nested_map_key_drift(self):
         out = c.attribute_changes({"tags": {"a": "1"}}, {"tags": {"a": "1", "b": "2"}}, {"tags": {"a": "1"}}, {}, [])
@@ -147,6 +152,98 @@ class TestMigratedDiff(unittest.TestCase):
     def test_create_has_no_attribute_class(self):
         out = c.attribute_changes(None, None, {"a": 1}, {}, [])
         self.assertEqual(out[0]["class"], None)
+
+
+# ---------------------------------------------------------------------------
+# Sensitive values inside values reported whole (Task 6.2A regression)
+# ---------------------------------------------------------------------------
+
+SECRET_OLD, SECRET_NEW = "OLD-S3CRET-VALUE", "NEW-S3CRET-VALUE"
+
+
+def block(secret: str) -> dict:
+    """An azurerm-style nested block: plan JSON encodes blocks as lists of objects."""
+    return {"site_config": [{"name": "cfg", "password": secret}], "tags": {"env": "dev"}}
+
+
+class TestNestedSensitiveRedaction(unittest.TestCase):
+    """Lists are compared whole, so a flag on anything inside one must redact the whole value."""
+
+    def assertNoSecret(self, out):
+        text = json.dumps(out)
+        self.assertNotIn(SECRET_OLD, text)
+        self.assertNotIn(SECRET_NEW, text)
+
+    def assertRedactedEverywhere(self, change):
+        self.assertTrue(change["redacted"])
+        for view in ("state", "real", "desired"):
+            self.assertEqual(change[view], {"status": "redacted"}, view)
+
+    def test_flag_inside_a_list_block_redacts_every_view(self):
+        mask = {"site_config": [{"password": True}]}
+        # The flag may come from any one of the four masks (drift/change x before/after).
+        for position in range(4):
+            with self.subTest(position=position):
+                masks = [{} for _ in range(4)]
+                masks[position] = mask
+                out = c.attribute_changes(block(SECRET_OLD), block(SECRET_NEW), block(SECRET_OLD), {}, masks)
+                self.assertNoSecret(out)
+                [change] = out
+                self.assertEqual(change["path"], ["site_config"])
+                self.assertRedactedEverywhere(change)
+
+    def test_deeply_nested_flags(self):
+        cases = {
+            "map in list": ({"b": [{"m": {"k": SECRET_OLD}}]}, {"b": [{"m": {"k": SECRET_NEW}}]},
+                            {"b": [{"m": {"k": True}}]}),
+            "list in list": ({"b": [[SECRET_OLD]]}, {"b": [[SECRET_NEW]]}, {"b": [[True]]}),
+            "list in map": ({"m": {"l": [SECRET_OLD]}}, {"m": {"l": [SECRET_NEW]}}, {"m": {"l": [True]}}),
+            "second element": ({"b": [{"p": "x"}, {"p": SECRET_OLD}]}, {"b": [{"p": "x"}, {"p": SECRET_NEW}]},
+                               {"b": [{}, {"p": True}]}),
+        }
+        for name, (old, new, mask) in cases.items():
+            with self.subTest(name):
+                out = c.attribute_changes(old, new, old, {}, [mask])
+                self.assertNoSecret(out)
+                self.assertEqual(len(out), 1)
+                self.assertRedactedEverywhere(out[0])
+
+    def test_unflagged_and_sibling_values_stay_visible(self):
+        for mask in ({}, {"site_config": []}, {"site_config": [{}]}, {"site_config": [{"password": False}]}):
+            with self.subTest(mask=mask):
+                [change] = c.attribute_changes(block("a"), block("b"), block("a"), {}, [mask])
+                self.assertFalse(change["redacted"])
+                self.assertEqual(change["real"]["status"], "value")
+        old, new = block(SECRET_OLD), block(SECRET_NEW)
+        new["tags"]["env"] = "prod"
+        out = c.attribute_changes(old, new, old, {}, [{"site_config": [{"password": True}]}])
+        by = {".".join(x["path"]): x for x in out}
+        self.assertRedactedEverywhere(by["site_config"])
+        self.assertEqual(by["tags.env"]["real"], {"status": "value", "value": "prod"})
+        self.assertFalse(by["tags.env"]["redacted"])
+
+    def test_created_and_deleted_objects(self):
+        mask = {"site_config": [{"password": True}]}
+        created = c.attribute_changes(None, None, block(SECRET_NEW), {}, [mask])
+        deleted = c.attribute_changes(block(SECRET_OLD), None, None, {}, [mask])
+        for out in (created, deleted):
+            self.assertNoSecret(out)
+            by = {".".join(x["path"]): x for x in out}
+            self.assertTrue(by["site_config"]["redacted"])
+            self.assertFalse(by["tags.env"]["redacted"])
+
+    def test_through_the_classifier_report(self):
+        plan = azure_plan("azurerm_linux_web_app", block(SECRET_OLD), block(SECRET_NEW), block(SECRET_OLD),
+                          ["site_config", "tags"])
+        mask = {"site_config": [{"password": True}], "tags": {}}
+        for entry in plan["resource_drift"] + plan["resource_changes"]:
+            entry["change"]["before_sensitive"] = entry["change"]["after_sensitive"] = mask
+        report = dd.classify_plan(plan)
+        self.assertNoSecret(report)
+        [resource] = report["resources"]
+        [change] = resource["attribute_changes"]
+        self.assertRedactedEverywhere(change)
+        self.assertEqual(resource["classification"], dd.EXTERNAL_DRIFT)  # classification unaffected
 
 
 # ---------------------------------------------------------------------------

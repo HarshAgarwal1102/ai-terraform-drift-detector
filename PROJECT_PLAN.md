@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 6 — LangGraph AI Analysis Engine
-- **Current Active Task**: Task 6.1 — LangGraph Infrastructure & LLM Configuration
+- **Current Active Task**: Task 6.4 — Cost & Configuration Analysis Nodes
 - **Phases Completed**: 5 of 14
 
 ---
@@ -1534,55 +1534,122 @@ The dedicated infrastructure expansion anticipated by the Phase 1 scope note: ad
   - **Lesson for later phases**: creating a subnet and its NSG association in one apply leaves computed attributes stale in state until a refresh is persisted; the engine reports that as `converged_drift`. After applies that add associated network resources, run a reviewed `apply -refresh-only` (or expect one converged-drift scan).
 
 ### PHASE 6 — LangGraph AI Analysis Engine
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS
 
 Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI-compatible models to analyze detected drift, evaluate security and cost implications, and recommend remediation steps based on strict empirical evidence.
 
 #### Task 6.1 — LangGraph Infrastructure & LLM Configuration
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Initialize Python LangGraph state graph framework and set up OpenAI / Azure OpenAI client providers with environment configuration.
 - **Dependencies**: Tasks 4.3, 5.4
 - **Files/Areas**: `src/ai_engine/config.py`, `src/ai_engine/graph.py`
 - **Acceptance Criteria**:
-  - [ ] `AiState` TypedDict defined for LangGraph state propagation.
-  - [ ] Config handles API keys, endpoint URLs, and model deployment names safely.
-  - [ ] Graceful fallback when LLM API keys are missing or unreachable.
+  - [x] `AiState` TypedDict defined for LangGraph state propagation.
+  - [x] Config handles API keys, endpoint URLs, and model deployment names safely.
+  - [x] Graceful fallback when LLM API keys are missing or unreachable.
 - **Validation**:
-  - [ ] `pytest tests/test_ai_config.py` passes.
+  - [x] `pytest tests/test_ai_config.py` passes.
 - **Implementation Notes**:
   - Robust LLM integration layer.
+  - New package `src/ai_engine/` (`__init__.py`, `config.py`, `graph.py`, `py.typed`). LangGraph/LangChain deps live in a new opt-in `ai` extra (`langgraph>=1.0,<2`, `langchain-openai>=1.0,<2`); `requirements.txt` now installs `.[dev,ai]`. The drift workflow's `pip install .` is unchanged and pulls no LLM stack; `ai_engine.config` imports without the extra.
+  - **Config** (`load_config(env)`): environment variables only, no `.env` reading. LLM use is **opt-in** via `AI_LLM_PROVIDER` (`none` default | `openai` | `azure_openai`), so credentials merely present on a runner never send evidence to an LLM. `openai` needs `OPENAI_API_KEY` + `AI_LLM_MODEL` (optional `OPENAI_BASE_URL` for OpenAI-compatible endpoints); `azure_openai` needs `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` (optional `AZURE_OPENAI_API_VERSION`, default `2024-10-21`). Tunables: `AI_LLM_TEMPERATURE` (default 0), `AI_LLM_TIMEOUT_SECONDS` (60), `AI_LLM_MAX_RETRIES` (2; changed to **0**, i.e. opt-in, in the Task 6.3 final review). No default model name is hard-coded.
+  - **Safety**: keys held as `SecretStr` (absent from repr/str/`summary()`/log events); endpoints must be http(s) with a host, no userinfo, no query/fragment, https except localhost; error messages never echo a URL value. Missing credentials → disabled config with a reason (no exception); malformed values (unknown provider, bad numbers, unsafe URL) → `AiConfigError`.
+  - **Clients**: `create_chat_model(config)` returns `(ChatOpenAI|AzureChatOpenAI, None)` or `(None, reason)` (disabled, extra not installed, client construction failure); no network call at construction.
+  - **Graph**: `AiState` (total=False) separates evidence from inference: `drift_report` (deterministic input, never modified), `inferences` (model output keyed by node, dict-merge reducer), `llm` (`LlmStatus`: available/provider/model/reason), `warnings` (append reducer). `build_graph()` compiles START → `initialize` → END; the LLM is bound by closure, not stored in state. `invoke_llm()` converts an absent/unreachable/failing LLM (`openai.OpenAIError`, `TimeoutError`, `ConnectionError`) into an `LLMCallResult` carrying only the exception type; programming errors still raise. Analysis nodes are left to Tasks 6.2–6.6.
 - **Completion Notes**:
-  - None.
+  - Validation in a session-scratchpad venv (Python 3.14, langgraph 1.2.12, langchain-openai 1.6.7, openai 3.23.0): `pytest tests/test_ai_config.py` **40 passed**; full suite **359 passed** (607 subtests); `--cov=src/drift_engine` gate 99.87% (≥85); `ai_engine` coverage 98%.
+  - Unreachable endpoint verified for real against a closed port on 127.0.0.1 (`max_retries=0`): returns `LLM call failed (OpenAIConnectionError)`, no exception. No real LLM or external network was contacted.
+  - Core-only install (`pip install .` + pytest, no `ai` extra): `drift-engine` CLI works, `langgraph` absent, `test_ai_config.py` 27 passed / 13 skipped (graph/client tests marked `requires_ai`).
+  - No Terraform, Azure, drift-engine or GitHub Actions changes.
+  - **Post-review follow-up (2026-10-02)**, from a focused review of this task:
+    - *Evidence immutability enforced* (was convention only; a probe showed a node could mutate the caller's nested data and overwrite `drift_report`). `drift_report` now uses the reducer `write_once_evidence`: it accepts the graph input once and deep-copies it via `freeze_evidence` into `FrozenDict`/`FrozenList` (dict/list subclasses whose mutating methods raise `EvidenceMutationError`; still JSON-serializable and accepted by the strict `DriftReport` model). Any later write to `drift_report` raises `EvidenceMutationError`; non-JSON values are rejected. `initialize` now also rejects an empty/unset report.
+    - *`invoke_llm` hardening*: AzureChatOpenAI raises a plain `ValueError` when Azure's content filter blocks a response; that exact type + message (`AZURE_CONTENT_FILTER_MESSAGE`) now returns `LLMCallResult(error="LLM response blocked by content filter")`. Every other `ValueError` (including subclasses and other messages) still raises. Blocked prompts already arrive as `openai.BadRequestError`.
+    - *Setup docs*: `pyproject.toml` header, `requirements.txt` header and the README install snippet now distinguish `.[dev]` (drift engine only, AI tests skipped) from `.[dev,ai]` (= `requirements.txt`).
+    - Validation: `pytest tests/test_ai_config.py` **76 passed** (adds nested-mutation, top-level replacement, per-method blocking, copy/pickle/JSON, non-JSON rejection, a real fixture report validated by `DriftReport`, and an AzureChatOpenAI content-filter regression via `httpx.MockTransport`); full suite **395 passed** (607 subtests); `drift_engine` coverage gate 99.87%; `ai_engine` coverage 97%. Core-only install: no LLM packages, 27 passed / 49 skipped, CLI works.
 
 #### Task 6.2 — Drift Parsing & Resource Identification Nodes
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Implement LangGraph node `parse_drift` to read `drift_report.json` and populate graph state with structured resource diffs.
 - **Dependencies**: Task 6.1
 - **Files/Areas**: `src/ai_engine/nodes/parse_drift.py`
 - **Acceptance Criteria**:
-  - [ ] Extracts target resource types, addresses, and attribute changes into graph memory.
-  - [ ] Generates initial resource summary list.
+  - [x] Extracts target resource types, addresses, and attribute changes into graph memory.
+  - [x] Generates initial resource summary list.
 - **Validation**:
-  - [ ] Test node execution with sample `drift_report.json`.
+  - [x] Test node execution with sample `drift_report.json`.
 - **Implementation Notes**:
   - Deterministic state preparation node.
+  - New `src/ai_engine/nodes/{__init__,parse_drift}.py`; wired in `src/ai_engine/graph.py` (START → `initialize` → `parse_drift` → END). No LLM call, network or Terraform access; the module imports without the `ai` extra.
+  - **Contract reuse, no second schema**: `parse_drift` validates `AiState.drift_report` with `drift_engine.models.DriftReport` (strict, mirrors `schemas/drift_report.schema.json`). `load_drift_report(path)` reads a `drift_report.json` file (rejecting invalid JSON and NaN/Infinity) and validates it the same way. Contract violations raise `DriftReportError`, whose message lists field locations only (pydantic's message would quote values).
+  - **Output** `AiState.parsed_drift` (`ParsedDrift`): `outcome`, `has_drift`; `resources` = every non-`in_sync` resource as the contract's own `DriftItem` JSON (`model_dump(mode="json")`, attribute changes with state/real/desired views); `resource_types` = sorted types of those; `resource_summaries` = value-free `ResourceSummary` per resource (address, type, classification, action, drift_action, `is_drift`, changed attribute names, change and redacted counts, ambiguous). All classification fields are copied from the report; `is_drift` is the classifier's own rule (`drift_actions` present), and its total equals `summary.drifted_resources` on every fixture.
+  - **Separation/immutability**: `parsed_drift` is deterministic derived data, separate from `drift_report` (evidence) and `inferences` (AI output). Its channel uses the same write-once reducer as `drift_report` (Task 6.1 reducer generalized to `_write_once(field)`): frozen on first write, any later write or in-place change raises `EvidenceMutationError`.
+  - A `failed` report (drift status unknown) is valid input: empty `parsed_drift` plus a warning naming the failure source/stage. Log event `drift_parsed` carries counts and type names only.
+  - Severity is intentionally absent: `drift_engine.severity` needs the raw plan, and Phase 6 consumes only `drift_report.json` (Task 5.4). *(Superseded by Task 6.2A: severity is now in the report and copied into `ResourceSummary.severity`.)*
 - **Completion Notes**:
-  - None.
+  - Validation (session-scratchpad venv): `tests/test_ai_parse_drift.py` **44 passed**: the node and the full graph run on a sample `drift_report.json` for every fixture scenario (11, incl. `failed_run`), written to disk and loaded with `load_drift_report`, generated by drift_engine from `tests/fixtures/plan_evidence` so samples always match the contract; exact expected output for `external_drift`; in_sync/config_change/resource_added targeting; contract violations rejected without echoing values; bad files rejected; an LLM stub that fails if called proves no LLM use; later nodes cannot modify or replace `parsed_drift`; exact graph edges.
+  - `tests/test_ai_config.py` (Task 6.1) updated to use a real contract report instead of a non-contract stand-in, now required because the graph validates the report: 76 passed. Full suite **439 passed** (607 subtests); `drift_engine` coverage gate 99.87%; `ai_engine` 98% (`parse_drift.py` 100%). Core-only install: no LLM packages, 55 passed / 65 skipped.
+  - No Terraform, Azure, drift_engine or GitHub Actions changes.
+
+#### Task 6.2A — Pre-6.3 Prerequisites: Nested Redaction Fix & Deterministic Severity in the Report
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
+- **Objective**: Close the blocking findings of the Task 6.3 design review before any LLM call: fix sensitive values leaking through list/nested-block values, and make the deterministic `drift_engine.severity` rating part of the `drift_report` contract so later AI nodes consume it instead of deciding it.
+- **Dependencies**: Task 6.2; Task 6.3 design review (2026-10-02, accepted)
+- **Files/Areas**: `src/drift_engine/{comparator,classifier,models,formatters}.py`, `schemas/drift_report.schema.json`, `schemas/examples/drift_report.json`, `src/ai_engine/nodes/parse_drift.py`, affected tests, `docs/drift-detection-spec.md`, `README.md`
+- **Acceptance Criteria**:
+  - [x] A value emitted whole (list / nested block) whose sensitivity mask flags anything inside it is redacted in every view; regression tests prove it.
+  - [x] Every attribute change, resource and summary of a succeeded report carries the deterministic severity from `drift_engine.severity` (no second implementation).
+  - [x] Schema, models, example, tests and docs updated consistently; existing classification output otherwise unchanged.
+  - [x] Plan/spec record: deterministic severity is authoritative; AI may explain but not lower/replace it; Task 6.3 `classify_drift` = deterministic security-relevant routing.
+- **Validation**:
+  - [x] Focused regression tests, full suite, schema/model agreement (incl. random mutations), fuzz, core-only install.
+- **Out of scope**: LLM evidence builder, `analyze_security`, any LLM call (Task 6.3).
+- **Completion Notes**:
+  - **Redaction fix** (`comparator._walk`): descending still requires a flag at the node itself, but a node emitted **whole** (a list, i.e. every nested block in plan JSON, or a scalar/undescended object) is now redacted when any mask flags it *or anything inside it* (`_contains_true`), in all three views, `redacted: true`. Spec §8.2 already required this; the old code only checked `mask is True` at the list node, so `{"site_config": [{"password": true}]}` leaked both values. Every existing fixture report is byte-identical after the fix (the dev resources have no sensitive fields inside lists, so earlier published artifacts are not expected to have leaked; not re-verified against past artifacts).
+  - **Severity in the report** (`classification_version` **"1" → "2"**): `classifier._add_severity` runs the existing `comparator.compare_plan(parsed, configured_attributes(plan))` and `severity.plan_severity(...)` while the raw plan is available, then annotates: per attribute change `severity` `{level, rules}` and `assessment` `{category, noise_rule}`; per resource `severity` `{level, reasons}`; `summary.highest_severity` and `summary.severity_counts`. A failed report carries none (drift unknown, never `INFO`). A comparator/report change mismatch raises `RuntimeError` instead of attaching a mis-attributed rating. No rating logic was copied; ratings on all fixtures equal the Task 4.5 real-data results (tags `LOW`, deletion/replace `HIGH`, create/delete `MEDIUM`, in-sync `INFO`).
+  - **Backward compatibility**: purely additive — on all 11 fixtures, removing the new fields and resetting the version reproduces the pre-change report byte for byte. The version is bumped because the new fields are required, so v2 readers (models/schema/`ai_engine`) reject v1 reports with a `classification_version` error; old v1 artifacts must be regenerated to be analysed. Top-level keys and every v1 field are unchanged; the drift workflow is untouched (it produces v2 automatically from the same commit).
+  - **AI side**: `parse_drift` copies `severity.level` into each `ResourceSummary` (the full `{level, reasons}` and per-change ratings stay in the contract `resources`). A test proves it copies rather than computes (an injected `CRITICAL` passes through), and an AST test proves no `ai_engine` module imports `drift_engine.severity`, `.comparator` or `.parser`, so `plan.json` stays out of the AI workflow.
+  - **Known duplication (follow-up, not a blocker)**: `drift-engine analyze --format console` still rates the plan a second time for its view (same function, same inputs); a new test pins console ratings == report severity on every fixture. Switching the console renderer to read the report would change formatter internals beyond this task.
+  - **Validation** (session-scratchpad venv): new `TestNestedSensitiveRedaction` (7 tests, 12 subtests; 11 of them fail against the pre-fix comparator) plus report-level, model (`sensitive_block` variant, severity typed access, 16 new invalid cases in both the model and the schema) and classifier severity tests; full suite **453 passed** (667 subtests); `drift_engine` coverage gate 99.87% (`classifier`/`comparator`/`models` 100%); `ai_engine` 98%; `python -m unittest discover -s tests` OK (327 tests); schema/model agreement incl. 3,000 random mutations passes. **Ad hoc fuzz** (scratchpad only): 20,000 mutated real plans, half with a secret planted inside a nested block and flagged in a random mask shape, through parse → classify → severity → models + schema: 0 unhandled exceptions, 0 leaks in 6,125 planted-secret reports, models and schema agree on all; the same harness detects the leak immediately on the pre-fix comparator. 172 mutated plans break the contract only in fuzzed `plan` header fields (pre-existing; the CLI reports them as contract violations). Core-only install: no LLM packages, 381 passed / 69 skipped, `drift-engine analyze` writes a v2 report.
+  - No Terraform, Azure or GitHub Actions changes; no LLM calls.
 
 #### Task 6.3 — Classification & Security Analysis Nodes
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Implement LangGraph nodes `classify_drift` and `analyze_security` to evaluate compliance and security exposure.
 - **Dependencies**: Task 6.2
 - **Files/Areas**: `src/ai_engine/nodes/security_analysis.py`
 - **Acceptance Criteria**:
-  - [ ] Analyzes firewall rule removals, open ports, public storage access, or disabled encryption.
-  - [ ] Assigns security impact rating backed by specific attribute evidence.
+  - [x] Analyzes firewall rule removals, open ports, public storage access, or disabled encryption.
+  - [x] Assigns security impact rating backed by specific attribute evidence.
 - **Validation**:
-  - [ ] Test node with security-drift report.
+  - [x] Test node with security-drift report.
 - **Implementation Notes**:
   - AI must explicitly cite attribute evidence in prompt response.
+  - **Scope clarification (Task 6.3 design review, 2026-10-02):**
+    - `classify_drift` is **deterministic routing**, not drift re-classification: it selects the security-relevant changes (from the report's severity rules, redacted changes and security-sensitive types) into a deterministic, write-once state field. Terraform/engine classifications are never re-decided.
+    - The **security impact rating is the report's deterministic severity** (Task 6.2A, authoritative). `analyze_security` may add an AI-assessed impact and explanation, labelled inference and stored in `inferences`, shown next to but never lowering or replacing the deterministic level.
+    - "Cite attribute evidence" is **enforced deterministically**: every AI finding must cite (address, path) pairs that exist in `parsed_drift`; findings citing anything else are dropped.
+    - Prerequisites still to build in 6.3 before the first LLM call: a single allowlist prompt-evidence builder (no `run`/`plan` metadata; redacted views passed as status only; fail closed on any redaction inconsistency; values framed as untrusted data), a strict AI finding schema, and status handling (`skipped` / `failed` / `invalid_output`) so the graph always completes deterministically.
+    - Validation uses synthetic security-drift plans run through `drift_engine` (open inbound NSG rule, removed rule, public storage access, TLS/encryption downgrade) and a fake chat model; a live LLM check is optional and needs user credentials.
 - **Completion Notes**:
-  - None.
+  - **Files**: new `src/ai_engine/evidence.py`, `src/ai_engine/llm.py` (Task 6.1 `invoke_llm` moved out of `graph.py` to avoid a graph↔node import cycle; `graph.py` re-exports it), `src/ai_engine/nodes/security_analysis.py`, `tests/test_ai_security.py`, `tests/fixtures/security_plans/` (generator `build.py` + 6 synthetic scenarios); `graph.py` wiring; Task 6.1/6.2 tests updated for the new graph (state keys, edges, `inferences` now holds the `analyze_security` record).
+  - **Graph**: START → `initialize` → `parse_drift` → `classify_drift` → `analyze_security` → END. New write-once, frozen deterministic field `security_targets`; AI output only in `inferences["analyze_security"]`.
+  - **`classify_drift` (deterministic routing, no re-classification)**: reads only report fields. Routes a change when its deterministic severity is HIGH/CRITICAL (`rated …`, every security rule and the sensitive-value rule rate ≥ HIGH), it is redacted, or it is MEDIUM with no rule (`unrated`, impact unknown: covers uncovered attributes of security-sensitive types). LOW (tags/description) and INFO (noise) are excluded and counted. The `ai_engine` imports no rule catalogue (AST test from 6.2A still holds), so "security-sensitive types" is honored through the deterministic ratings and floors rather than a copied type list.
+  - **`build_llm_evidence` (the only prompt input)**: explicit allowlist — resource `address, type, classification, action, drift_action, ambiguous, notes, severity{level,reasons}`; change `path, attribute, class, redacted, severity{level,rules}, assessment, routing_reason` and the S/R/D views (value only for status `value`). Never `run`, `plan`, provider/module/previous address, importing, in-sync resources, outputs or `plan.json`. **Fail closed**: any change that is flagged redacted yet carries a value, or mixes redacted and value views, raises `EvidenceIntegrityError` (checked across all resources, before any call; the value is not echoed). **Limits** (`EvidenceLimits`: 20 resources, 60 changes, 2,000 chars per value, 40,000 chars total): changes ordered by deterministic severity then address/path, long values cut to a prefix (`value_truncated`), lowest-priority changes dropped; everything recorded in `truncation` and surfaced as a warning and a prompt note.
+  - **Prompt framing**: system prompt states that tagged evidence is untrusted data, never instructions; forbids re-classification, lowering severity and attribution; requires citations and JSON only. Evidence is deterministic JSON inside `<terraform_evidence>` with `<`/`>` escaped, so a value cannot close the block (tested with an injection string in an NSG rule description).
+  - **Output contract & validation**: strict Pydantic `AiSecurityOutput` / `AiSecurityFinding` (`address, cited_paths, exposure` enum, `ai_assessed_impact`, `explanation`, `basis: "inference"`; no extra fields; no field for any deterministic decision). One ```json fence tolerated. Every cited (address, path) must be in the evidence actually sent, else the finding is rejected `unsupported_citation`. Each kept finding carries `deterministic_severity` = max deterministic level of its cited changes (authoritative) next to `ai_assessed_impact` and `ai_impact_below_deterministic`; the AI value never replaces it.
+  - **LLM-call behavior**: at most one `invoke` per run, only when the report succeeded, something was routed, the LLM is available and evidence remains after limits. With the **default configuration (`AI_LLM_MAX_RETRIES=0`) that is at most one HTTP attempt per run**; additional attempts of the same prompt occur only when retries are explicitly configured (`AI_LLM_MAX_RETRIES=N` allows up to N+1 attempts on connection errors, 408/409/429 and 5xx). The configured `max_retries` is recorded in the result. Statuses: `skipped` (LLM unavailable, failed report, nothing routed, or no evidence left after limits — no call), `failed` (connection, timeout, auth, rate limit, server error, Azure content filter, via `invoke_llm`; error type only, plus a warning), `invalid_output` (non-JSON, refusal text, schema violation; reply discarded, never stored), `ok`. Genuine bugs (KeyError, TypeError, other ValueError, AssertionError) raise. No structured-output API is used, so refusals arrive as text and end as `invalid_output`.
+  - **Validation** (session-scratchpad venv; fake chat models only, no real LLM or network): `tests/test_ai_security.py` **81 passed** (after the final-review fixes) — routing per scenario and on real fixtures; allowlist; redacted status-only; fail-closed (incl. unrouted resources, nothing sent); limit ordering/omission/value-cut/char-cap records; determinism; prompt framing and injection escaping; citation rejection (unrouted, invented path/address, partly unsupported); 14 invalid-output shapes; all statuses; 7 failure kinds; bugs raise; the four acceptance exposure kinds end-to-end (open inbound NSG CRITICAL, removed deny rule HIGH, public storage/network rules CRITICAL, TLS/HTTPS downgrade HIGH, plus a redacted secret change HIGH) with a citing fake model; LangChain `FakeListChatModel` through the full graph; `security_targets` immutable. Mutation check: 8 deliberate breakages of the safeguards (integrity check, delimiter escaping, allowlist, citation check, severity replacement, routing, `basis`, availability guard) are each caught. Full suite **534 passed** (667 subtests); `drift_engine` gate 99.87%; `ai_engine` 99% (`evidence.py`, `security_analysis.py` 100%); `unittest discover` OK; core-only install: no LLM packages, 432 passed / 102 skipped.
+  - **Final review fixes (2026-10-02)**: the review measured that the old default `AI_LLM_MAX_RETRIES=2` made one logical call send the same prompt up to 3 times on 429/5xx (hidden resends) — the default is now `0` (opt-in) and the result records `max_retries`; evidence limits that remove every change now give `skipped` / "no evidence left after limits" with no call (previously an empty-evidence call reported `ok`); `create_chat_model` gained an optional `http_client` so tests drive the real client factory over a local `httpx.MockTransport` (OpenAI and Azure: default = exactly 1 request on 429/500/503 and on success; `AI_LLM_MAX_RETRIES=2` = 3 identical requests); added a test that a later node cannot *replace* `security_targets`; `evidence.py` docstring now states that engine `notes` are included and may mention an address (e.g. a previous address). Mutation check: 18 deliberate breakages of the safeguards (the 14 from the review plus default retries, empty-evidence call, unrecorded retries, ignored `http_client`) are each caught.
+  - **Limitations**: (a) analysis quality of a real model is unverified — no live call was made (needs user credentials; optional). (b) `unrated` routing also sends uncovered changes of non-security resources (e.g. a newly created resource group's `name`/`location`), costing a call; bounded by the limits. (c) Attribution claims inside free-text `explanation`/`summary` are forbidden by the prompt but only checked by Task 6.5/6.7. (d) Citation checks are at change-path granularity; a finding about one element of a whole-list value (e.g. one NSG rule) cites the list path. (e) Synthetic fixtures model azurerm plan shapes; they are not real Azure evidence.
+  - No Terraform, Azure or GitHub Actions changes; no commit.
 
 #### Task 6.4 — Cost & Configuration Analysis Nodes
 - **Status**: ⬜ NOT STARTED

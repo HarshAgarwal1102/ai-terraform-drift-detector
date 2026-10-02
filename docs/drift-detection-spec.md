@@ -336,8 +336,9 @@ from `src/` (no installation needed); its output is unchanged.
 - JSON (default) and YAML are this report, validated against the Task 4.3 models before
   writing. With `--manifest`, the JSON is byte-identical to `scripts/detect_drift.py`
   output for the same bundle.
-- `console` is a readable view that also shows the Task 4.4 assessment and Task 4.5
-  severity. Neither is part of the report.
+- `console` is a readable view of the report, including the Task 4.4 assessment and
+  Task 4.5 severity. Both are part of the report since `classification_version` 2
+  (Task 6.2A, below).
 - **Without `--manifest`**, the two manifest-based gate checks (plan exit-code consistency,
   Terraform version) are skipped, every `run` field is `null`, and a warning is printed.
   All other gate checks still apply. Pass the manifest whenever one exists.
@@ -406,10 +407,32 @@ changed.
     or `{"status": "redacted"}`.
   - **Redaction (§8.3):** a path flagged in any `before_sensitive` / `after_sensitive`
     mask of the resource's drift or change entry is redacted in **every** view, and a
-    sensitive subtree is reported once without descending. No sensitive value is
-    emitted. This is the redaction format; §8.3 previously defined none.
+    sensitive subtree is reported once without descending. A value reported whole (a
+    list, which includes every nested block in plan JSON) is redacted when a mask flags
+    it **or anything inside it**, e.g. `{"site_config": [{"password": true}]}` redacts
+    the whole `site_config` value. No sensitive value is emitted. This is the redaction
+    format; §8.3 previously defined none. (Before Task 6.2A, a flag inside a list was
+    missed and the list was emitted in clear; fixed with regression tests.)
 - Top level, `resource_types`: resources grouped by Terraform `type`, sorted, each with
   `resource_count`, `addresses` and `classification_counts`.
+
+**Deterministic severity in the report (Task 6.2A, `classification_version` 2):** the
+classifier runs the Task 4.4 comparator and the Task 4.5 severity rules while it still has
+the raw plan (configuration section and whole objects), and writes the result into the
+report. No field above changes; the version moves from `"1"` to `"2"` because the new
+fields are required.
+
+| Where | Field | Content |
+|---|---|---|
+| each `attribute_changes` entry | `severity` | `{"level", "rules"}`: `CRITICAL`…`INFO` and the ids of the severity rules that set it (empty for noise and for the unmatched `MEDIUM` default) |
+| each `attribute_changes` entry | `assessment` | `{"category", "noise_rule"}`: `configured` / `unconfigured` / `noise` / `undetermined` and the matching noise rule id |
+| each resource | `severity` | `{"level", "reasons"}`: highest change severity raised to the classification/action floor, with the reasons |
+| `summary` | `highest_severity`, `severity_counts` | highest resource level (`INFO` when there are none) and resources per level |
+
+This rating is **authoritative** (§10.6). Report consumers, including the Phase 6 AI
+engine, read it and never re-derive it, so they never need `plan.json`. A failed report has
+no resources and no summary, so it carries no severity: drift status stays unknown, never
+`INFO`.
 - Non-sensitive identifiers (e.g. resource `id` values containing the subscription ID)
   are emitted as values. Like every evidence artifact, the output stays outside the
   repository (§4.1).
@@ -478,7 +501,17 @@ The contract stays valid as resources are added:
    - Proven noise is `INFO`; an unmatched significant change is `MEDIUM`. Unknown impact is
      never rated down.
    - AI may add context to this rating but does not replace it.
-   - It is an annotation only and is not yet part of the report.
+   - It is an annotation only: it changes no classification. Since Task 6.2A it is part of
+     the report (§8.2, `classification_version` 2).
+7. **Deterministic severity is authoritative (Task 6.2A).** AI nodes read the report's
+   `severity` fields and may explain them or add context. They must not compute, lower or
+   replace a rating, and an AI-assessed impact is always shown next to, never instead of,
+   the deterministic level. The AI engine does not import the comparator, parser or
+   severity modules and never reads `plan.json`.
+8. **No re-classification by AI.** `outcome`, `has_drift`, resource classes, attribute
+   classes, actions, `ambiguous`, `redacted`, counts and severity are decided
+   deterministically. The Phase 6 `classify_drift` node (Task 6.3) is deterministic routing
+   of changes that are security-relevant for analysis; it does not re-classify drift.
 
 ## 11. Verification Evidence
 

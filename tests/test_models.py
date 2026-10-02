@@ -86,6 +86,13 @@ def setUpModule():
         sensitive = copy.deepcopy(base)
         for e in sensitive["resource_drift"] + sensitive["resource_changes"]:
             e["change"]["after_sensitive"] = {"tags": {"probe": True}}
+        # A nested block (a list in plan JSON) with one sensitive field that changed outside Terraform.
+        sensitive_block = copy.deepcopy(base)
+        for e in sensitive_block["resource_drift"] + sensitive_block["resource_changes"]:
+            for view in ("before", "after"):
+                e["change"][view]["site_config"] = [{"name": "cfg", "password": "S3CRET-STATE"}]
+            e["change"]["before_sensitive"] = e["change"]["after_sensitive"] = {"site_config": [{"password": True}]}
+        sensitive_block["resource_drift"][0]["change"]["after"]["site_config"][0]["password"] = "S3CRET-REAL"
         unknown = copy.deepcopy(base)
         unknown["resource_changes"][0]["change"]["after_unknown"] = {"tags": True}
         null_value = copy.deepcopy(base)
@@ -93,6 +100,7 @@ def setUpModule():
 
         variants = {
             "sensitive": (manifest, sensitive),
+            "sensitive_block": (manifest, sensitive_block),
             "unknown_value": (manifest, unknown),
             "null_value": (manifest, null_value),
             "missing_plan": (manifest, None),
@@ -157,6 +165,24 @@ class TestRealReports(ModelTestCase):
                 again = m.DriftReport.model_validate_json(model.model_dump_json())
                 self.assertEqual(again, model)
                 self.assertEqual(json.loads(model.model_dump_json()), REPORTS[name])
+
+    def test_redacted_block_report(self):
+        self.assertNotIn("S3CRET", json.dumps(REPORTS["sensitive_block"]))
+        r = m.DriftReport.model_validate(report("sensitive_block"))
+        [change] = [c for c in r.resources[0].attribute_changes if c.attribute == "site_config"]
+        self.assertTrue(change.redacted)
+        self.assertEqual({change.state.status, change.real.status, change.desired.status}, {"redacted"})
+        # A redacted change keeps its deterministic rating: it cannot be read, so it is HIGH.
+        self.assertEqual((change.severity.level, change.severity.rules), ("HIGH", ["sensitive-value"]))
+
+    def test_severity_typed_access(self):
+        r = m.DriftReport.model_validate(report("external_deletion"))
+        self.assertEqual(r.summary.highest_severity, "HIGH")
+        self.assertEqual(r.summary.severity_counts, {"HIGH": 1, "INFO": 1})
+        deleted = next(x for x in r.resources if x.classification == "external_deletion")
+        self.assertEqual(deleted.severity.level, "HIGH")
+        self.assertTrue(all(c.assessment.category in ("configured", "unconfigured", "noise", "undetermined")
+                            for c in deleted.attribute_changes))
 
     def test_typed_access(self):
         r = m.DriftReport.model_validate(report("external_drift"))
@@ -248,7 +274,8 @@ AC0 = R0 + ("attribute_changes", 0)
 INVALID = {
     "has_drift string": ("external_drift", ("has_drift",), "true"),
     "has_drift int": ("external_drift", ("has_drift",), 1),
-    "version 2": ("external_drift", ("classification_version",), "2"),
+    "version 1 (pre-severity)": ("external_drift", ("classification_version",), "1"),
+    "version 3": ("external_drift", ("classification_version",), "3"),
     "version int": ("external_drift", ("classification_version",), 1),
     "unknown outcome": ("external_drift", ("outcome",), "partial"),
     "extra top-level field": ("external_drift", ("header",), {}),
@@ -303,6 +330,23 @@ INVALID = {
     "failed reported as no drift": ("failed_run", ("has_drift",), False),
     "failed without failure": ("failed_run", ("failure",), None),
     "failure source unknown": ("failed_run", ("failure", "source"), "terraform"),
+    # Deterministic severity (classification_version 2, Task 6.2A)
+    "resource severity missing": ("external_drift", R0 + ("severity",), _DELETE),
+    "resource severity unknown level": ("external_drift", R0 + ("severity", "level"), "SEVERE"),
+    "resource severity lowercase": ("external_drift", R0 + ("severity", "level"), "low"),
+    "resource severity extra field": ("external_drift", R0 + ("severity", "score"), 3),
+    "severity reasons not strings": ("external_drift", R0 + ("severity", "reasons"), [1]),
+    "change severity missing": ("external_drift", AC0 + ("severity",), _DELETE),
+    "change severity null": ("external_drift", AC0 + ("severity",), None),
+    "change severity rules not list": ("external_drift", AC0 + ("severity", "rules"), "tags"),
+    "assessment missing": ("external_drift", AC0 + ("assessment",), _DELETE),
+    "assessment unknown category": ("external_drift", AC0 + ("assessment", "category"), "ignored"),
+    "assessment noise rule int": ("external_drift", AC0 + ("assessment", "noise_rule"), 1),
+    "highest severity missing": ("external_drift", ("summary", "highest_severity"), _DELETE),
+    "highest severity unknown": ("external_drift", ("summary", "highest_severity"), "NONE"),
+    "severity count unknown level": ("external_drift", ("summary", "severity_counts", "SEVERE"), 1),
+    "severity count negative": ("external_drift", ("summary", "severity_counts", "LOW"), -1),
+    "severity count as string": ("external_drift", ("summary", "severity_counts", "LOW"), "1"),
 }
 
 
@@ -348,6 +392,8 @@ class TestStrictTypes(ModelTestCase):
             path=["tags", "owner"], attribute="tags", class_="drifted",
             state={"status": "absent"}, real={"status": "value", "value": "a"},
             desired={"status": "absent"}, redacted=False,
+            severity={"level": "LOW", "rules": ["tags"]},
+            assessment={"category": "configured", "noise_rule": None},
         )
         dumped = change.model_dump()
         self.assertEqual(dumped["class"], "drifted")

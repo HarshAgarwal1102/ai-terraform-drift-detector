@@ -1,10 +1,11 @@
 # -----------------------------------------------
-# Python drift engine (Phase 4)
+# Python drift engine (Phase 4) and AI analysis engine (Phase 6)
 # -----------------------------------------------
 # Setup (from the repository root):
 #   python3 -m venv .venv
 #   source .venv/bin/activate
-#   pip install -e ".[dev]"     # or: pip install -r requirements.txt
+#   pip install -e ".[dev,ai]"  # full dev setup; same as: pip install -r requirements.txt
+#   pip install -e ".[dev]"     # drift engine only; the AI engine tests are skipped
 # -----------------------------------------------
 
 [build-system]
@@ -35,12 +36,19 @@ dev = [
     "pytest-cov>=5",          # Task 4.7 coverage gate
     "jsonschema>=4.23,<5",    # validates reports against schemas/drift_report.schema.json
 ]
+# AI analysis engine (Phase 6, src/ai_engine). Opt-in so that deterministic drift
+# detection (`pip install .`, used by the drift workflow) never depends on an LLM stack.
+ai = [
+    "langgraph>=1.0,<2",
+    "langchain-openai>=1.0,<2",   # ChatOpenAI / AzureChatOpenAI (pulls in openai)
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 drift_engine = ["py.typed"]
+ai_engine = ["py.typed"]
 
 [tool.coverage.run]
 branch = true

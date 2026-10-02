@@ -2,9 +2,10 @@
 
 JSON and YAML render the drift report exactly as defined by
 schemas/drift_report.schema.json; the JSON is byte-identical to the file written
-by scripts/detect_drift.py. The console view adds, for reading only, the
-deterministic severity (Task 4.5) and the configured/noise assessment (Task 4.4).
-Those are not part of the report contract.
+by scripts/detect_drift.py. The console view shows the deterministic severity
+(Task 4.5) and the configured/noise assessment (Task 4.4); since
+classification_version 2 both are also in the report, and the console ratings are
+computed by the same function from the same evidence (tested to agree).
 
 Every format is deterministic: the same report gives the same text.
 """

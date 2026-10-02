@@ -5,6 +5,13 @@ schemas/drift_report.schema.json. Migrated unchanged from scripts/detect_drift.p
 (Task 4.6), which now imports it, so the package CLI and the script produce the
 same report from the same evidence.
 
+Since classification_version 2 (Task 6.2A) the report also carries the
+deterministic severity of drift_engine.severity (Task 4.5) and the comparator
+assessment it is based on (Task 4.4). Both are computed here, where the raw plan
+(configuration section, whole objects) is available, so report consumers such as
+the AI engine never need plan.json and never re-derive a rating. Severity only
+annotates: it changes no classification.
+
 Standard library only. No Terraform, Azure, network or LLM access; the same
 evidence always yields the same report.
 """
@@ -26,6 +33,8 @@ from drift_engine.comparator import (
     UNKNOWN_UNTIL_APPLY,
     attribute_changes,
     classify_attributes,
+    compare_plan,
+    configured_attributes,
 )
 from drift_engine.parser import (
     PLAN_STAGE,
@@ -38,10 +47,11 @@ from drift_engine.parser import (
     parse_plan,
     resource_evidence,
 )
+from drift_engine.severity import INFO, SEVERITIES, highest, plan_severity
 
 logger = logging.getLogger(__name__)
 
-CLASSIFICATION_VERSION = "1"
+CLASSIFICATION_VERSION = "2"  # 2: severity + assessment added (Task 6.2A)
 OUTPUT_FILE = "drift_classification.json"
 MANIFEST_FILE = "detection_run.json"
 PLAN_FILE = "plan.json"
@@ -156,11 +166,37 @@ def _classify_evidence(ev: ResourceEvidence) -> dict:
 
 def classify_plan(plan: dict) -> dict:
     """Classify a plan that has already passed the integrity gate."""
-    return classify_parsed(extract_plan(plan))
+    return classify_parsed(extract_plan(plan), configured_attributes(plan))
 
 
-def classify_parsed(parsed: ParsedPlan) -> dict:
+def _add_severity(parsed: ParsedPlan, resources: list[dict], configured: dict[str, frozenset[str]]) -> None:
+    """Annotate report resources in place with drift_engine.severity's rating.
+
+    Each attribute change gets `severity` {level, rules} and the comparator's
+    `assessment` {category, noise_rule} that the rating depends on; each resource
+    gets `severity` {level, reasons}. Nothing else is touched.
+    """
+    comparisons = compare_plan(parsed, configured)
+    classes = {r["address"]: r["classification"] for r in resources}
+    rated = plan_severity(parsed, comparisons, classes)
+    for resource, rating in zip(resources, rated, strict=True):
+        changes = resource["attribute_changes"]
+        # Comparator and report diff the same evidence with the same function; a
+        # mismatch is an engine defect and must not produce a mis-attributed rating.
+        if [c.assessment.change for c in rating.changes] != changes:
+            raise RuntimeError(f"severity changes do not match the report for {resource['address']}")
+        for change, rated_change in zip(changes, rating.changes):
+            change["severity"] = {"level": rated_change.severity, "rules": list(rated_change.rules)}
+            change["assessment"] = {"category": rated_change.assessment.category,
+                                    "noise_rule": rated_change.assessment.rule}
+        resource["severity"] = {"level": rating.severity, "reasons": list(rating.reasons)}
+
+
+def classify_parsed(parsed: ParsedPlan, configured: dict[str, frozenset[str]] | None = None) -> dict:
+    """Classify parsed evidence. `configured` is comparator.configured_attributes(plan);
+    without it every change is assessed `undetermined` (never noise, never rated down)."""
     resources = [_classify_evidence(ev) for ev in parsed.resources]
+    _add_severity(parsed, resources, configured or {})
     output_changes = [
         {"name": name, "action": normalize_action(actions), "actions": actions}
         for name, actions in parsed.output_changes.items()
@@ -186,6 +222,7 @@ def classify_parsed(parsed: ParsedPlan) -> dict:
         })
     drift = sum(1 for ev in parsed.resources if ev.drift_actions is not None)
     resource_pending = any(r["classification"] != IN_SYNC for r in resources)
+    levels = [r["severity"]["level"] for r in resources]
     output_pending = any(o["action"] != "no-op" for o in output_changes)
 
     return {
@@ -195,6 +232,8 @@ def classify_parsed(parsed: ParsedPlan) -> dict:
             "drifted_resources": drift,
             "classification_counts": dict(sorted(counts.items())),
             "ambiguous_resources": sum(1 for r in resources if r["ambiguous"]),
+            "highest_severity": highest(levels, default=INFO),
+            "severity_counts": {s: levels.count(s) for s in reversed(SEVERITIES) if s in levels},
             "has_pending_resource_changes": resource_pending,
             "has_pending_output_changes": output_pending,
             "output_only_change": output_pending and not resource_pending and not drift,
@@ -245,7 +284,8 @@ def evaluate(plan_path: str, manifest_path: str | None = None) -> Evaluation:
                   outcome="succeeded", has_drift=report["has_drift"], resources=summary["resources_total"],
                   drifted_resources=summary["drifted_resources"],
                   classification_counts=summary["classification_counts"],
-                  ambiguous_resources=summary["ambiguous_resources"], manifest=manifest_path is not None)
+                  ambiguous_resources=summary["ambiguous_resources"],
+                  highest_severity=summary["highest_severity"], manifest=manifest_path is not None)
     else:
         failure = report["failure"]
         log_event(logger, logging.WARNING, "classification_failed", "evidence failed or rejected: drift status unknown",
@@ -306,7 +346,7 @@ def _evaluate(plan_path: str, manifest_path: str | None = None) -> Evaluation:
         plan = load_json(plan_path, PLAN_STAGE)
         parsed = parse_plan(plan, plan_rc, tf_version)
         result["plan"] = parsed.header
-        result.update(classify_parsed(parsed))
+        result.update(classify_parsed(parsed, configured_attributes(plan)))
         result["outcome"] = "succeeded"
         return Evaluation(result, parsed, plan)
     except EvidenceError as exc:

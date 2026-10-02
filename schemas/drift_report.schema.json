@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/schemas/drift_report.schema.json",
   "title": "Drift report (classifier output)",
-  "description": "Contract for the drift report written by scripts/detect_drift.py. The project plan calls this document drift_report.json; the file written today is drift_classification.json. Both names refer to this one document (Task 3.5; docs/drift-detection-spec.md §8.2). Header data lives in the existing run/plan objects: timestamp = plan.timestamp (run.started_at/finished_at for the run itself), environment = run.environment, target = run.working_dir + run.backend_key.",
+  "description": "Contract for the drift report written by scripts/detect_drift.py. The project plan calls this document drift_report.json; the file written today is drift_classification.json. Both names refer to this one document (Task 3.5; docs/drift-detection-spec.md §8.2). Header data lives in the existing run/plan objects: timestamp = plan.timestamp (run.started_at/finished_at for the run itself), environment = run.environment, target = run.working_dir + run.backend_key. classification_version 2 (Task 6.2A) adds the deterministic severity of drift_engine.severity (per change, per resource, summary) and the comparator assessment it rests on; that severity is authoritative and consumers (including AI analysis) must not re-derive, lower or replace it.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,7 +18,7 @@
     "output_changes"
   ],
   "properties": {
-    "classification_version": { "const": "1" },
+    "classification_version": { "const": "2" },
     "outcome": { "enum": ["succeeded", "failed"] },
     "has_drift": {
       "description": "true/false only for valid evidence; null means unknown (failed or rejected evidence), never 'no drift'.",
@@ -124,6 +124,49 @@
       }
     },
     "count": { "type": "integer", "minimum": 0 },
+    "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
+    "severity_counts": {
+      "description": "Resources per resource severity level; only levels that occur.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "CRITICAL": { "$ref": "#/$defs/count" },
+        "HIGH": { "$ref": "#/$defs/count" },
+        "MEDIUM": { "$ref": "#/$defs/count" },
+        "LOW": { "$ref": "#/$defs/count" },
+        "INFO": { "$ref": "#/$defs/count" }
+      }
+    },
+    "change_severity": {
+      "description": "Deterministic severity of one change (drift_engine.severity). rules: ids of the severity rules that set the level; empty for proven noise (INFO) or when no rule matches (MEDIUM).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "rules"],
+      "properties": {
+        "level": { "$ref": "#/$defs/severity" },
+        "rules": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "change_assessment": {
+      "description": "Comparator assessment the severity rests on (Task 4.4). noise_rule is recorded even when configuration overrides it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "noise_rule"],
+      "properties": {
+        "category": { "enum": ["configured", "unconfigured", "noise", "undetermined"] },
+        "noise_rule": { "$ref": "#/$defs/nullable_string" }
+      }
+    },
+    "resource_severity": {
+      "description": "Deterministic resource severity: highest change severity raised to the classification/action floor; reasons name the floor and rules behind the level.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "reasons"],
+      "properties": {
+        "level": { "$ref": "#/$defs/severity" },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "failure": {
       "type": "object",
       "additionalProperties": false,
@@ -187,6 +230,8 @@
         "drifted_resources",
         "classification_counts",
         "ambiguous_resources",
+        "highest_severity",
+        "severity_counts",
         "has_pending_resource_changes",
         "has_pending_output_changes",
         "output_only_change"
@@ -196,6 +241,8 @@
         "drifted_resources": { "$ref": "#/$defs/count" },
         "classification_counts": { "$ref": "#/$defs/classification_counts" },
         "ambiguous_resources": { "$ref": "#/$defs/count" },
+        "highest_severity": { "$ref": "#/$defs/severity" },
+        "severity_counts": { "$ref": "#/$defs/severity_counts" },
         "has_pending_resource_changes": { "type": "boolean" },
         "has_pending_output_changes": { "type": "boolean" },
         "output_only_change": { "type": "boolean" }
@@ -237,7 +284,7 @@
       "description": "Task 3.4: one changed leaf path with its state/real/desired views. class is null for create/delete (spec §6.2 does not apply).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "attribute", "class", "state", "real", "desired", "redacted"],
+      "required": ["path", "attribute", "class", "state", "real", "desired", "redacted", "severity", "assessment"],
       "properties": {
         "path": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "attribute": { "type": "string" },
@@ -247,7 +294,9 @@
         "state": { "$ref": "#/$defs/view_value" },
         "real": { "$ref": "#/$defs/view_value" },
         "desired": { "$ref": "#/$defs/view_value" },
-        "redacted": { "type": "boolean" }
+        "redacted": { "type": "boolean" },
+        "severity": { "$ref": "#/$defs/change_severity" },
+        "assessment": { "$ref": "#/$defs/change_assessment" }
       }
     },
     "resource": {
@@ -273,7 +322,8 @@
         "attributes",
         "attribute_changes",
         "ambiguous",
-        "notes"
+        "notes",
+        "severity"
       ],
       "properties": {
         "address": { "type": "string", "minLength": 1 },
@@ -294,7 +344,8 @@
         "attributes": { "type": "array", "items": { "$ref": "#/$defs/attribute" } },
         "attribute_changes": { "type": "array", "items": { "$ref": "#/$defs/attribute_change" } },
         "ambiguous": { "type": "boolean" },
-        "notes": { "type": "array", "items": { "type": "string" } }
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "severity": { "$ref": "#/$defs/resource_severity" }
       }
     },
     "resource_type": {

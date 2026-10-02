@@ -165,5 +165,42 @@ class TestClassificationBranches(unittest.TestCase):
         self.assertEqual(plan, snapshot)
 
 
+class TestSeverityInReport(unittest.TestCase):
+    """Task 6.2A: deterministic severity is attached to the report, never mis-attributed."""
+
+    def test_every_change_and_resource_is_rated(self):
+        report = c.classify_plan(load(plan_path("external_deletion")))
+        for resource in report["resources"]:
+            self.assertEqual(set(resource["severity"]), {"level", "reasons"})
+            for change in resource["attribute_changes"]:
+                self.assertEqual(set(change["severity"]), {"level", "rules"})
+                self.assertEqual(set(change["assessment"]), {"category", "noise_rule"})
+        self.assertEqual(report["summary"]["highest_severity"], "HIGH")
+
+    def test_without_configuration_evidence_nothing_is_noise(self):
+        plan = load(plan_path("replace"))
+        parsed = c.extract_plan(plan)
+        unconfigured = c.classify_parsed(parsed)  # no configuration: every change undetermined
+        categories = {ch["assessment"]["category"] for r in unconfigured["resources"] for ch in r["attribute_changes"]}
+        self.assertEqual(categories, {"undetermined"})
+        levels = {ch["severity"]["level"] for r in unconfigured["resources"] for ch in r["attribute_changes"]}
+        self.assertNotIn("INFO", levels)  # unproven noise is never rated down
+
+    def test_mismatched_comparison_is_refused(self):
+        from unittest import mock
+
+        from drift_engine import comparator
+
+        def shuffled(parsed, configured):
+            result = comparator.compare_plan(parsed, configured)
+            return tuple(comparator.ResourceComparison(r.address, r.type, r.action, r.changes[::-1])
+                         for r in result)
+
+        plan = load(plan_path("external_deletion"))  # 8 changes, so reversing reorders them
+        with mock.patch.object(c, "compare_plan", shuffled):
+            with self.assertRaisesRegex(RuntimeError, "do not match the report"):
+                c.classify_plan(plan)
+
+
 if __name__ == "__main__":
     unittest.main()
