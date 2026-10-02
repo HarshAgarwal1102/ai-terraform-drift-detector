@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); next Task 5.5 (failure reporting).
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); Task 5.5 (failure reporting + `drift_detected` job output) implemented, awaiting real GitHub validation.
 
 | Phase | Status |
 |---|---|

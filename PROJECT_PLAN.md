@@ -1438,7 +1438,8 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - **Annotations** as in Task 5.3 (Node.js 20 deprecation; `ubuntu-latest` → Ubuntu 26 notice); none from upload-artifact.
 
 #### Task 5.5 — Pipeline Error Handling & Failure Reporting
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS
+- **Started**: 2026-10-02
 - **Objective**: Ensure execution failures (auth failure, terraform syntax errors) fail the job, while detected drift is reported without failing execution unexpectedly.
 - **Dependencies**: Task 5.4
 - **Files/Areas**: `.github/workflows/drift-detection.yml`
@@ -1449,8 +1450,22 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - [ ] Test execution with valid plan, drifted plan, and syntax error.
 - **Implementation Notes**:
   - Clear separation of operational failure vs drift finding.
-- **Completion Notes**:
-  - None.
+- **Progress Notes (2026-10-02)**:
+  - **Existing behavior kept (Task 5.3)**: every infra/CLI failure already fails its step (auth: `azure/login` / `az account show`; init/validate; install; evidence script ≠ 0 or invalid manifest; engine ≠ 0 or invalid report), and detected drift already ends Analyze Drift successfully with a `::warning::`. No classification logic was added to the workflow.
+  - **New in 5.5** (`.github/workflows/drift-detection.yml` only):
+    - **`drift_detected` output**: the Analyze Drift step writes `drift_detected=true`/`false` only on the valid path (engine 0, evidence success, report `succeeded`, boolean `has_drift`), and `drift_detected=unknown` otherwise.
+    - **Job outputs**: `drift_detected: ${{ steps.analyze.outputs.drift_detected || 'unknown' }}` and `drift_status` (`detected`/`none`/`UNKNOWN`). If analysis never ran, the job output is `unknown`, never `false`. A valid `"false"` is a non-empty string and passes through `||`.
+    - **Failure reporting**: Run Summary now runs with `if: ${{ !cancelled() }}`, so failed runs also get a summary. It shows Result (`VALID` / `FAILED - drift status UNKNOWN`), the first failed stage (from step `outcome`s; steps gained ids for this), drift status, `drift_detected`, and Backend and Artifact rows that reflect what actually happened. It never changes the job's red/green status and exits 0 in every tested case.
+    - **Unchanged**: upload condition, artifact contents, permissions, OIDC, `-lockfile=readonly`, exit-code mapping.
+  - **Local validation**:
+    - `check-jsonschema` and `actionlint` 1.7.12 + shellcheck 0.11.0 pass.
+    - Structure/security assertions pass: job outputs exact; `drift_detected=false` is never written literally (only `${has_drift}` on the valid path or `unknown`); only Analyze Drift and Run Summary have non-default `if`; Upload unchanged; step ids unique and all referenced; permissions, ARM env scope, lockfile and forbidden-flag checks unchanged.
+    - `pytest --cov=src/drift_engine tests/`: 319 passed, 99.87%. `./scripts/validate.sh` passed.
+    - **Job simulator** (14 cases; results in `.artifacts/task-5.5-validation/`): runs the real `run:` scripts from the YAML in order (guard, Resolve Environment, Generate Plan Evidence with the real `generate_plan_json.sh` and a fake `terraform` on Phase 3 fixtures, Analyze Drift with the installed `drift-engine`, Run Summary) under GitHub's step-condition semantics, then derives the job conclusion and evaluates the job-output expressions. The upload step is simulated from its declared paths.
+      - **Required cases**: (1) valid in-sync plan → job success, `drift_detected=false`, status `none`, artifact; (2) valid drifted plan (exit 2, external drift) → job **success**, `drift_detected=true`, status `detected`, artifact; (3) a real Terraform syntax error (malformed resource block; real `terraform init -backend=false` exits 1, "Missing name for resource") → job **failure** at Terraform Init, `drift_detected=unknown`, no artifact.
+      - **Also valid**: converged drift (exit 0) → `true`; config change (exit 2) → `false`; both green.
+      - **Also failed → red, `unknown`, no artifact**: auth failure, install failure, plan exit 1, plan exit 137, malformed plan JSON, `errored:true` JSON, `show` failure, Analyze Drift failure, and provider-lock modification. In the lock case the engine itself returned 0 with `has_drift=true`, yet `drift_detected` stays `unknown`.
+  - **Pending**: real GitHub validation (a valid run; see Validation).
 
 ---
 

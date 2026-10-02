@@ -5,12 +5,18 @@ name: "Phase 5 - Drift Detection"
 # Implemented so far: triggers and environment selection (Task 5.1), Azure OIDC
 # login and Terraform init/validate against the remote backend (Task 5.2), plan
 # evidence via scripts/generate_plan_json.sh and classification via
-# `drift-engine analyze` (Task 5.3), and the report artifact (Task 5.4). Failure
-# reporting (Task 5.5) is added to this workflow by that task.
+# `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), and failure
+# reporting with the `drift_detected` output (Task 5.5).
 #
 # Job status reflects process validity only: detected drift is a valid result and
 # does not fail the job; any detection or classification failure does, and the
 # drift status of that run is UNKNOWN (never "no drift").
+#
+# Job outputs (Task 5.5):
+#   drift_detected  "true" / "false" only for a valid classification; "unknown"
+#                   for any failure or when analysis did not run. Consumers must
+#                   test for the literal "true" or "false", never for emptiness.
+#   drift_status    "detected" / "none" / "UNKNOWN".
 #
 # Detection is read-only: this workflow must never run `terraform apply`.
 
@@ -66,11 +72,16 @@ jobs:
       environment: ${{ steps.context.outputs.environment }}
       working_directory: ${{ steps.context.outputs.working_directory }}
       var_file: ${{ steps.context.outputs.var_file }}
+      # `||` falls back only when the step output is empty (analysis skipped or
+      # never reached); a valid "false" is a non-empty string and passes through.
+      drift_detected: ${{ steps.analyze.outputs.drift_detected || 'unknown' }}
+      drift_status: ${{ steps.analyze.outputs.drift_status || 'UNKNOWN' }}
 
     steps:
       # Azure trusts only `ref:refs/heads/main` tokens, and scanning must reflect
       # the reviewed configuration on main, not an arbitrary branch.
       - name: Require main branch
+        id: guard
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
@@ -79,6 +90,7 @@ jobs:
           fi
 
       - name: Checkout Code
+        id: checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -113,6 +125,7 @@ jobs:
       # OIDC only: the token subject is `...:ref:refs/heads/main`, matching the
       # existing federated credential (enforced by the main-branch guard above).
       - name: Azure OIDC Login
+        id: login
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -121,6 +134,7 @@ jobs:
 
       # Fail at the auth boundary rather than as a confusing backend error later.
       - name: Verify Azure OIDC Authentication
+        id: auth
         run: |
           set -euo pipefail
           echo "==> Confirming Azure authentication context (OIDC, no client secret)..."
@@ -130,6 +144,7 @@ jobs:
       # Wrapper disabled so later steps see Terraform's real exit codes and
       # unmodified stdout (needed for `plan -detailed-exitcode` and JSON output).
       - name: Setup Terraform
+        id: tf_setup
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -140,6 +155,7 @@ jobs:
       #   ARM_USE_AZUREAD - Entra ID for the state blob instead of storage keys
       # -lockfile=readonly: use the committed provider lock as-is; never rewrite it.
       - name: Terraform Init (remote backend)
+        id: tf_init
         env:
           WORK_DIR: ${{ steps.context.outputs.working_directory }}
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -153,6 +169,7 @@ jobs:
           terraform -chdir="${WORK_DIR}" init -input=false -lockfile=readonly -no-color
 
       - name: Terraform Validate
+        id: tf_validate
         env:
           WORK_DIR: ${{ steps.context.outputs.working_directory }}
         run: |
@@ -160,12 +177,14 @@ jobs:
           terraform -chdir="${WORK_DIR}" validate -no-color
 
       - name: Setup Python
+        id: py_setup
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       # Runtime dependencies only (pydantic, PyYAML); no dev/test extras.
       - name: Install drift-engine
+        id: install
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check --no-input .
@@ -284,6 +303,7 @@ jobs:
             if [ "${has_drift}" = true ]; then drift_status=detected; else drift_status=none; fi
             {
               echo "has_drift=${has_drift}"
+              echo "drift_detected=${has_drift}"
               echo "drift_status=${drift_status}"
               echo "classification_counts=$(jq -c '.summary.classification_counts' "${report}")"
             } >> "${GITHUB_OUTPUT}"
@@ -297,8 +317,11 @@ jobs:
             exit 0
           fi
 
-          echo "has_drift=unknown" >> "${GITHUB_OUTPUT}"
-          echo "drift_status=UNKNOWN" >> "${GITHUB_OUTPUT}"
+          {
+            echo "has_drift=unknown"
+            echo "drift_detected=unknown"
+            echo "drift_status=UNKNOWN"
+          } >> "${GITHUB_OUTPUT}"
           if [ -f "${report}" ]; then
             jq -r '"report outcome: \(.outcome); failure: \(.failure // {} | "\(.source // "-")/\(.stage // "-"): \(.reason // "-")")"' "${report}" 2>/dev/null || true
           fi
@@ -313,6 +336,7 @@ jobs:
       # succeeded (drift or no drift). ARTIFACT_DIR is this job's RUNNER_TEMP, which
       # the evidence script required to be empty, so no stale files can be picked up.
       - name: Upload Drift Report
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: drift-report-${{ github.run_id }}
@@ -323,31 +347,84 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+      # Runs after failures too (not after cancellation) so every completed run
+      # reports its result. It only reports: the job's red/green status comes from
+      # the steps above, and this step never turns a failed run green.
       - name: Run Summary
+        if: ${{ !cancelled() }}
         env:
           WORK_DIR: ${{ steps.context.outputs.working_directory }}
           VAR_FILE: ${{ steps.context.outputs.var_file }}
-          PLAN_EXIT_CODE: ${{ steps.evidence.outputs.plan_exit_code }}
-          DRIFT_STATUS: ${{ steps.analyze.outputs.drift_status }}
-          CLASSIFICATION_COUNTS: ${{ steps.analyze.outputs.classification_counts }}
+          PLAN_EXIT_CODE: ${{ steps.evidence.outputs.plan_exit_code || 'n/a' }}
+          DRIFT_STATUS: ${{ steps.analyze.outputs.drift_status || 'UNKNOWN' }}
+          DRIFT_DETECTED: ${{ steps.analyze.outputs.drift_detected || 'unknown' }}
+          CLASSIFICATION_COUNTS: ${{ steps.analyze.outputs.classification_counts || 'n/a' }}
+          # Step outcomes in execution order: success, failure or skipped.
+          STAGE_OUTCOMES: >-
+            Require main branch=${{ steps.guard.outcome }};
+            Checkout Code=${{ steps.checkout.outcome }};
+            Resolve Environment=${{ steps.context.outcome }};
+            Azure OIDC Login=${{ steps.login.outcome }};
+            Verify Azure OIDC Authentication=${{ steps.auth.outcome }};
+            Setup Terraform=${{ steps.tf_setup.outcome }};
+            Terraform Init (remote backend)=${{ steps.tf_init.outcome }};
+            Terraform Validate=${{ steps.tf_validate.outcome }};
+            Setup Python=${{ steps.py_setup.outcome }};
+            Install drift-engine=${{ steps.install.outcome }};
+            Generate Plan Evidence=${{ steps.evidence.outcome }};
+            Analyze Drift=${{ steps.analyze.outcome }};
+            Upload Drift Report=${{ steps.upload.outcome }}
+          INIT_OUTCOME: ${{ steps.tf_init.outcome }}
+          VALIDATE_OUTCOME: ${{ steps.tf_validate.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
         run: |
           set -euo pipefail
+          failed_stage="none"
+          stages="${STAGE_OUTCOMES//; /;}"
+          IFS=';' read -r -a pairs <<< "${stages}"
+          for pair in "${pairs[@]}"; do
+            if [ "${pair##*=}" = "failure" ]; then failed_stage="${pair%=*}"; break; fi
+          done
+
+          # A result is valid only when no stage failed and drift-engine produced a
+          # boolean; anything else is reported as FAILED with drift status UNKNOWN.
+          if [ "${failed_stage}" = "none" ] && { [ "${DRIFT_DETECTED}" = true ] || [ "${DRIFT_DETECTED}" = false ]; }; then
+            result="VALID"
+          else
+            result="FAILED - drift status UNKNOWN"
+            DRIFT_STATUS="UNKNOWN"
+            DRIFT_DETECTED="unknown"
+          fi
+          if [ "${INIT_OUTCOME}" = success ] && [ "${VALIDATE_OUTCOME}" = success ]; then
+            backend="AzureRM remote state, initialized and validated"
+          else
+            backend="not initialized/validated (init ${INIT_OUTCOME:-n/a}, validate ${VALIDATE_OUTCOME:-n/a})"
+          fi
+          if [ "${UPLOAD_OUTCOME}" = success ]; then
+            artifact="\`drift-report-${GITHUB_RUN_ID}\` (drift_report.json + detection_run.json, 30 days)"
+          else
+            artifact="not uploaded"
+          fi
+
           {
             echo "### Drift detection run"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
+            echo "| Result | **${result}** |"
+            echo "| Failed stage | ${failed_stage} |"
+            echo "| Drift status | **${DRIFT_STATUS}** |"
+            echo "| drift_detected | \`${DRIFT_DETECTED}\` |"
             echo "| Trigger | \`${GITHUB_EVENT_NAME}\` |"
             echo "| Environment | \`${DRIFT_ENVIRONMENT}\` |"
-            echo "| Working directory | \`${WORK_DIR}\` |"
-            echo "| Variable file | \`${VAR_FILE}\` |"
+            echo "| Working directory | \`${WORK_DIR:-n/a}\` |"
+            echo "| Variable file | \`${VAR_FILE:-n/a}\` |"
             echo "| Terraform | \`${TERRAFORM_VERSION}\` |"
             echo "| Azure auth | OIDC (no client secret) |"
-            echo "| Backend | AzureRM remote state, initialized and validated |"
+            echo "| Backend | ${backend} |"
             echo "| Plan exit code | \`${PLAN_EXIT_CODE}\` (0 = no pending changes, 2 = pending changes) |"
-            echo "| Drift status | **${DRIFT_STATUS}** |"
             echo "| Classification | \`${CLASSIFICATION_COUNTS}\` |"
-            echo "| Artifact | \`drift-report-${GITHUB_RUN_ID}\` (drift_report.json + detection_run.json, 30 days) |"
+            echo "| Artifact | ${artifact} |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
-          echo "Drift detection completed for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME}): drift status ${DRIFT_STATUS}."
+          echo "Drift detection for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME}): result ${result}; drift_detected=${DRIFT_DETECTED}; failed stage: ${failed_stage}."
