@@ -424,6 +424,15 @@ Before persisting reports or passing data to AI, the engine must redact every va
 sensitive. The MVP Resource Group has no sensitive attributes (`before_sensitive:
 {"tags": {}}`), but the rule applies from the start.
 
+**CI publication (Task 5.4):** the public-repository workflow publishes only
+`drift_report.json` and `detection_run.json`, as the `drift-report-<run_id>` artifact
+(30-day retention). `tfplan`, `plan.json` and `plan.log` are generated, gated and consumed
+on the ephemeral runner (`$RUNNER_TEMP`); they are kept only there and are not uploaded or
+otherwise persisted by this workflow. The published report is the contract report
+(sensitive values redacted by the engine). Values Terraform does not flag sensitive are not
+redacted: when a resource `id` changes, its before/after values (which contain the
+subscription ID) can appear in the report.
+
 ## 9. Future Extensibility
 
 The contract stays valid as resources are added:

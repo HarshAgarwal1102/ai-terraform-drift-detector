@@ -5,8 +5,8 @@ name: "Phase 5 - Drift Detection"
 # Implemented so far: triggers and environment selection (Task 5.1), Azure OIDC
 # login and Terraform init/validate against the remote backend (Task 5.2), plan
 # evidence via scripts/generate_plan_json.sh and classification via
-# `drift-engine analyze` (Task 5.3). Artifacts (Task 5.4) and failure reporting
-# (Task 5.5) are added to this workflow by those tasks.
+# `drift-engine analyze` (Task 5.3), and the report artifact (Task 5.4). Failure
+# reporting (Task 5.5) is added to this workflow by that task.
 #
 # Job status reflects process validity only: detected drift is a valid result and
 # does not fail the job; any detection or classification failure does, and the
@@ -305,6 +305,24 @@ jobs:
           echo "::error::Drift classification not valid (engine exit ${engine_rc}, evidence ${EVIDENCE_OUTCOME}, report ${report_outcome}). Drift status: UNKNOWN."
           exit 1
 
+      # Publishes only the contract report (sensitive values redacted by the
+      # engine) and the run manifest. Raw plan evidence (tfplan, plan.json,
+      # plan.log) is kept only on the ephemeral runner and is not uploaded: this is
+      # a public repository and plan files can hold clear-text values (spec §8.3).
+      # Default success() condition: runs only when evidence and analysis both
+      # succeeded (drift or no drift). ARTIFACT_DIR is this job's RUNNER_TEMP, which
+      # the evidence script required to be empty, so no stale files can be picked up.
+      - name: Upload Drift Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/drift/drift_report.json
+            ${{ runner.temp }}/drift/detection_run.json
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
+
       - name: Run Summary
         env:
           WORK_DIR: ${{ steps.context.outputs.working_directory }}
@@ -329,6 +347,7 @@ jobs:
             echo "| Plan exit code | \`${PLAN_EXIT_CODE}\` (0 = no pending changes, 2 = pending changes) |"
             echo "| Drift status | **${DRIFT_STATUS}** |"
             echo "| Classification | \`${CLASSIFICATION_COUNTS}\` |"
+            echo "| Artifact | \`drift-report-${GITHUB_RUN_ID}\` (drift_report.json + detection_run.json, 30 days) |"
             echo "| Commit | \`${GITHUB_SHA}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "Drift detection completed for '${DRIFT_ENVIRONMENT}' (${GITHUB_EVENT_NAME}): drift status ${DRIFT_STATUS}."

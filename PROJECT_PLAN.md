@@ -1369,17 +1369,38 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - **Not exercised locally**: real Azure plan/OIDC inside the script, Python 3.12 on the runner, and `pip install .` on Linux.
 
 #### Task 5.4 — Structured Artifact Storage & Pipeline Handling
-- **Status**: ⬜ NOT STARTED
-- **Objective**: Upload `drift_report.json` and raw plan as workflow artifacts for downstream inspection.
+- **Status**: 🟡 WORK IN PROGRESS
+- **Started**: 2026-10-02
+- **Objective**: Publish the contract drift report (`drift_report.json`) and the run manifest (`detection_run.json`) as a downloadable workflow artifact for downstream inspection. Raw Terraform plan evidence (`tfplan`, `plan.json`, `plan.log`) is still generated, validated and consumed by `drift-engine` during the workflow; it is kept only on the ephemeral GitHub runner and is not uploaded or otherwise persisted by this public-repository workflow.
 - **Dependencies**: Task 5.3
-- **Files/Areas**: `.github/workflows/drift-detection.yml`
+- **Files/Areas**: `.github/workflows/drift-detection.yml` (plus `docs/drift-detection-spec.md` §8.3 and `README.md` wording)
 - **Acceptance Criteria**:
-  - [ ] Artifact `drift-report-<run_id>` uploaded using `actions/upload-artifact@v4`.
-  - [ ] Retention policy set appropriately (e.g., 30 days).
+  - [ ] Artifact `drift-report-<run_id>` uploaded using `actions/upload-artifact@v4`, containing exactly `drift_report.json` and `detection_run.json`.
+  - [ ] Raw Terraform plan/state evidence (`tfplan`, `plan.json`, `plan.log`) is not uploaded; it stays on the ephemeral runner, and the evidence model is unchanged (generated, integrity-gated and analyzed in the workflow).
+  - [ ] Uploaded only for valid evidence (Generate Plan Evidence and Analyze Drift both succeeded, drift or no drift), from this run's `$RUNNER_TEMP/drift`; never failed or stale evidence.
+  - [ ] Retention policy set to 30 days.
 - **Validation**:
-  - [ ] Download and inspect artifact from completed workflow run.
+  - [ ] Download and inspect artifact from completed workflow run; confirm it contains only `drift_report.json` and `detection_run.json`.
 - **Implementation Notes**:
-  - Artifacts serve as input for Phase 6 AI analysis.
+  - Artifacts serve as input for Phase 6 AI analysis. Phase 6 consumes `drift_report.json`, not raw plans.
+  - **Scope revision (2026-10-02, user-approved)**: "raw plan" removed from the published artifact because the repository is public and plan files can contain clear-text sensitive and state values (spec §8.3). The published report is the contract report (sensitive values redacted by the engine).
+  - **Known limitation**: the report is not free of identifiers. Values Terraform does not flag sensitive are not redacted, so when a resource's `id` attribute changes (deletion, replacement, removal) its before/after values, including the subscription ID, appear in `attribute_changes`.
+- **Progress Notes (2026-10-02)**:
+  - **Workflow**: one new step, `Upload Drift Report`, between Analyze Drift and Run Summary.
+    - `actions/upload-artifact@v4`; `name: drift-report-${{ github.run_id }}`.
+    - `path` lists exactly `${{ runner.temp }}/drift/drift_report.json` and `${{ runner.temp }}/drift/detection_run.json` (no globs, nothing from the checkout).
+    - `retention-days: 30`; `if-no-files-found: error`; `overwrite: true` so a re-run attempt replaces its own run's artifact instead of failing on the name.
+    - Default `success()` condition: the step runs only when Generate Plan Evidence and Analyze Drift both succeeded.
+  - **Run Summary**: gains an `Artifact` row.
+  - **Unchanged**: permissions, OIDC, Terraform, `drift-engine` and exit-code logic. Raw plan evidence is still generated, gated and analyzed.
+  - **Docs**: spec §8.3 gains a "CI publication (Task 5.4)" paragraph. README: status line, Planned list, and the known limitation (artifact contents, no raw evidence persisted, `id` identifier caveat).
+  - **Local validation**:
+    - `check-jsonschema` and `actionlint` 1.7.12 + shellcheck 0.11.0 pass.
+    - Assertions pass: exactly one upload step, with the exact name, two exact paths (no `tfplan`/`plan.json`/`plan.log`/globs/workspace), retention 30, no `if`/`continue-on-error`; step order Analyze → Upload → Summary; earlier controls unchanged (permissions, no job `environment:`, `-lockfile=readonly`, ARM env only on init and evidence, no apply/forbidden flags/secrets).
+    - **15-case step harness** with an upload-selection check:
+      - Valid runs 01–04 (rc0 in_sync, rc2 external_drift, rc2 config_change, rc0 converged_drift): upload selects exactly `drift_report.json` + `detection_run.json`, while `plan.json`, `plan.log` and `tfplan` sit in the same directory and are **not** selected. The manifest and report carry the current `run_id`.
+      - Failure cases 05–15 (plan errors, integrity failures, show failure, lock change, tampered JSON, stale directory, non-dev var file): upload skipped.
+    - `./scripts/validate.sh` passed. No Python code changed.
 - **Completion Notes**:
   - None.
 

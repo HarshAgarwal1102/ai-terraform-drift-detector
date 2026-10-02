@@ -11,7 +11,7 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); next Task 5.4 (report artifacts).
+**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). Phase 5 in progress: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 (report + manifest artifact `drift-report-<run_id>`) implemented, awaiting a real GitHub run.
 
 | Phase | Status |
 |---|---|
@@ -58,7 +58,7 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Drift report artifacts and failure reporting for the scheduled workflow (Phase 5, Tasks 5.4–5.5)
+- Failure reporting for the scheduled workflow (Phase 5, Task 5.5)
 - **AI-powered analysis with LangGraph + an LLM** (Phase 6)
 - Azure Activity Log investigation of who or what changed a resource (Phase 7)
 - GitHub Issue/PR automation (Phase 8)
@@ -518,8 +518,11 @@ registration holds zero credentials.
 
 - Only one Azure resource type (resource group) is managed and drift-tested. Rules for Key
   Vault, NSG and storage are verified on synthetic plans only.
-- Scheduled detection (`drift-detection.yml`, daily 02:00 UTC) runs plan + `drift-engine analyze`,
-  but the report is not yet uploaded as an artifact (Task 5.4).
+- Scheduled detection (`drift-detection.yml`, daily 02:00 UTC) uploads only the contract report
+  (sensitive values redacted by the engine) and run manifest as `drift-report-<run_id>` (30 days).
+  Raw plan evidence (`tfplan`, `plan.json`, `plan.log`) is kept only on the ephemeral runner and is
+  not uploaded or otherwise persisted. The report can contain resource identifiers (e.g. the
+  subscription ID) when an `id` attribute changes.
 - Terraform reports drift only for resources and attributes it manages. Unmanaged resources
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.
