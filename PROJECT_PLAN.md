@@ -86,7 +86,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 5 — Automated Drift Detection Workflow
-- **Current Active Task**: Task 5.4 — Structured Artifact Storage & Pipeline Handling
+- **Current Active Task**: Task 5.5 — Pipeline Error Handling & Failure Reporting
 - **Phases Completed**: 4 of 14
 
 ---
@@ -1369,18 +1369,19 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - **Not exercised locally**: real Azure plan/OIDC inside the script, Python 3.12 on the runner, and `pip install .` on Linux.
 
 #### Task 5.4 — Structured Artifact Storage & Pipeline Handling
-- **Status**: 🟡 WORK IN PROGRESS
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Publish the contract drift report (`drift_report.json`) and the run manifest (`detection_run.json`) as a downloadable workflow artifact for downstream inspection. Raw Terraform plan evidence (`tfplan`, `plan.json`, `plan.log`) is still generated, validated and consumed by `drift-engine` during the workflow; it is kept only on the ephemeral GitHub runner and is not uploaded or otherwise persisted by this public-repository workflow.
 - **Dependencies**: Task 5.3
 - **Files/Areas**: `.github/workflows/drift-detection.yml` (plus `docs/drift-detection-spec.md` §8.3 and `README.md` wording)
 - **Acceptance Criteria**:
-  - [ ] Artifact `drift-report-<run_id>` uploaded using `actions/upload-artifact@v4`, containing exactly `drift_report.json` and `detection_run.json`.
-  - [ ] Raw Terraform plan/state evidence (`tfplan`, `plan.json`, `plan.log`) is not uploaded; it stays on the ephemeral runner, and the evidence model is unchanged (generated, integrity-gated and analyzed in the workflow).
-  - [ ] Uploaded only for valid evidence (Generate Plan Evidence and Analyze Drift both succeeded, drift or no drift), from this run's `$RUNNER_TEMP/drift`; never failed or stale evidence.
-  - [ ] Retention policy set to 30 days.
+  - [x] Artifact `drift-report-<run_id>` uploaded using `actions/upload-artifact@v4`, containing exactly `drift_report.json` and `detection_run.json`.
+  - [x] Raw Terraform plan/state evidence (`tfplan`, `plan.json`, `plan.log`) is not uploaded; it stays on the ephemeral runner, and the evidence model is unchanged (generated, integrity-gated and analyzed in the workflow).
+  - [x] Uploaded only for valid evidence (Generate Plan Evidence and Analyze Drift both succeeded, drift or no drift), from this run's `$RUNNER_TEMP/drift`; never failed or stale evidence. Valid path proven in the real run; skip on failure proven by the local harness.
+  - [x] Retention policy set to 30 days.
 - **Validation**:
-  - [ ] Download and inspect artifact from completed workflow run; confirm it contains only `drift_report.json` and `detection_run.json`.
+  - [x] Download and inspect artifact from completed workflow run; confirm it contains only `drift_report.json` and `detection_run.json`. See Completion Notes.
 - **Implementation Notes**:
   - Artifacts serve as input for Phase 6 AI analysis. Phase 6 consumes `drift_report.json`, not raw plans.
   - **Scope revision (2026-10-02, user-approved)**: "raw plan" removed from the published artifact because the repository is public and plan files can contain clear-text sensitive and state values (spec §8.3). The published report is the contract report (sensitive values redacted by the engine).
@@ -1402,7 +1403,20 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
       - Failure cases 05–15 (plan errors, integrity failures, show failure, lock change, tampered JSON, stale directory, non-dev var file): upload skipped.
     - `./scripts/validate.sh` passed. No Python code changed.
 - **Completion Notes**:
-  - None.
+  - **Real GitHub validation**: run **#6**, id `37000123885` (attempt 1), <https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/37000123885>.
+    - Event `workflow_dispatch`, branch `main`, commit `4ad55e741f684bbb406fa896077ea4d58438c486` (`feat: upload drift report and run manifest as workflow artifact`), 2026-10-02T11:16:42Z → 11:17:32Z. **Conclusion: success.**
+    - All 19 steps succeeded, including Generate Plan Evidence, Analyze Drift, **Upload Drift Report** and Run Summary.
+  - **Artifact (Actions API)**: exactly one, `drift-report-37000123885` (id `11223520945`), 1,232 bytes, created 2026-10-02T11:17:27Z, expires 2026-11-01T11:17:26Z (30 days), digest `sha256:fe74b8c427ef27f0d4cdea013b79a523e5153da954a172eb2703a700be54c942`.
+  - **Downloaded and inspected**: the zip was downloaded through the signed-in browser. Its SHA-256 equals the API digest.
+    - `unzip -Z1` lists exactly 2 entries, `drift_report.json` (2,095 B) and `detection_run.json` (439 B). No `tfplan`, `plan.json`, `plan.log` or any other file.
+    - Both files are valid JSON.
+    - Manifest: `outcome: succeeded`, `plan_exit_code: 0`, `show_exit_code: 0`, `terraform_version: 1.14.7`, `environment: dev`, `backend_key: dev.tfstate`, `git_commit: 4ad55e7…`, `run_id: github-37000123885-1`, 11:17:08Z → 11:17:25Z.
+    - Report: `outcome: succeeded`, `has_drift: false`, `failure: null`, `in_sync` = 1 (`module.resource_group.azurerm_resource_group.this["main"]`, no attribute changes). Its `run` block repeats the manifest's run ID, commit, exit codes and timestamps, and its `plan` block carries metadata only (`format_version 1.2`, `errored false`, `complete true`, plan timestamp 11:17:19Z).
+    - Run ID and attempt, commit and timestamps match the actual run.
+    - **No raw plan or state content**: the report's top-level keys are only the contract keys; no `prior_state`/`resource_changes`/`resource_drift`/`configuration`/`planned_values`/`variables`/`*_sensitive` keys in either file; no subscription paths, GUIDs, tenant, client or secret strings.
+  - **Plan/drift result**: plan exit 0, drift status `none` (`dev` in sync).
+  - **Not exercised in CI**: an artifact from a real drifted run (exit 2) and the skip-on-failure path. Both are covered by the local harness; Task 5.5 owns failure-path validation.
+  - **Annotations** as in Task 5.3 (Node.js 20 deprecation; `ubuntu-latest` → Ubuntu 26 notice); none from upload-artifact.
 
 #### Task 5.5 — Pipeline Error Handling & Failure Reporting
 - **Status**: ⬜ NOT STARTED
