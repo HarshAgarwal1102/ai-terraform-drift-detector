@@ -62,6 +62,12 @@ Per drifted resource, the first failing step decides (`decide` implements R0-R7)
 Anchor B (a trusted prior detection run) is reserved in the rules but has no
 input yet: rules_version 1 accepts only write-event anchors.
 
+Fallback (Task 7.3): `origin_statement` is the single display mapping. A drifted
+resource shows the claim above only when confirmed; every other case (any unknown
+reason, a failed document, a missing document or address) shows "Change origin
+could not be confirmed". No `caller_identity` field exists and the drift report is
+not changed.
+
 Pure and deterministic: standard library and pydantic only, no Azure SDK, no
 network, no clock. Identical inputs give byte-identical output regardless of event
 order. Callers are untrusted text copied verbatim from validated evidence; they are
@@ -109,6 +115,9 @@ CLAIM_TEMPLATE = (
     "Azure recorded caller {caller} performing the successful delete of this exact resource "
     "under the correlation rules."
 )
+# Task 7.3 fallback: the display statement for every drifted resource whose origin
+# is not confirmed. A rendering, never a stored identity value.
+UNCONFIRMED_ORIGIN = "Change origin could not be confirmed"
 
 SKEW = timedelta(minutes=5)
 SETTLE_MARGIN = INGESTION_LAG  # 20 minutes (Task 7.1); a project margin, not an Azure SLA
@@ -351,6 +360,24 @@ def render_claim(resource: ResourceAttribution) -> str | None:
     if resource.attribution.status != "confirmed":
         return None
     return CLAIM_TEMPLATE.format(caller=resource.attribution.caller)
+
+
+def origin_statement(document: DriftAttribution | None, address: str) -> str:
+    """How the change origin of a drifted resource may be displayed (Task 7.3).
+
+    The confirmed-claim template only when `document` is a non-failed attribution
+    that lists `address` as confirmed; otherwise, always UNCONFIRMED_ORIGIN: any
+    `unknown` reason (missing, expired, empty, unsettled, incomplete or ambiguous
+    Activity Log evidence), a failed document (invalid, mismatched or failed
+    evidence or report), an address it does not list, or no document at all.
+    Display text only: the machine-readable `status`, `reason` and `caller` (null
+    unless confirmed) stay in the document unchanged.
+    """
+    if document is None or document.failure is not None:
+        return UNCONFIRMED_ORIGIN
+    resource = next((r for r in document.resources if r.address == address), None)
+    claim = render_claim(resource) if resource is not None else None
+    return claim if claim is not None else UNCONFIRMED_ORIGIN
 
 
 # ---------------------------------------------------------------------------

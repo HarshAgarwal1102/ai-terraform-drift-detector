@@ -124,9 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 7 — Azure Activity Log Investigation
-- **Current Active Task**: Task 7.3 — Unknown/Missing Log Handling & Fallback Logic
-- **Phases Completed**: 6 of 14
+- **Current Active Phase**: Phase 8 — GitHub Issue / PR Automation
+- **Current Active Task**: Task 8.1 — Automated GitHub Drift Issue Creator
+- **Phases Completed**: 7 of 14
 
 ---
 
@@ -1784,7 +1784,7 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
 ---
 
 ### PHASE 7 — Azure Activity Log Investigation
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azure control plane events (caller identity, timestamp, operation name).
 
@@ -1841,19 +1841,25 @@ Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azur
   - **Limitations / blockers**: B1 — Anchor B has no producer, so deletions without an in-window successful write stay `no_existence_anchor`; B4 — downstream caller exposure (Phase 8, public repo) undecided; evidence and report from two different plans that share run_id, plan timestamp and drifted addresses cannot be told apart (the report carries no resource IDs); no deletion of a project resource has been observed in real Azure (mechanics verified on other resources, 2026-10-03).
 
 #### Task 7.3 — Unknown/Missing Log Handling & Fallback Logic
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-03
+- **Completed**: 2026-10-03
 - **Objective**: Implement fallback behavior when Activity Logs are disabled, expired, or lack relevant events.
 - **Dependencies**: Task 7.2
-- **Files/Areas**: `src/drift_engine/activity_logs.py`
+- **Files/Areas**: `src/drift_engine/attribution.py` (fallback display mapping), tests. *(Corrected 2026-10-03 per the approved Task 7.3 design review: the Activity Log collector `activity_logs.py` is unchanged.)*
 - **Acceptance Criteria**:
-  - [ ] Sets `caller_identity = "Change origin could not be confirmed"` when logs are missing.
-  - [ ] Prevents AI layer from inventing or assuming caller identities without log data.
+  - [x] Every drifted resource whose origin is not confirmed (any Task 7.2 `unknown` reason; failed, mismatched, invalid or missing evidence; no attribution document; address not listed) resolves to the fixed display statement "Change origin could not be confirmed", with the machine-readable `status`/`reason` kept and `caller` null. *(Reworded 2026-10-03 per the approved design: a rendering/display mapping, not a stored `caller_identity` field; the drift report schema is unchanged. Confirmed attributions keep the Task 7.2 claim template.)*
+  - [x] Prevents AI layer from inventing or assuming caller identities without log data.
 - **Validation**:
-  - [ ] Test execution with empty log response.
+  - [x] Test execution with empty log response.
 - **Implementation Notes**:
   - Strict compliance with anti-hallucination rules.
 - **Completion Notes**:
-  - None.
+  - **Files**: `src/drift_engine/attribution.py` (additions only: `UNCONFIRMED_ORIGIN = "Change origin could not be confirmed"`, `origin_statement(document, address)`, docstring), new `tests/test_attribution_fallback.py`. **Unchanged**: `activity_logs.py`, `cli.py`, the `drift_attribution.json` contract (no new field, no version change), the drift report schema, `src/ai_engine/` (code and contract), dependencies, Terraform, workflows, the Task 7.1/7.2 tests. No Anchor B.
+  - **Fallback**: `origin_statement` returns the Task 7.2 claim template only for a non-failed document that lists the address as `confirmed`; every other case — any of the 19 `unknown` reasons (missing/expired/empty/unsettled/incomplete/ambiguous evidence), a failed document (`report_invalid`, `report_failed`, `evidence_invalid`, `evidence_mismatch`, `evidence_failed`), an unlisted address, or no document (`None`) — returns "Change origin could not be confirmed". Display text only: never stored in any output; `status`/`reason` stay machine-readable and `caller` stays null unless confirmed (Task 7.2 contract). Activity Logs cannot be disabled at subscription level; "disabled" appears as collection failures (`authorization_failed`, `credential_unavailable`, `azure_sdk_unavailable`, …) → `evidence_failed`.
+  - **AI layer** (criterion 2, no AI change): `ai_engine` never imports `activity_logs`/`attribution` or reads their files, `run_analysis` has no Activity Log input, and a model that names a caller is rejected (`unsupported_attribution`, `summary_unsupported_attribution`) while the AI report keeps `attribution = {actor: unknown, confirmed: false, pending: phase_7_activity_log}`, contains no caller, and passes `verify_report`; the AI report is identical with and without evidence/attribution files.
+  - **Tests** (session-scratchpad venv; no Azure/credentials): `tests/test_attribution_fallback.py` **19 passed** (64 subtests) — empty Activity Log response end to end (7.1 collector → 7.2 → fallback) and through the real CLI pipeline (`analyze` → `activity-logs` with a fake source and pinned clock → `attribute`, drift report bytes unchanged), every 7.1 failure code, one failed scope, missing/invalid/mismatched evidence and report, no document / unlisted addresses, SDK unavailable, out-of-window and pre-window anchors, not settled, **all 19 reason codes produced and mapped** (caller null, statement never contains a caller), confirmed positive control (UPN and GUID), fallback never stored, failed-document defense in depth, determinism, AI boundary (always) and 3 AI anti-caller tests (`[ai]` extra). Three ad hoc fallback mutants (failed-document guard, claim for unknown, `None` document) are each caught. Task 7.2 suite unchanged and passing (82, incl. 25/25 safeguard mutants). Full suite **1683 passed** (1340 subtests); `drift_engine` gate **99.94%** (`attribution.py` 100% lines and branches); core-only venv **1004 passed / 679 skipped** (the 3 AI tests skip); `unittest discover` OK in both venvs; `./scripts/validate.sh` passed; gitleaks 8.30.1: no finding in new/changed lines (pre-existing "TLS/encryption" false positive only).
+  - **Note (no change, out of scope)**: the AI report's `attribution.pending = "phase_7_activity_log"` label remains; integrating deterministic attribution into presentation (and caller exposure, blocker B4) is for a later task.
 
 ---
 
