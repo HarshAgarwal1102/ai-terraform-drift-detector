@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 6 — LangGraph AI Analysis Engine
-- **Current Active Task**: Task 6.4 — Cost & Configuration Analysis Nodes
+- **Current Active Task**: Task 6.5 — Root Cause & Risk Assessment Nodes
 - **Phases Completed**: 5 of 14
 
 ---
@@ -1652,19 +1652,37 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
   - No Terraform, Azure or GitHub Actions changes; no commit.
 
 #### Task 6.4 — Cost & Configuration Analysis Nodes
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-02
+- **Completed**: 2026-10-02
 - **Objective**: Implement LangGraph nodes `analyze_cost` and `analyze_configuration` to inspect resource SKU changes, instance counts, or settings.
 - **Dependencies**: Task 6.3
-- **Files/Areas**: `src/ai_engine/nodes/cost_analysis.py`
+- **Files/Areas**: `src/ai_engine/nodes/cost_analysis.py`; plus (approved design) `src/ai_engine/nodes/analyze_drift.py`, `src/ai_engine/nodes/security_analysis.py`, `src/ai_engine/evidence.py`, `src/ai_engine/graph.py`, `tests/fixtures/cost_config_plans/`, tests
 - **Acceptance Criteria**:
-  - [ ] Evaluates SKU upgrades/downgrades or resource additions/deletions.
-  - [ ] Summarizes configuration drift relative to declared Terraform specs.
+  - [x] Evaluates SKU upgrades/downgrades or resource additions/deletions.
+  - [x] Summarizes configuration drift relative to declared Terraform specs.
 - **Validation**:
-  - [ ] Test node with SKU change drift report.
+  - [x] Test node with SKU change drift report.
 - **Implementation Notes**:
   - Synthesizes configuration differences into clear explanations.
+  - **Approved design (Task 6.4 design review, 2026-10-02) — one LLM call per run:**
+    - `analyze_cost` and `analyze_configuration` are **section handlers** inside a single LLM node `analyze_drift`, which also takes over Task 6.3's security call (the `inferences["analyze_security"]` contract is preserved). A deterministic `route_cost_config` node runs before it and writes write-once `cost_targets` / `config_targets` (incl. a deterministic configuration summary).
+    - **Phase 6 guarantee: at most one logical LLM call per run across all analysis sections**; with the default configuration at most one HTTP attempt; extra attempts only when `AI_LLM_MAX_RETRIES > 0`. Only `analyze_drift` receives the LLM client.
+    - Output: one JSON object with `security_analysis`, `cost_analysis`, `configuration_analysis` sections; findings `basis: "inference"`, citations **section-scoped** to evidence actually sent; deterministic severity/classification attached by code; no remediation or attribution fields.
+    - **Cost is pricing-free in Phase 6**: only a qualitative `direction` (increase/decrease/neutral/undetermined); `monetary_impact = "not_determinable_from_evidence"`; no amounts, prices, savings or currency claims (enforced by a deterministic guard). Infracost figures arrive in Task 10.3 as a deterministic, allowlisted input to the same `cost_analysis` section, not as an extra call.
+    - Evidence via the single `build_llm_evidence` gateway, extended with section tags, deduplication (a change routed to several sections is sent once) and per-section caps; redaction fail-closed, allowlist and delimiter escaping unchanged; no raw plan.
+    - Cost routing list is routing-only data in `ai_engine` (may move to `drift_engine` with `cost.py` in Phase 10). "Declared Terraform specs" = the plan's desired view plus the `configured` assessment, not HCL source or variable origins.
+    - **Knock-on (decided in 6.5/6.6)**: their planned LLM nodes must respect the one-call rule — either further sections of the same call or deterministic/rendering-only steps.
 - **Completion Notes**:
-  - None.
+  - **Files**: new `src/ai_engine/nodes/analyze_drift.py` (the single LLM node), `src/ai_engine/nodes/cost_analysis.py` (`route_cost_config`, deterministic configuration summary, cost/configuration section schemas and validators), `src/ai_engine/nodes/common.py` (strict base model, cited-path type, cost-claim guard), `tests/test_ai_cost_config.py`, `tests/fixtures/cost_config_plans/` (generator + 9 synthetic scenarios, no pricing data), `tests/conftest.py` (blocks every non-loopback connection in tests, so no real LLM/network call is possible); changed `evidence.py` (section tags, dedupe, per-section caps/applicability, section-scoped `cited_keys`), `security_analysis.py` (reduced to routing + security section handler; prompt/node moved to `analyze_drift`), `graph.py`; Task 6.1–6.3 tests updated for the new graph and envelope. No `drift_engine`, Terraform, Azure or workflow change; README unchanged (no new user-facing command).
+  - **Graph**: START → `initialize` → `parse_drift` → `classify_drift` → `route_cost_config` → `analyze_drift` → END. All deterministic nodes run before the only LLM node. New write-once/frozen fields `cost_targets`, `config_targets`, `llm_call`.
+  - **One-call guarantee**: `analyze_drift` is the only node holding the client; one `invoke_llm` per run for all three sections; default one HTTP attempt (retries opt-in, recorded in `llm_call.max_retries`). No call when the report failed, nothing is routed in any section, the LLM is unavailable, or limits leave no evidence.
+  - **Routing (deterministic, report fields only)**: cost = lifecycle (`resource_added`/`resource_removed`/`external_deletion`/`replace`: every non-noise change) or a cost-attribute name pattern (SKU, tier, replication, size, capacity, counts, instances, MB/GB, throughput, zones, autoscale; never tags/description); configuration = every non-noise change of a changed resource; plus a per-resource configuration summary (counts by class/assessment, reverted on apply, pending config changes, ambiguous, unknown until apply, unconfigured-but-reverted).
+  - **Evidence**: one `build_llm_evidence` call; a change routed to several sections is sent once with per-section reasons; per-section caps (security 30, cost 20, configuration 30) plus global caps, priority security → cost → configuration; a section is `applicable` only if evidence for it was included. Allowlist, fail-closed redaction check, value/char caps and delimiter escaping unchanged.
+  - **Output contract**: envelope with exactly `security_analysis`, `cost_analysis`, `configuration_analysis`. Cost findings: `cost_driver`, qualitative `direction`, constant `monetary_impact = "not_determinable_from_evidence"`; code adds `pricing_source: null`, `classification`, `action`, `deterministic_severity`. Configuration findings: `topic`; code adds `evidence_facts` (deterministic attribute class + assessment per cited path), `topic_conflicts_with_evidence`, `deterministic_severity`. No field for classification, severity, remediation or attribution in any schema.
+  - **Validation rules**: envelope invalid → every applicable section `invalid_output` (raw reply discarded); one section failing its schema → only that section `invalid_output`; citations must be sent **for that section**; findings in a non-applicable section rejected (`section_not_applicable`); free text with amounts/currency/rates/numeric savings rejected (`unsupported_cost_claim`) in every section, and such a summary is dropped.
+  - **Tests** (session-scratchpad venv, fake models / local `httpx.MockTransport` only): `test_ai_cost_config.py` **92 passed**; `test_ai_security.py` 82, `test_ai_parse_drift.py` 47, `test_ai_config.py` 76 (all AI: 297). Covers routing per scenario and on real fixtures, lifecycle and noise exclusion, the configuration summary, dedupe, per-section caps, ≤ 1 call for every scenario and the whole graph, 1 HTTP request by default for three sections (3 with `AI_LLM_MAX_RETRIES=2`), section-scoped citations, non-applicable sections, cost-claim guard (12 positive / 9 negative phrasings), strict cost and configuration schemas, topic-conflict flags, envelope variants, failed call, bugs raise, injection values escaped and echoed amounts rejected, SKU changes end-to-end, frozen `cost_targets`/`config_targets`/`llm_call`, and deterministic output identical with and without an LLM. The test-wide network guard caught one pre-existing test that would now have contacted `api.openai.com` (tag drift now routes to configuration); that test now uses an in-sync report. Mutation check: **33/33** deliberate breakages caught (two survivors on the first run led to added assertions). Full suite **627 passed** (667 subtests); `drift_engine` gate 99.87%; `ai_engine` 99% (`analyze_drift`, `security_analysis`, `common` 100%; `cost_analysis` 98%); `unittest discover` OK; core-only install: no LLM packages, 465 passed / 162 skipped.
+  - **Limitations**: (a) no pricing: cost output is qualitative until Phase 10 (Infracost); (b) the cost pattern list is heuristic routing and can miss provider-specific cost attributes or include free ones; lifecycle routing also sends tag changes of added/deleted resources; (c) the cost-claim guard is pattern-based (conservative: it may reject a legitimate text containing e.g. `$` or "cost: 3"); (d) updates carry only changed paths, so unchanged context (current tier, region, usage) is absent; (e) analysis quality of a real model is unverified (no live call); (f) attribution/remediation wording in free text is forbidden by the prompt but checked only in Task 6.7.
 
 #### Task 6.5 — Root Cause & Risk Assessment Nodes
 - **Status**: ⬜ NOT STARTED

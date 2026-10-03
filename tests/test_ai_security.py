@@ -1,4 +1,7 @@
-"""Task 6.3: security routing, LLM evidence, and the analyze_security node.
+"""Task 6.3: security routing, LLM evidence, and the security section of the single LLM call.
+
+Since Task 6.4 the security analysis is one section of `analyze_drift`, the only
+LLM node; `inferences["analyze_security"]` keeps its Task 6.3 contract.
 
 Reports come from drift_engine run on synthetic security-drift plans
 (tests/fixtures/security_plans, see build.py there) and on the real fixtures.
@@ -22,13 +25,13 @@ from ai_engine.evidence import (
     build_llm_evidence,
     render_evidence,
 )
+from ai_engine.nodes.analyze_drift import SYSTEM_PROMPT, make_analyze_drift
+from ai_engine.nodes.cost_analysis import route_cost_config
 from ai_engine.nodes.parse_drift import parse_drift
 from ai_engine.nodes.security_analysis import (
-    SYSTEM_PROMPT,
     AiSecurityOutput,
     InvalidModelOutput,
     classify_drift,
-    make_analyze_security,
     parse_model_output,
     validate_findings,
 )
@@ -64,10 +67,11 @@ def real_report(name: str) -> dict:
 
 
 def prepared(report: dict) -> dict:
-    """State after parse_drift and classify_drift, as the graph builds it."""
+    """State after the deterministic nodes, as the graph builds it."""
     state = {"drift_report": report, "llm": AVAILABLE}
     state.update(parse_drift(state))
     state.update(classify_drift(state))
+    state.update(route_cost_config(state))
     return state
 
 
@@ -97,21 +101,29 @@ EXPOSURE = {"security_rule": "network_exposure", "public_network_access_enabled"
 
 
 class EvidenceCitingLLM(ScriptedLLM):
-    """A well-behaved fake: one finding per change it was shown, citing exactly that change."""
+    """A well-behaved fake: one finding per change and section it was shown, citing exactly that change."""
 
     def invoke(self, messages):
         self.prompts.append(messages)
         evidence = evidence_from_messages(messages)
-        findings = [{"address": r["address"], "cited_paths": [c["path"]],
-                     "exposure": EXPOSURE.get(c["attribute"], "other"),
-                     "ai_assessed_impact": c["severity"]["level"],
-                     "explanation": f"{'.'.join(c['path'])} changed outside Terraform.", "basis": "inference"}
-                    for r in evidence["resources"] for c in r["changes"]]
-        return json.dumps({"findings": findings, "summary": f"{len(findings)} security-relevant change(s)."})
+
+        def changes(section):
+            return [(r, c) for r in evidence["resources"] for c in r["changes"] if section in c["sections"]]
+
+        def base(r, c):
+            return {"address": r["address"], "cited_paths": [c["path"]], "basis": "inference",
+                    "explanation": f"{'.'.join(c['path'])} changed outside Terraform."}
+
+        security = [dict(base(r, c), exposure=EXPOSURE.get(c["attribute"], "other"),
+                         ai_assessed_impact=c["severity"]["level"]) for r, c in changes("security")]
+        cost = [dict(base(r, c), cost_driver="other", direction="undetermined",
+                     monetary_impact="not_determinable_from_evidence") for r, c in changes("cost")]
+        config = [dict(base(r, c), topic="declared_value_overridden") for r, c in changes("configuration")]
+        return envelope(security, cost, config)
 
 
 def analyze(state: dict, llm, limits: EvidenceLimits = EvidenceLimits()) -> dict:
-    return make_analyze_security(llm, limits)(state)
+    return make_analyze_drift(llm, limits)(state)
 
 
 def finding(address=NSG, paths=(["security_rule"],), impact="CRITICAL", **extra) -> dict:
@@ -120,7 +132,20 @@ def finding(address=NSG, paths=(["security_rule"],), impact="CRITICAL", **extra)
             "basis": "inference", **extra}
 
 
+def envelope(security=(), cost=(), configuration=(), summary="s") -> str:
+    """A reply of the single LLM call (Task 6.4): all three sections."""
+    return json.dumps({"security_analysis": {"findings": list(security), "summary": summary},
+                       "cost_analysis": {"findings": list(cost), "summary": ""},
+                       "configuration_analysis": {"findings": list(configuration), "summary": ""}})
+
+
 def reply(*findings, summary="s") -> str:
+    """A reply carrying `findings` in the security section."""
+    return envelope(findings, summary=summary)
+
+
+def security_only(*findings, summary="s") -> str:
+    """The Task 6.3 standalone security shape, for `parse_model_output` tests."""
     return json.dumps({"findings": list(findings), "summary": summary})
 
 
@@ -186,12 +211,13 @@ def test_evidence_is_allowlisted():
                              "notes", "severity", "changes"}
     for change in resource["changes"]:
         assert set(change) == {"path", "attribute", "class", "redacted", "severity", "assessment",
-                               "routing_reason", "state", "real", "desired"}
+                               "sections", "state", "real", "desired"}
+        assert set(change["sections"]) == {"security"}
     text = render_evidence(evidence)
     for forbidden in ("synthetic-security-fixture", "dev.tfstate", "terraform/environments/dev",
                       "registry.terraform.io", "classification_version", "1.14.7", "run_id", "tags"):
         assert forbidden not in text, forbidden
-    assert set(evidence) == {"resources", "truncation"}
+    assert set(evidence) == {"resources", "sections", "truncation"}
 
 
 def test_redacted_values_are_status_only():
@@ -238,9 +264,12 @@ def test_limits_order_by_severity_and_record_omissions():
     routes = state["security_targets"]["changes"]
     evidence = build_llm_evidence(state["parsed_drift"], routes, EvidenceLimits(max_changes=1))
     assert [c["path"] for c in evidence["resources"][0]["changes"]] == [["https_traffic_only_enabled"]]
-    assert evidence["truncation"] == {"changes_total": 2, "changes_included": 1, "truncated": True,
-                                      "changes_omitted": [{"address": SA, "path": ["min_tls_version"]}],
-                                      "values_truncated": []}
+    assert evidence["truncation"] == {
+        "changes_total": 2, "changes_included": 1, "truncated": True,
+        "changes_omitted": [{"address": SA, "path": ["min_tls_version"], "sections": ["security"]}],
+        "values_truncated": [],
+        "per_section": {"security": {"routed": 2, "included": 1}, "cost": {"routed": 0, "included": 0},
+                        "configuration": {"routed": 0, "included": 0}}}
 
 
 def test_critical_changes_kept_first():
@@ -321,7 +350,7 @@ def _evidence(scenario: str) -> dict:
 
 
 def test_valid_output_keeps_deterministic_severity_authoritative():
-    output = parse_model_output(reply(finding(impact="LOW")))
+    output = parse_model_output(security_only(finding(impact="LOW")))
     [kept], rejected = validate_findings(output, _evidence("nsg_open_inbound"))
     assert rejected == []
     assert kept["deterministic_severity"] == "CRITICAL"  # authoritative, from drift_engine
@@ -330,7 +359,7 @@ def test_valid_output_keeps_deterministic_severity_authoritative():
 
 
 def test_fenced_json_is_accepted():
-    output = parse_model_output("```json\n" + reply(finding()) + "\n```")
+    output = parse_model_output("```json\n" + security_only(finding()) + "\n```")
     assert len(output.findings) == 1
 
 
@@ -345,7 +374,7 @@ def test_fenced_json_is_accepted():
     ids=["unrouted-path", "invented-path", "invented-address", "partly-unsupported"],
 )
 def test_unsupported_citations_rejected(bad):
-    output = parse_model_output(reply(finding(), bad))
+    output = parse_model_output(security_only(finding(), bad))
     kept, rejected = validate_findings(output, _evidence("nsg_open_inbound"))
     assert len(kept) == 1
     assert rejected == [{"index": 1, "reason": "unsupported_citation"}]
@@ -358,16 +387,16 @@ def test_unsupported_citations_rejected(bad):
         "I'm sorry, but I can't help with that.",  # refusal as plain text
         "",
         "[]",
-        reply(finding(basis="evidence")),
-        reply(finding(), summary=None),
+        security_only(finding(basis="evidence")),
+        security_only(finding(), summary=None),
         json.dumps({"findings": [finding()]}),  # missing summary
         json.dumps({"findings": [finding()], "summary": "s", "severity": "LOW"}),  # extra field
-        reply(finding(exposure="lateral_movement")),
-        reply(finding(impact="SEVERE")),
-        reply(finding(paths=())),
-        reply({**finding(), "classification": "in_sync"}),  # attempt to re-classify
-        "```json\n" + reply(finding()) + "\n``` trailing",
-        reply(finding()) + reply(finding()),
+        security_only(finding(exposure="lateral_movement")),
+        security_only(finding(impact="SEVERE")),
+        security_only(finding(paths=())),
+        security_only({**finding(), "classification": "in_sync"}),  # attempt to re-classify
+        "```json\n" + security_only(finding()) + "\n``` trailing",
+        security_only(finding()) + security_only(finding()),
     ],
 )
 def test_invalid_output_rejected(text):
@@ -400,11 +429,21 @@ def test_unavailable_status_wins_over_a_client_object():
     assert result["status"] == "skipped" and llm.prompts == []
 
 
-def test_skipped_without_routes_makes_no_call():
+@requires_ai
+def test_security_skipped_without_security_routes():
+    # Tag drift has no security routes; the single call still runs for its configuration section.
     llm = ScriptedLLM(reply())
     result = analyze(prepared(security_report("nsg_tags_only")), llm)["inferences"]["analyze_security"]
     assert (result["status"], result["reason"]) == ("skipped", "no security-relevant changes")
+    assert len(llm.prompts) == 1
+
+
+def test_no_call_without_any_routes():
+    llm = ScriptedLLM(reply())
+    update = analyze(prepared(real_report("in_sync")), llm)
     assert llm.prompts == []
+    assert update["inferences"]["analyze_security"]["reason"] == "no security-relevant changes"
+    assert update["llm_call"]["attempted"] is False
 
 
 def test_skipped_for_failed_report():
@@ -436,8 +475,8 @@ def test_llm_failures_become_failed_status(error):
     assert result["status"] == "failed" and result["findings"] == []
     assert result["reason"].startswith("LLM ")
     assert "bad key" not in result["reason"] and "slow down" not in result["reason"]
-    assert update["warnings"] == [f"AI security analysis failed ({result['reason']}); "
-                                  "deterministic severity is unaffected"]
+    assert update["warnings"] == [f"AI analysis failed ({result['reason']}); "
+                                  "deterministic classification and severity are unaffected"]
 
 
 @requires_ai
@@ -446,7 +485,7 @@ def test_invalid_output_status_discards_reply():
     result = update["inferences"]["analyze_security"]
     assert result["status"] == "invalid_output" and result["findings"] == [] and result["summary"] is None
     assert "Sure!" not in json.dumps(update)
-    assert update["warnings"] == ["AI security analysis returned invalid output and was discarded"]
+    assert update["warnings"] == ["AI analysis returned invalid output and was discarded"]
 
 
 @requires_ai
@@ -499,7 +538,7 @@ def test_graph_with_langchain_fake_model():
     # Deterministic channels are untouched and frozen; AI output lives only in `inferences`.
     assert state["drift_report"] == report
     assert isinstance(state["security_targets"], FrozenDict)
-    assert set(state["inferences"]) == {"analyze_security"}
+    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration"}
     assert state["drift_report"]["resources"][0]["severity"]["level"] == "CRITICAL"
 
 
@@ -558,8 +597,10 @@ def test_no_call_when_limits_leave_no_evidence(limits):
     assert (result["status"], result["reason"]) == ("skipped", "no evidence left after limits")
     assert llm.prompts == []  # no call
     assert result["evidence"]["changes"] == 0
-    assert result["evidence"]["truncation"]["changes_omitted"] == [{"address": NSG, "path": ["security_rule"]}]
-    assert update["warnings"][0].startswith("AI security analysis saw truncated evidence: 1 change(s) omitted")
+    assert result["evidence"]["truncation"]["changes_omitted"] == [
+        {"address": NSG, "path": ["security_rule"], "sections": ["security", "configuration"]}]
+    assert update["warnings"][0].startswith("AI analysis saw truncated evidence: 1 change(s) omitted")
+    assert update["llm_call"]["attempted"] is False
 
 
 @requires_ai
@@ -635,6 +676,7 @@ def test_retries_only_when_explicitly_configured():
     assert result["status"] == "failed" and result["max_retries"] == 2
 
 
+@requires_ai
 def test_retry_count_unknown_for_clients_without_the_setting():
     result = analyze(prepared(security_report("nsg_tags_only")), ScriptedLLM(reply()))["inferences"]
     assert result["analyze_security"]["max_retries"] is None

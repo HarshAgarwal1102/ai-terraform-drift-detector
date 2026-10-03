@@ -1,0 +1,91 @@
+{
+  "applyable": true,
+  "complete": true,
+  "configuration": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "azurerm_linux_virtual_machine.this",
+          "expressions": {
+            "admin_username": {
+              "constant_value": null
+            },
+            "location": {
+              "constant_value": null
+            },
+            "name": {
+              "constant_value": null
+            },
+            "resource_group_name": {
+              "constant_value": null
+            },
+            "size": {
+              "constant_value": null
+            },
+            "tags": {
+              "constant_value": null
+            }
+          },
+          "mode": "managed",
+          "name": "this",
+          "type": "azurerm_linux_virtual_machine"
+        }
+      ]
+    }
+  },
+  "errored": false,
+  "format_version": "1.2",
+  "output_changes": {},
+  "resource_changes": [
+    {
+      "address": "azurerm_linux_virtual_machine.this",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "admin_username": "azureuser",
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Compute/virtualMachines/aitdd-dev-vm",
+          "location": "centralindia",
+          "name": "aitdd-dev-vm",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "size": "Standard_D4s_v5",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "admin_username": "azureuser",
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Compute/virtualMachines/aitdd-dev-vm",
+          "location": "centralindia",
+          "name": "aitdd-dev-vm",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "size": "Standard_B2s",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "mode": "managed",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_linux_virtual_machine"
+    }
+  ],
+  "resource_drift": [],
+  "terraform_version": "1.14.7",
+  "timestamp": "2026-10-02T12:00:00Z"
+}

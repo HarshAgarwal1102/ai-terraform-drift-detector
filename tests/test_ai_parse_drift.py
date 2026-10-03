@@ -226,7 +226,8 @@ class _CountingLLM:
 
     def invoke(self, messages):
         self.calls += 1
-        return '{"findings": [], "summary": ""}'
+        empty = {"findings": [], "summary": ""}
+        return json.dumps({"security_analysis": empty, "cost_analysis": empty, "configuration_analysis": empty})
 
 
 @requires_ai
@@ -239,10 +240,11 @@ def test_graph_runs_parse_drift(scenario, report_file):
     assert isinstance(state["parsed_drift"], FrozenDict)
     assert state["drift_report"] == report
     # Deterministic data never lands in the AI output channel; only the AI node writes there.
-    assert set(state["inferences"]) == {"analyze_security"}
+    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration"}
     assert state["llm"]["available"] is True
-    # At most one LLM call per run (Task 6.3), and only when something was routed.
-    assert llm.calls == (1 if state["security_targets"]["changes"] else 0)
+    # At most one LLM call per run (Task 6.4), and only when some section was routed.
+    routed = any(state[k]["changes"] for k in ("security_targets", "cost_targets", "config_targets"))
+    assert llm.calls == (1 if routed else 0) and state["llm_call"]["attempted"] is routed
 
 
 @requires_ai
@@ -293,4 +295,5 @@ def test_later_node_cannot_replace_parsed_drift():
 def test_compiled_graph_order():
     edges = {(e.source, e.target) for e in build_graph(config=load_config({})).get_graph().edges}
     assert edges == {(START, "initialize"), ("initialize", "parse_drift"), ("parse_drift", "classify_drift"),
-                     ("classify_drift", "analyze_security"), ("analyze_security", END)}
+                     ("classify_drift", "route_cost_config"), ("route_cost_config", "analyze_drift"),
+                     ("analyze_drift", END)}

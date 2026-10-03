@@ -1,4 +1,4 @@
-"""LangGraph state and graph for the AI analysis engine (Tasks 6.1-6.3).
+"""LangGraph state and graph for the AI analysis engine (Tasks 6.1-6.4).
 
 `AiState` keeps deterministic evidence and model output apart:
 
@@ -13,17 +13,25 @@
   (by `parse_drift`), then frozen.
 - `security_targets` is the deterministic security routing of `classify_drift`
   (Task 6.3): which changes go to security analysis and why. Write-once, frozen.
+- `cost_targets` / `config_targets` are the deterministic cost and configuration
+  routing of `route_cost_config` (Task 6.4), incl. a deterministic configuration
+  summary. Write-once, frozen.
+- `llm_call` records the run's single LLM call: attempted or not, status,
+  provider/model, configured `max_retries`, evidence truncation. Write-once.
 - `inferences` holds model-generated interpretation keyed by the node that
   produced it. Nothing in it is evidence.
 - `llm` records whether an LLM was usable for this run, and why not.
 - `warnings` collects non-fatal problems such as an unreachable endpoint.
 
 The graph runs START -> `initialize` -> `parse_drift` -> `classify_drift` ->
-`analyze_security` -> END. All but `analyze_security` are deterministic; it is
-the first LLM-backed node and writes only to `inferences`. Tasks 6.4-6.6 add
-the remaining analysis nodes. Every LLM call goes through `invoke_llm`,
-which turns a missing, unreachable or failing LLM into a result object instead
-of an exception, so the graph always completes with deterministic data.
+`route_cost_config` -> `analyze_drift` -> END. Every deterministic node runs
+before the LLM. `analyze_drift` is the only node that receives the LLM client
+and makes **at most one logical LLM call per run** (security, cost and
+configuration sections in one reply); it writes AI output only to `inferences`
+(`analyze_security`, `analyze_cost`, `analyze_configuration`). Every LLM call
+goes through `invoke_llm`, which turns a missing, unreachable or failing LLM
+into a result object instead of an exception, so the graph always completes
+with deterministic data.
 """
 
 from __future__ import annotations
@@ -39,7 +47,9 @@ from ai_engine.config import AiConfig, create_chat_model, load_config
 from ai_engine.llm import AZURE_CONTENT_FILTER_MESSAGE, LLMCallResult, invoke_llm  # noqa: F401 (re-exported)
 from ai_engine.evidence import EvidenceLimits
 from ai_engine.nodes.parse_drift import ParsedDrift, parse_drift
-from ai_engine.nodes.security_analysis import classify_drift, make_analyze_security
+from ai_engine.nodes.analyze_drift import make_analyze_drift
+from ai_engine.nodes.cost_analysis import route_cost_config
+from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
@@ -121,6 +131,9 @@ def _write_once(field: str):
 write_once_evidence = _write_once("drift_report")
 write_once_parsed_drift = _write_once("parsed_drift")
 write_once_security_targets = _write_once("security_targets")
+write_once_cost_targets = _write_once("cost_targets")
+write_once_config_targets = _write_once("config_targets")
+write_once_llm_call = _write_once("llm_call")
 
 
 def merge_dicts(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any]:
@@ -139,6 +152,9 @@ class AiState(TypedDict, total=False):
     drift_report: Annotated[dict[str, Any], write_once_evidence]
     parsed_drift: Annotated[ParsedDrift, write_once_parsed_drift]
     security_targets: Annotated[dict[str, Any], write_once_security_targets]
+    cost_targets: Annotated[dict[str, Any], write_once_cost_targets]
+    config_targets: Annotated[dict[str, Any], write_once_config_targets]
+    llm_call: Annotated[dict[str, Any], write_once_llm_call]
     llm: LlmStatus
     inferences: Annotated[dict[str, Any], merge_dicts]
     warnings: Annotated[list[str], operator.add]
@@ -180,12 +196,14 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_node("initialize", initialize)
     graph.add_node("parse_drift", parse_drift)
     graph.add_node("classify_drift", classify_drift)
-    graph.add_node("analyze_security", make_analyze_security(llm, limits))
+    graph.add_node("route_cost_config", route_cost_config)
+    graph.add_node("analyze_drift", make_analyze_drift(llm, limits))  # the only node holding the LLM client
     graph.add_edge(START, "initialize")
     graph.add_edge("initialize", "parse_drift")
     graph.add_edge("parse_drift", "classify_drift")
-    graph.add_edge("classify_drift", "analyze_security")
-    graph.add_edge("analyze_security", END)
+    graph.add_edge("classify_drift", "route_cost_config")
+    graph.add_edge("route_cost_config", "analyze_drift")
+    graph.add_edge("analyze_drift", END)
     return graph.compile()
 
 

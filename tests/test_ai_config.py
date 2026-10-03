@@ -229,8 +229,8 @@ def test_missing_client_library_degrades(monkeypatch):
 
 @requires_ai
 def test_ai_state_schema():
-    assert set(AiState.__annotations__) == {"drift_report", "parsed_drift", "security_targets", "llm",
-                                            "inferences", "warnings"}
+    assert set(AiState.__annotations__) == {"drift_report", "parsed_drift", "security_targets", "cost_targets",
+                                            "config_targets", "llm_call", "llm", "inferences", "warnings"}
     assert AiState.__total__ is False
 
 
@@ -242,9 +242,10 @@ def test_graph_without_llm_falls_back_to_deterministic():
     assert report == DRIFT_REPORT  # evidence untouched
     assert state["llm"] == {"available": False, "provider": "none", "model": None,
                             "reason": "AI_LLM_PROVIDER is not set (LLM analysis is opt-in)"}
-    # Task 6.3: the only AI node records why it did not run; nothing else enters `inferences`.
-    assert set(state["inferences"]) == {"analyze_security"}
-    assert state["inferences"]["analyze_security"]["status"] == "skipped"
+    # The single AI node records why each section did not run; nothing else enters `inferences`.
+    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration"}
+    assert {r["status"] for r in state["inferences"].values()} == {"skipped"}
+    assert state["llm_call"]["attempted"] is False
     assert len(state["warnings"]) == 1 and "deterministic evidence" in state["warnings"][0]
 
 
@@ -257,7 +258,11 @@ def test_graph_with_missing_key_does_not_raise():
 
 @requires_ai
 def test_graph_with_configured_llm():
-    state = run_analysis(DRIFT_REPORT, config=load_config(OPENAI_ENV))
+    # An in-sync report routes nothing, so the real client is built but never called.
+    in_sync = Path(__file__).parent / "fixtures" / "plan_evidence" / "in_sync"
+    report = evaluate(str(in_sync / "plan.sanitized.json"), str(in_sync / "detection_run.json")).report
+    state = run_analysis(report, config=load_config(OPENAI_ENV))
+    assert state["llm_call"]["attempted"] is False
     assert state["llm"] == {"available": True, "provider": "openai", "model": "test-model", "reason": None}
     assert "warnings" not in state or state["warnings"] == []
     assert SECRET not in str(state)
