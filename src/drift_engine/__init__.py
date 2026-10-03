@@ -2,7 +2,8 @@
 
 Modules: parser (Task 4.2), models (4.3), comparator (4.4), severity (4.5),
 classifier, formatters and the `drift-engine` CLI (4.6), structured logging (4.7),
-activity_logs (7.1). scripts/detect_drift.py is a thin wrapper over this package.
+activity_logs (7.1), attribution (7.2). scripts/detect_drift.py is a thin wrapper
+over this package.
 
 Like the Phase 3 classifier, this package must not call Terraform, Azure, the
 network or an LLM: it only interprets evidence that has already been produced.

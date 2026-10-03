@@ -50,6 +50,28 @@ Exit status:
   70  unexpected internal error (nothing written)
   73  the output file could not be written
   130 / 141 as above
+
+    drift-engine attribute --report drift_classification.json --evidence activity_log_evidence.json
+                           [--output drift_attribution.json] [--log-level ...] [--log-format text|json]
+
+Correlates the drift report with the Activity Log evidence of the same run
+(attribution.py, Task 7.2) and writes drift_attribution.json. Deterministic: no
+Azure, network or clock. `confirmed` only ever means "Azure recorded caller X
+performing the successful delete of this exact resource under the correlation
+rules"; everything else is `unknown` with a reason code. Confirmed callers are
+personal data: a new --output file is created readable by its owner only, and the
+summary line never shows a caller. Before anything is written, the result is
+re-checked against the evidence it names. It never changes the drift report.
+
+Exit status:
+  0   attribution complete (every drifted resource evaluated against complete,
+      settled evidence; `unknown` results are valid results)
+  1   attribution incomplete or failed (still written; see `outcome` and `failure`)
+  2   usage error
+  70  the result failed its re-check against the evidence, or an unexpected
+      internal error (nothing written)
+  73  the output file could not be written
+  130 / 141 as above
 """
 
 from __future__ import annotations
@@ -65,7 +87,7 @@ from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
-from drift_engine import __version__, activity_logs, comparator, severity
+from drift_engine import __version__, activity_logs, attribution, comparator, severity
 from drift_engine.classifier import evaluate
 from drift_engine.formatters import FORMATS, render
 from drift_engine.logs import LOG_FORMATS, LOG_LEVELS, configure_logging, log_event
@@ -123,6 +145,24 @@ def _parser() -> argparse.ArgumentParser:
                       help="emit structured logs at this level and above to standard error (default: off)")
     logs.add_argument("--log-format", choices=LOG_FORMATS, default="text",
                       help="log line format when --log-level is set (default: text)")
+
+    attribute = commands.add_parser(
+        "attribute",
+        help="correlate drift with Activity Log evidence (deterministic, no Azure access)",
+        description=(
+            "Correlate a drift report with the activity_log_evidence.json of the same run and write "
+            "drift_attribution.json. Only an external deletion can be confirmed, as the caller Azure recorded "
+            "for the successful delete; everything else is unknown with a reason code."
+        ),
+    )
+    attribute.add_argument("--report", required=True, help="drift report (JSON) written by drift-engine analyze")
+    attribute.add_argument("--evidence", required=True,
+                           help="activity_log_evidence.json written by drift-engine activity-logs")
+    attribute.add_argument("--output", help="write the attribution to this file instead of standard output")
+    attribute.add_argument("--log-level", choices=LOG_LEVELS,
+                           help="emit structured logs at this level and above to standard error (default: off)")
+    attribute.add_argument("--log-format", choices=LOG_FORMATS, default="text",
+                           help="log line format when --log-level is set (default: text)")
     return parser
 
 
@@ -248,6 +288,46 @@ def collect_activity_logs(args: argparse.Namespace) -> int:
     return EXIT_OK if evidence.outcome == "complete" else EXIT_FAILED
 
 
+def attribute_drift(args: argparse.Namespace) -> int:
+    document, evidence_bytes = attribution.attribute_files(args.report, args.evidence)
+    problems = attribution.verify_against_evidence(document, evidence_bytes)
+    if problems:
+        log_event(logger, logging.ERROR, "attribution_recheck_failed",
+                  "attribution does not match the evidence it names", problems=len(problems))
+        print(
+            "ERROR: the attribution does not match the evidence it names; nothing was written.\n"
+            "  This indicates an engine defect; please report it. Drift detection results are unaffected.",
+            file=sys.stderr,
+        )
+        return EXIT_CONTRACT_VIOLATION
+    text = attribution.render_attribution(document)
+    if args.output is None:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    else:
+        try:
+            _write_atomic(args.output, text, private=True)
+        except OSError as exc:
+            log_event(logger, logging.ERROR, "output_write_failed", "cannot write the attribution",
+                      output=args.output, error=str(exc))
+            print(f"ERROR: cannot write {args.output}: {exc}", file=sys.stderr)
+            return EXIT_CANT_WRITE
+        log_event(logger, logging.INFO, "attribution_written", "attribution written",
+                  output=args.output, outcome=document.outcome)
+
+    statuses = Counter(r.attribution.status for r in document.resources)
+    summary = (f"attribution_outcome={document.outcome}  resources={len(document.resources)} "
+               f"[confirmed={statuses['confirmed']}, unknown={statuses['unknown']}]")
+    if document.outcome != "complete":
+        reason = document.failure.reason if document.failure is not None else "incomplete"
+        print(f"ATTRIBUTION {document.outcome.upper()} [{reason}]\n"
+              "  Drift detection results are unaffected.", file=sys.stderr)
+    if args.output is not None:
+        print(summary)
+        print(f"Attribution: {args.output}")
+    return EXIT_OK if document.outcome == "complete" else EXIT_FAILED
+
+
 def _target_mode(path: str, private: bool = False) -> int:
     """Permission bits for the new report at `path`.
 
@@ -312,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.log_level is not None:
         configure_logging(args.log_level, args.log_format)
-    command = collect_activity_logs if args.command == "activity-logs" else analyze
+    command = {"activity-logs": collect_activity_logs, "attribute": attribute_drift}.get(args.command, analyze)
     try:
         return command(args)
     except KeyboardInterrupt:
@@ -324,11 +404,10 @@ def main(argv: list[str] | None = None) -> int:
         log_event(logger, logging.ERROR, "unexpected_error", "unexpected internal error",
                   error_type=type(exc).__name__)
         logger.debug("traceback", exc_info=True)
-        consequence = (
-            "  No Activity Log evidence was written; drift detection results are unaffected."
-            if command is collect_activity_logs
-            else "  Drift status is UNKNOWN - this must not be treated as 'no drift'."
-        )
+        consequence = {
+            collect_activity_logs: "  No Activity Log evidence was written; drift detection results are unaffected.",
+            attribute_drift: "  No attribution was written; drift detection results are unaffected.",
+        }.get(command, "  Drift status is UNKNOWN - this must not be treated as 'no drift'.")
         print(f"INTERNAL ERROR: unexpected {type(exc).__name__}: {exc}\n{consequence}", file=sys.stderr)
         return EXIT_INTERNAL_ERROR
 
