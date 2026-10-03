@@ -149,6 +149,13 @@ library, so they run with plain `python3`. Pydantic and PyYAML are needed only f
 | Blob Container | `tfstate` | N/A | Private container for `.tfstate` files |
 | State Blob | `dev.tfstate` | N/A | Remote state for the `dev` environment |
 
+The Storage Account and the Blob Container hold the Terraform remote state, so
+`terraform/bootstrap/main.tf` sets `lifecycle { prevent_destroy = true }` on both
+(Task 9.1). They are intentionally protected from accidental destruction: Terraform refuses
+any plan that would destroy them. Destroying them on purpose requires an explicit, reviewed
+change that first removes `prevent_destroy`. Adding the setting needed no `terraform apply`:
+Terraform evaluates it at plan time and does not store it in state.
+
 ### Application Infrastructure (`dev`)
 
 | Resource | Name | Location | Purpose |
@@ -171,7 +178,8 @@ each network inherits its resource group's name and location.
 ```
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
-└── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → report (Phase 5)
+├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → report (Phase 5)
+└── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (Task 9.1)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
@@ -184,6 +192,7 @@ terraform/
 scripts/
 ├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
 ├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
+├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
 └── validate.sh                   # terraform fmt -check + validate (no Azure auth)
 
 src/drift_engine/                 # Python drift engine (Phase 4)
@@ -211,6 +220,7 @@ docs/
 └── architecture.md               # Phase 1–2 design
 
 pyproject.toml / requirements.txt # Python package and dev environment
+.tflint.hcl                       # TFLint configuration with exact version pins (Task 9.1)
 PROJECT_PLAN.md                   # Roadmap and task status (source of truth)
 ```
 
@@ -444,6 +454,42 @@ tests/scenarios/run_rg_tag_drift_scenario.sh --apply   # inject tag drift, detec
 Its approved run on 2026-10-02 passed 18/18 checks (Task 3.6). Additional validation per
 task (golden-output comparisons, fuzzing, mutation checks) is recorded in the completion
 notes in [PROJECT_PLAN.md](PROJECT_PLAN.md). No CI workflow runs the Python tests yet.
+
+### Static Terraform linting (TFLint, Task 9.1)
+
+TFLint checks the Terraform code under `terraform/`. It is **static linting, not drift
+detection**: a TFLint finding fails the lint job and never changes a drift result. It needs
+no Azure access and no `terraform init`.
+
+```bash
+# Plugins are installed outside the repository (e.g. a scratch directory), never in it.
+mkdir -p /tmp/tflint-plugins
+TFLINT_PLUGIN_DIR=/tmp/tflint-plugins ./scripts/run_tflint.sh
+```
+
+`scripts/run_tflint.sh` is the same command CI runs in
+[`security-scan.yml`](.github/workflows/security-scan.yml) on every push and pull request to
+`main` (permissions `contents: read` only). It:
+- installs the pinned plugins;
+- checks that the AzureRM ruleset is loaded;
+- runs `tflint --recursive` over `terraform/` with the repository's `.tflint.hcl`.
+
+Any warning or error fails it. Findings are fixed in the code, never suppressed.
+
+| Component | Pinned version | Where |
+|---|---|---|
+| TFLint | `0.64.0` | `.tflint.hcl` (`required_version = "= 0.64.0"`) and `security-scan.yml` (`tflint_version: v0.64.0`) |
+| `tflint-ruleset-azurerm` | `0.32.0` | `.tflint.hcl` (signed release; signature verification left at the default) |
+| Terraform rules (bundled) | `0.15.0` | ships with TFLint 0.64.0, `recommended` preset |
+
+A local TFLint of another version is rejected by `required_version`. To upgrade, make one
+reviewed change that updates `.tflint.hcl`, `security-scan.yml`, `scripts/run_tflint.sh` (the
+expected ruleset version), `tests/test_tflint_integration.py` and this table together.
+
+**AzureRM v5 limitation:** ruleset `0.32.0` was generated from the AzureRM **4.65.0** schema.
+This repository uses AzureRM `~> 5.0` (locked at `5.7.0`). The upstream AzureRM v5 work only
+removes rules for resources that v5 dropped, and this repository uses none of them. Moving to
+a ruleset release with explicit AzureRM v5 support is a separate, reviewed version bump.
 
 ---
 

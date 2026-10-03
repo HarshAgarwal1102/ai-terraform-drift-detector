@@ -41,10 +41,22 @@ resource "azurerm_storage_account" "tfstate" {
   }
 
   tags = var.tags
+
+  # Holds the Terraform remote state: protected from accidental destruction.
+  # Destroying it on purpose requires a reviewed change removing this first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_storage_container" "tfstate" {
   name                  = var.container_name
   storage_account_id    = azurerm_storage_account.tfstate.id
   container_access_type = "private"
+
+  # Holds the Terraform remote state: protected from accidental destruction.
+  # Destroying it on purpose requires a reviewed change removing this first.
+  lifecycle {
+    prevent_destroy = true
+  }
 }

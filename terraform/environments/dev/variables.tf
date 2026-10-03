@@ -30,12 +30,6 @@ variable "environment" {
   }
 }
 
-variable "location" {
-  description = "Default Azure region for resources."
-  type        = string
-  default     = "Central India"
-}
-
 variable "common_tags" {
   description = "Tags applied to every resource via modules."
   type        = map(string)

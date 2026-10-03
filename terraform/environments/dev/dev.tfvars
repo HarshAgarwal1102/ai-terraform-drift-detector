@@ -10,7 +10,6 @@
 
 project_name = "aitdd"
 environment  = "dev"
-location     = "Central India"
 
 common_tags = {
   environment = "dev"

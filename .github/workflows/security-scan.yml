@@ -1,0 +1,63 @@
+name: "Phase 9 - Security Scan"
+
+# Phase 9 static analysis of the repository's code. Task 9.1: TFLint.
+#
+# This is NOT drift detection: a finding here is a static lint/security failure,
+# never a drift result. Drift is owned by drift-detection.yml (Phase 5); this
+# workflow publishes no drift outputs, artifacts, issues or labels.
+#
+# Credential-free: no Azure login, no OIDC (`id-token`), no ARM_* / TF_VAR_*
+# variables. TFLint reads the committed Terraform files only (no terraform init,
+# no backend, no provider download).
+#
+# Jobs:
+#   tflint  Task 9.1. Runs scripts/run_tflint.sh, the same command used locally.
+#           Versions are pinned exactly (TFLint v0.64.0 here and in .tflint.hcl,
+#           tflint-ruleset-azurerm 0.32.0 in .tflint.hcl). Any finding (warning
+#           or error) or TFLint failure fails the job.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# Read-only: checkout only.
+permissions:
+  contents: read
+
+# Superseded pull request runs are cancelled; runs on main always complete so
+# every commit there gets a result.
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tflint:
+    name: "TFLint (static lint, not drift detection)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The action's github_token input stays at its documented default (the
+      # workflow token, used only to fetch TFLint release data; not exported to
+      # later steps). Plugin caching stays off.
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.64.0
+
+      # GITHUB_TOKEN is for `tflint --init` only (plugin download rate limits);
+      # the script unsets it before TFLint inspects any code. Plugins go to
+      # RUNNER_TEMP, outside the checkout.
+      - name: Run TFLint
+        env:
+          TFLINT_PLUGIN_DIR: ${{ runner.temp }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/run_tflint.sh
