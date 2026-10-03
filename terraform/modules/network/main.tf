@@ -66,3 +66,19 @@ resource "azurerm_subnet_network_security_group_association" "this" {
   subnet_id                 = azurerm_subnet.this[each.key].id
   network_security_group_id = azurerm_network_security_group.this[each.value.network_security_group_key].id
 }
+
+# Task 9.2 CI proof only (never merged): deliberately open inbound SSH.
+resource "azurerm_network_security_rule" "ci_proof" {
+  for_each                    = var.network_security_groups
+  name                        = "ci-proof-open-ssh"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "22"
+  source_address_prefix       = "0.0.0.0/0"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
