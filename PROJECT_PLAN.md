@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.1 — TFLint Integration
+- **Current Active Task**: Task 9.2 — tfsec Infrastructure Security Scanner (Design Review)
 - **Phases Completed**: 8 of 14
 
 ---
@@ -2035,8 +2035,9 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 > - **Design review per task**: every Phase 9 task requires its own design review, with its decisions recorded in this plan, before implementation.
 
 #### Task 9.1 — TFLint Integration
-- **Status**: 🟡 WORK IN PROGRESS — implemented and validated locally (checkpoint commit); only the approval-gated CI proof is pending
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-03
+- **Completed**: 2026-10-03
 - **Objective**: Integrate TFLint (static Terraform linting) with the AzureRM ruleset through one shared script used both locally and in a separate, credential-free GitHub Actions workflow. TFLint is **not** a drift detector: a TFLint failure is a static lint failure, never a drift result. *(Reworded 2026-10-03 per the Task 9.1 design review.)*
 - **Dependencies**: Task 1.3 (dev root + resource-group module), Task 2.2 (bootstrap state configuration), Task 5A.1 (network module)
 - **Dependency note**: changed 2026-10-03 from Task 5.1. TFLint depends only on the Terraform layout it lints, not on the drift-detection workflow.
@@ -2116,7 +2117,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - (f) removing either `prevent_destroy`;
     - (g) a no-op control mutation that must still pass.
   - [x] Offline Terraform checks (validate/init/lock-file diff, see the Phase 5 criterion). No Azure calls.
-  - [ ] CI proof, approval-gated: one green `push` run on `main`, and one pull request run with a deliberate lint finding that fails the `tflint` job, with no Azure step executed in `security-scan.yml`. *(Wording corrected 2026-10-03, Phase 9 re-evaluation.)* The approval must acknowledge that these events also trigger the existing, unmodified `terraform-auth-test.yml`:
+  - [x] CI proof, approval-gated: one green `push` run on `main`, and one pull request run with a deliberate lint finding that fails the `tflint` job, with no Azure step executed in `security-scan.yml`. *(Wording corrected 2026-10-03, Phase 9 re-evaluation.)* The approval must acknowledge that these events also trigger the existing, unmodified `terraform-auth-test.yml`:
     - a push to `main` runs its Azure OIDC login and its read-only `terraform plan` against the dev state;
     - on a pull request, its Azure login fails, because no `pull_request` federated credential exists (Task 2.6). This is existing behaviour, not a Task 9.1 result.
 - **Design Review (2026-10-03)**:
@@ -2143,7 +2144,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
   - Static analysis for Terraform best practices.
   - TFLint needs no `terraform init`, backend or provider download, because all modules are local.
   - Output contains only values from committed public `.tf` / `dev.tfvars` files; do not enable `TFLINT_LOG` debug output.
-- **Completion Notes** *(2026-10-03, checkpoint; Task 9.1 stays 🟡 until the CI proof)*:
+- **Completion Notes** *(2026-10-03)*:
   - **Implemented**:
     - new `.tflint.hcl`, `scripts/run_tflint.sh` (executable), `.github/workflows/security-scan.yml` (job `tflint`), `tests/test_tflint_integration.py`
     - baseline fixes: new `terraform/modules/{network,resource-group}/versions.tf`; `location` removed from dev `variables.tf` and `dev.tfvars`; `prevent_destroy` on `azurerm_storage_account.tfstate` and `azurerm_storage_container.tfstate`
@@ -2161,7 +2162,16 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - every `dev.tfvars` key is a declared variable.
     No Azure call, no `terraform apply`.
   - **Choices within the locked design**: `TFLINT_PLUGIN_DIR` must be an existing directory (the script never creates it); TFLint output uses `--format compact`; job `timeout-minutes: 10`; workflow name "Phase 9 - Security Scan".
-  - **Pending (approval-gated)**: the CI proof (push to `main`, plus one PR with a deliberate lint finding). It also triggers the existing `terraform-auth-test.yml` (an Azure plan on push; the Azure login fails on a PR).
+  - **CI proof** (user-approved 2026-10-03; push of `ca1caad`, `64f6693` and `b34803f` to `main`):
+    - `main` push, commit `b34803f`:
+      - `security-scan.yml` run `37131296792`: success. Job steps were only Checkout, Setup TFLint and Run TFLint; no Azure/OIDC step. TFLint 0.64.0 with `+ ruleset.azurerm (0.32.0)` and `+ ruleset.terraform (0.15.0-bundled)`; 0 findings; 0 artifacts.
+      - `terraform-auth-test.yml` run `37131296809`: success. The real read-only dev plan reported `No changes. Your infrastructure matches the configuration.`, so the baseline fixes do not change dev.
+    - Draft PR #2 (branch `ci-proof/task-9.1-tflint-failure`, head `3b3d1cb` = `b34803f` + one unused variable `ci_proof_unused` in `terraform/modules/network/variables.tf`):
+      - `security-scan.yml` run `37131473701`: failed as intended. `modules/network/variables.tf:89:1: Warning - variable "ci_proof_unused" is declared but not used (terraform_unused_declarations)`, TFLint exit 2. No Azure/OIDC step, no token value in the log, 0 artifacts.
+      - `terraform-auth-test.yml` run `37131473689`: failed at Azure OIDC login (`AADSTS700213`, no federated identity record for the `pull_request` subject). Existing behaviour (Task 2.6).
+    - Cleanup: PR #2 closed unmerged (2026-10-03T14:58:09Z, `merged=false`); the remote and local branches were deleted; `main` = `origin/main` = `b34803f`, and `ci_proof_unused` is absent from `main`.
+    - Evidence summary kept in `.artifacts/task-9.1-ci-proof/evidence.md` (gitignored).
+    - Observation: the `pull_request` OIDC subject uses GitHub's ID-qualified format (`repo:<owner>@<id>/<repo>@<id>:pull_request`). Relevant only if a `pull_request` federated credential is added (Task 12.3).
 
 #### Task 9.2 — tfsec Infrastructure Security Scanner
 - **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
