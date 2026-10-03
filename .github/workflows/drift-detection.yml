@@ -6,8 +6,9 @@ name: "Phase 5 - Drift Detection"
 # login and Terraform init/validate against the remote backend (Task 5.2), plan
 # evidence via scripts/generate_plan_json.sh and classification via
 # `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), failure
-# reporting with the `drift_detected` output (Task 5.5), and one GitHub Issue per
-# drifted resource (Task 8.1).
+# reporting with the `drift_detected` output (Task 5.5), one GitHub Issue per
+# drifted resource (Task 8.1), and evidence-based closing of those issues once the
+# resource is no longer drifted (Task 8.3).
 #
 # Jobs: preflight -> plan-and-analyze -> issues / report.
 #   preflight         main-branch guard and environment/path validation.
@@ -17,8 +18,10 @@ name: "Phase 5 - Drift Detection"
 #                     evidence (tfplan, plan.json, plan.log) must never leave this
 #                     ephemeral runner (spec §8.3), so it is never passed between
 #                     jobs. Only the redacted report and the manifest are uploaded.
-#   issues            Task 8.1: one GitHub Issue per drifted resource, only when
-#                     drift_detected is the literal "true". Least privilege
+#   issues            Tasks 8.1/8.3: one GitHub Issue per drifted resource when
+#                     drift_detected is the literal "true"; closes issues whose
+#                     resource is present and no longer drifted when it is "true"
+#                     or "false" (never for "unknown"). Least privilege
 #                     (contents: read, issues: write; no id-token, no Azure); reads
 #                     only this run's drift report artifact (no raw plan evidence).
 #                     Issue publication relies on the workflow-level concurrency
@@ -402,18 +405,21 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  # Task 8.1: deterministic drift issues (scripts/github_automation.py). Runs only
-  # for a valid drifted run (literal "true"; the implicit success() also requires
-  # preflight and plan-and-analyze to have succeeded). Its own permissions block
-  # replaces the workflow-level one: no id-token, no Azure login, no Terraform.
-  # GITHUB_TOKEN is passed only to the script step. The script refuses evidence
-  # from any other run attempt (run.run_id == github-<run_id>-<run_attempt>), so a
-  # "re-run failed jobs" attempt never publishes. Issues are created/updated only;
-  # closing them is Task 8.3. A failure here does not change drift_detected.
+  # Tasks 8.1/8.3: deterministic drift issues (scripts/github_automation.py). Runs
+  # only for a valid classification (literal "true" or "false"; never "unknown"; the
+  # implicit success() also requires preflight and plan-and-analyze to have
+  # succeeded). "true" creates/updates issues for drifted resources and closes
+  # resolved ones; "false" only closes. Its own permissions block replaces the
+  # workflow-level one: no id-token, no Azure login, no Terraform. GITHUB_TOKEN is
+  # passed only to the script step. The script refuses evidence from any other run
+  # attempt (run.run_id == github-<run_id>-<run_attempt>), so a "re-run failed jobs"
+  # attempt never publishes. Closing sends only state/state_reason (no body, no
+  # comment); issues are never reopened. A failure here does not change
+  # drift_detected.
   issues:
     name: "Drift Issues (${{ github.event.inputs.environment || 'dev' }})"
     needs: [preflight, plan-and-analyze]
-    if: ${{ needs.plan-and-analyze.outputs.drift_detected == 'true' }}
+    if: ${{ needs.plan-and-analyze.outputs.drift_detected == 'true' || needs.plan-and-analyze.outputs.drift_detected == 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -446,7 +452,7 @@ jobs:
           name: drift-report-${{ github.run_id }}
           path: ${{ runner.temp }}/drift-report
 
-      - name: Create or Update Drift Issues
+      - name: Manage Drift Issues
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRIFT_DETECTED: ${{ needs.plan-and-analyze.outputs.drift_detected }}

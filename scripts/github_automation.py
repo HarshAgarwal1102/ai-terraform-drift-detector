@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Deterministic drift issue creator (Task 8.1).
+"""Deterministic drift issue creator (Task 8.1) and issue lifecycle (Task 8.3).
 
 Creates or updates one GitHub Issue per drifted resource of a valid drifted
-detection run, from that run's drift report artifact (drift_report.json) only.
+detection run, from that run's drift report artifact (drift_report.json) only,
+and closes automation issues whose resource the run reports as present and no
+longer drifted (Task 8.3).
 
 Public-repository profile (PROJECT_PLAN.md Phase 8):
   * input is the drift report only: no AI report, no Activity Log evidence or
@@ -22,11 +24,24 @@ older or equal evidence never updates (stale_evidence / conflicting_evidence whe
 the content differs). The guard relies on the workflow's concurrency group and on
 the exact attempt binding run.run_id == github-<GITHUB_RUN_ID>-<GITHUB_RUN_ATTEMPT>.
 
-Dry-run is the default (no network; rendered requests are written to --out-dir).
+Lifecycle (Task 8.3): a valid 'true' or 'false' run closes an open automation
+issue only when its marker fingerprint equals fp(environment, address) for an
+address present in this report with drift_action == null, and the run's
+plan.timestamp is newer than the marker's. A 'false' run never creates or
+updates. Closing is exactly PATCH {"state": "closed", "state_reason": "completed"}:
+no body, title, label or comment, so human edits are never overwritten. A
+recurrence gets a new issue (matching is open-issues-only); issues are never
+reopened. Issues whose fingerprint matches no report address stay open
+(resource_not_in_report warning). Per-issue anomalies (marker_invalid,
+marker_version_unsupported, conflicting_evidence, stale_evidence) skip only that
+issue and make the run exit 1.
+
+Dry-run is the default (no network; rendered requests are written to --out-dir;
+closures need the issue list, so a preview shows only create requests).
 --publish is accepted only inside GitHub Actions. The GitHub client is the
 standard library only: api.github.com, no redirects, GET/PATCH retried, an
-issue-creating POST never retried. This script never creates labels, closes,
-reopens or assigns issues (closure is Task 8.3) and never imports ai_engine,
+issue-creating POST never retried. This script never creates labels, comments,
+reopens or assigns issues and never imports ai_engine,
 drift_engine.activity_logs or drift_engine.attribution.
 
 Usage:
@@ -40,6 +55,7 @@ Exit status: 0 done (incl. skipped and unchanged), 1 a failure code was reported
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
 import dataclasses
 import hashlib
@@ -86,6 +102,7 @@ MAX_REPORT_BYTES = 20 * 1024 * 1024
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 
 FULL_LEVELS = frozenset({"INFO", "LOW"})
+CLOSE_PAYLOAD = {"state": "closed", "state_reason": "completed"}  # never a body: closing must not overwrite edits
 PATH_PLACEHOLDER = "<withheld>"
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_INTERNAL = 0, 1, 2, 70
@@ -105,7 +122,7 @@ FAILURE_CODES = frozenset({
     # dry-run output
     "out_dir_not_empty", "out_dir_unwritable",
 })
-WARNING_CODES = frozenset({"duplicate_issues"})
+WARNING_CODES = frozenset({"duplicate_issues", "resource_not_in_report"})
 SKIP_CODES = frozenset({"not_drift_detected"})
 
 _ENV_RE = re.compile(r"^[a-z0-9-]{1,32}\Z")
@@ -144,6 +161,7 @@ class Evidence:
     run_id: str
     plan_timestamp: str
     resources: tuple[DriftItem, ...]  # issue set, in processing order
+    resolved: tuple[str, ...] = ()    # addresses present in the report with drift_action == null (Task 8.3)
 
 
 def validate_environment(environment: str) -> str:
@@ -171,11 +189,12 @@ def issue_set(report: DriftReport) -> tuple[DriftItem, ...]:
     return tuple(sorted(drifted, key=lambda r: (-rank(r.severity.level), r.address)))
 
 
-def evidence_from_report(report: DriftReport, environment: str) -> Evidence:
-    """The gate on the report itself: succeeded, has_drift true, same environment."""
+def evidence_from_report(report: DriftReport, environment: str, drift_detected: bool = True) -> Evidence:
+    """The gate on the report itself: succeeded, has_drift agrees with the workflow's
+    drift_detected ('true' or 'false'), same environment, unique addresses."""
     if report.outcome != "succeeded":
         raise AutomationError("report_failed")
-    if report.has_drift is not True:
+    if report.has_drift is not drift_detected:
         raise AutomationError("report_inconsistent")
     assert report.run is not None and report.plan is not None  # guaranteed by DriftReport for succeeded
     if report.run.environment != environment:
@@ -185,7 +204,18 @@ def evidence_from_report(report: DriftReport, environment: str) -> Evidence:
         raise AutomationError("run_mismatch")  # only CI evidence (github-<run>-<attempt>) can be published or previewed
     if not isinstance(plan_ts, str) or not _TIMESTAMP_RE.match(plan_ts):
         raise AutomationError("report_inconsistent")
-    return Evidence(environment, run_id, plan_ts, issue_set(report))
+    addresses = [r.address for r in report.resources]
+    if len(set(addresses)) != len(addresses):
+        raise AutomationError("report_inconsistent")
+    if drift_detected:
+        drifted = issue_set(report)
+    elif (report.summary is None or report.summary.drifted_resources != 0
+            or any(r.drift_action is not None for r in report.resources)):
+        raise AutomationError("report_inconsistent")
+    else:
+        drifted = ()
+    resolved = tuple(sorted(r.address for r in report.resources if r.drift_action is None))
+    return Evidence(environment, run_id, plan_ts, drifted, resolved)
 
 
 def check_publish_binding(evidence: Evidence, env: Mapping[str, str]) -> str:
@@ -390,7 +420,7 @@ def matching_issues(items: Iterable[Any], fp: str) -> list[dict]:
 
 @dataclasses.dataclass(frozen=True)
 class Decision:
-    action: str            # create | update | unchanged | refused
+    action: str            # create | update | unchanged | refused | close | skip
     number: int | None
     code: str | None       # failure/warning code, if any
     duplicates: bool = False
@@ -415,6 +445,38 @@ def decide(rendered: Rendered, evidence: Evidence, matches: list[dict]) -> Decis
         return Decision("unchanged", target["number"], None, duplicates)
     code_ = "conflicting_evidence" if evidence.plan_timestamp == marker.plan_timestamp else "stale_evidence"
     return Decision("refused", target["number"], code_, duplicates)
+
+
+def plan_closures(evidence: Evidence, items: Iterable[Any]) -> list[Decision]:
+    """Task 8.3 closure decisions, by issue number. Closable: an open automation issue
+    whose fingerprint is fp(environment, address) for a present, non-drifted address
+    and whose marker is valid and older than this run's evidence."""
+    drifted = {fingerprint(evidence.environment, r.address) for r in evidence.resources}
+    resolvable = {fingerprint(evidence.environment, address) for address in evidence.resolved}
+    candidates = sorted((i for i in items if is_automation_issue(i)), key=lambda i: i["number"])
+    fps = [marker_fingerprint(i.get("body"))[1] for i in candidates]
+    counts = collections.Counter(fp for fp in fps if fp in resolvable)
+    decisions = []
+    for item, fp in zip(candidates, fps):
+        number = item["number"]
+        if fp is None or fp in drifted:   # not a drift issue, or handled by the 8.1 create/update path
+            continue
+        if fp not in resolvable:          # removed/moved resource or another environment: never closed
+            decisions.append(Decision("skip", number, "resource_not_in_report"))
+            continue
+        duplicates = counts[fp] > 1
+        try:
+            marker = parse_marker(item["body"])
+        except AutomationError as exc:
+            decisions.append(Decision("refused", number, exc.code, duplicates))
+            continue
+        if marker.plan_timestamp < evidence.plan_timestamp:
+            decisions.append(Decision("close", number, None, duplicates))
+        elif marker.plan_timestamp == evidence.plan_timestamp:
+            decisions.append(Decision("refused", number, "conflicting_evidence", duplicates))
+        else:
+            decisions.append(Decision("refused", number, "stale_evidence", duplicates))
+    return decisions
 
 
 # --------------------------------------------------------------------------- GitHub REST client
@@ -568,6 +630,11 @@ class GitHubClient:
         response = self.request("PATCH", f"/repos/{self.repository}/issues/{int(number)}", {"title": title, "body": body})
         return _issue_number(response.data)
 
+    def close_issue(self, number: int) -> int:
+        """Idempotent close (retried like any PATCH); never sends a body, title or label."""
+        response = self.request("PATCH", f"/repos/{self.repository}/issues/{int(number)}", dict(CLOSE_PAYLOAD))
+        return _issue_number(response.data)
+
 
 def _issue_number(data: Any) -> int:
     number = data.get("number") if isinstance(data, dict) else None
@@ -592,6 +659,7 @@ class Result:
     codes: list[str] = dataclasses.field(default_factory=list)
     created: list[int] = dataclasses.field(default_factory=list)
     updated: list[int] = dataclasses.field(default_factory=list)
+    closed: list[int] = dataclasses.field(default_factory=list)
     unchanged: list[int] = dataclasses.field(default_factory=list)
     planned: int = 0
     not_processed: int = 0
@@ -610,7 +678,7 @@ class Result:
 
     def summary(self) -> dict:
         return {"mode": self.mode, "outcome": self.outcome, "codes": sorted(self.codes),
-                "created": self.created, "updated": self.updated, "unchanged": self.unchanged,
+                "created": self.created, "updated": self.updated, "closed": self.closed, "unchanged": self.unchanged,
                 "planned": self.planned, "not_processed": self.not_processed}
 
 
@@ -640,6 +708,20 @@ def publish(evidence: Evidence, client: GitHubClient, result: Result) -> None:
             result.created.append(client.create_issue(rendered.title, rendered.body))
         else:
             result.updated.append(client.update_issue(decision.number, rendered.title, rendered.body))
+    closures = plan_closures(evidence, existing)
+    for index, decision_ in enumerate(closures):
+        if decision_.duplicates:
+            result.add("duplicate_issues")
+        if decision_.code:
+            result.add(decision_.code)
+        if decision_.action != "close":
+            continue
+        if MAX_WRITES_PER_RUN <= writes:   # one cap shared by creates, updates and closes
+            result.add("cap_exceeded")
+            result.not_processed = sum(1 for d in closures[index:] if d.action == "close")
+            return
+        writes += 1
+        result.closed.append(client.close_issue(decision_.number))
 
 
 def dry_run(evidence: Evidence, out_dir: str, repository: str | None, result: Result) -> None:
@@ -681,7 +763,7 @@ def run(args: argparse.Namespace, env: Mapping[str, str],
     result = Result("publish" if args.publish else "dry_run")
     try:
         environment = validate_environment(args.environment)
-        if args.drift_detected != "true":
+        if args.drift_detected not in ("true", "false"):   # unknown/failed runs never act
             result.add("not_drift_detected")
             return result
         try:
@@ -689,7 +771,7 @@ def run(args: argparse.Namespace, env: Mapping[str, str],
                 data = fh.read(MAX_REPORT_BYTES + 1)
         except OSError:
             raise AutomationError("report_missing") from None
-        evidence = evidence_from_report(load_report(data), environment)
+        evidence = evidence_from_report(load_report(data), environment, args.drift_detected == "true")
         if args.publish:
             repository = check_publish_binding(evidence, env)
             factory = client_factory or (lambda token, repo: GitHubClient(token, repo))
@@ -705,7 +787,7 @@ def run(args: argparse.Namespace, env: Mapping[str, str],
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Create or update one GitHub Issue per drifted resource (Task 8.1).")
+    parser = argparse.ArgumentParser(description="Create, update and close drift issues (Tasks 8.1 and 8.3).")
     parser.add_argument("--report", required=True, help="drift_report.json of this run")
     parser.add_argument("--environment", required=True, help="workflow environment (e.g. dev)")
     parser.add_argument("--drift-detected", required=True, help="the workflow's drift_detected output")
@@ -722,8 +804,9 @@ def _step_summary(result: Result, env: Mapping[str, str]) -> None:
         return
     summary = result.summary()
     lines = ["## Drift issues", "", f"- Outcome: `{summary['outcome']}`",
-             f"- Created: {len(result.created)}, updated: {len(result.updated)}, unchanged: {len(result.unchanged)}, "
-             f"not processed: {result.not_processed}",
+             f"- Created: {len(result.created)}, updated: {len(result.updated)}, closed: {len(result.closed)}, "
+             f"unchanged: {len(result.unchanged)}, not processed: {result.not_processed}",
+             f"- Closed issues: {', '.join(f'#{n}' for n in result.closed) or 'none'}",
              f"- Codes: {', '.join(f'`{c}`' for c in summary['codes']) or 'none'}", ""]
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines))

@@ -62,8 +62,8 @@ These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist
 
 - **AI-powered analysis with LangGraph + an LLM** (Phase 6)
 - Azure Activity Log investigation of who or what changed a resource (Phase 7)
-- GitHub drift-issue closure and remediation PRs (Phase 8, Tasks 8.3 and 8.2). Drift issues
-  (Task 8.1) are implemented but not yet validated in a real workflow run.
+- Remediation PRs (Phase 8, Task 8.2). Drift issues (Task 8.1) are validated in real workflow
+  runs; evidence-based issue closure (Task 8.3) is implemented but not yet validated in a real run.
 - DevSecOps scanning and FinOps cost analysis (Phases 9–10)
 - Human-approved remediation (Phase 11)
 - Dashboard (Phase 13)
@@ -244,7 +244,7 @@ Evidence bundles and reports can contain resource IDs and must stay outside the 
 
 ---
 
-## 🐙 GitHub Drift Issues (Task 8.1)
+## 🐙 GitHub Drift Issues (Tasks 8.1 and 8.3)
 
 When a scheduled or manual detection run finds drift (`drift_detected` is `"true"`), the
 `issues` job of [`drift-detection.yml`](.github/workflows/drift-detection.yml) runs
@@ -262,7 +262,18 @@ When a scheduled or manual detection run finds drift (`drift_detected` is `"true
 - **Least privilege**: the job has `contents: read` and `issues: write` only (no Azure, no
   `id-token`); the token reaches only the script step. Re-running only failed jobs never
   publishes (the evidence must come from the same run attempt).
-- Issues are never closed, reopened or assigned by this task (closure is Task 8.3).
+- **Closing (Task 8.3)**: a valid run (`drift_detected` `"true"` or `"false"`, never `unknown`)
+  closes an open drift issue when the issue's resource is in the report and no longer drifted,
+  and the run is newer than the issue's marker. Closing sends only
+  `{"state": "closed", "state_reason": "completed"}`: no body, title, label or comment, so human
+  edits are never overwritten. The record is the issue timeline and the job's step summary.
+- **Recurrence**: if the resource drifts again, a **new** issue is opened; closed issues are never
+  reopened. An issue whose resource is no longer in the report at all (removed or moved resource)
+  stays open with a `resource_not_in_report` warning and needs a manual close.
+- **Ownership**: the automation owns the generated title and body and may rewrite them when the
+  drift changes; discuss in comments. Removing the `drift-detected` label opts an issue out.
+- A conflicting, stale or malformed issue marker is skipped (that issue is not written), the rest of
+  the run continues, and the job fails so it gets attention.
 
 **One-time setup** (a repository maintainer, before the first drifted run): the script never
 creates labels and fails with `label_missing` if this one is absent.
@@ -561,7 +572,7 @@ registration holds zero credentials.
 | 5A | Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
 | **6** | **LangGraph AI analysis** | ⬜ Next |
 | 7 | Azure Activity Log investigation | ⬜ Planned |
-| 8 | GitHub Issue/PR automation | 🟡 In progress (Task 8.1) |
+| 8 | GitHub Issue/PR automation | 🟡 In progress (Tasks 8.1 and 8.3) |
 | 9 | DevSecOps scanning | ⬜ Planned |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
@@ -587,6 +598,8 @@ registration holds zero credentials.
   subscription ID) when an `id` attribute changes.
 - Drift issues (Task 8.1) are public: a reduced body still shows the resource type, address and
   severity. Values, paths of security-relevant drift and callers are never published.
+- Issues for resources removed from the configuration or moved to a new address are not closed
+  automatically (`resource_not_in_report`); close them by hand.
 - Terraform reports drift only for resources and attributes it manages. Unmanaged resources
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.

@@ -471,6 +471,15 @@ the same run attempt (`run.run_id == github-<run_id>-<run_attempt>`), publishes 
 GitHub Actions, and updates an issue only when the evidence is newer (`plan.timestamp`) and
 the content differs.
 
+**Issue closure (Task 8.3):** the same job also runs for a valid no-drift run (`drift_detected`
+`"false"`; never `unknown`). An open automation issue is closed only when its marker fingerprint
+equals `fp(environment, address)` for an address present in this run's report with
+`drift_action == null` and the run's `plan.timestamp` is newer than the marker's. A `"false"` run
+never creates or updates issues. Closing is exactly `{"state": "closed", "state_reason":
+"completed"}`: no body, title, label or comment, so closure publishes no data at all. Issues whose
+fingerprint matches no report address (removed or moved resources) stay open; a recurrence opens
+a new issue.
+
 ## 9. Future Extensibility
 
 The contract stays valid as resources are added:

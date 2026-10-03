@@ -84,6 +84,22 @@ def lowest_report(**changes) -> dict:
     return report
 
 
+RG_ADDR = 'module.resource_group.azurerm_resource_group.this["main"]'
+
+
+def resolved_report(count: int = 1, plan_ts: str = "2026-10-03T10:00:00Z") -> dict:
+    """A valid no-drift run (Task 8.3): the in_sync fixture, optionally with extra in-sync resources."""
+    report = fixture_report("in_sync")
+    report["plan"]["timestamp"] = plan_ts
+    base = report["resources"][0]
+    for i in range(1, count):
+        item = copy.deepcopy(base)
+        item["address"] = f'module.resource_group.azurerm_resource_group.this["s{i:02d}"]'
+        report["resources"].append(item)
+    report["summary"]["resources_total"] = count
+    return report
+
+
 def many_resources(report: dict, count: int) -> dict:
     base = report["resources"][0]
     report["resources"] = []
@@ -161,6 +177,7 @@ class FakeGitHub:
         self.headers: list[dict] = []
         self.failures: dict[str, list] = {}
         self.list_override = None
+        self.before_patch = None  # hook to simulate a concurrent human edit
 
     def add_issue(self, body: str, *, title: str = "t", user=None, labels=(ga.LABEL,), state: str = "open",
                   pr: bool = False, number: int | None = None) -> int:
@@ -223,7 +240,9 @@ class FakeGitHub:
             n = self.add_issue(payload["body"], title=payload["title"], labels=tuple(payload["labels"]))
             return FakeResponse(201, {"number": n})
         n = int(parts.path.rsplit("/", 1)[1])
-        self.issues[n].update(title=payload["title"], body=payload["body"])
+        if self.before_patch:
+            self.before_patch(self, n)
+        self.issues[n].update(payload)
         return FakeResponse(200, {"number": n})
 
 
@@ -260,7 +279,7 @@ class _Base(unittest.TestCase):
 
 class GatingTests(_Base):
     def test_not_drift_detected_is_skipped_without_reading_the_report(self):
-        for value in ("false", "unknown", "", "True", "1"):
+        for value in ("unknown", "", "True", "1", "FALSE"):  # 'false' runs the Task 8.3 lifecycle
             with self.subTest(value=value):
                 fake = FakeGitHub()
                 result = ga.run(args_for(os.path.join(self.tmp, "missing.json"), drift=value), ENV,
@@ -792,7 +811,8 @@ class PublishTests(_Base):
         fake.add_issue(ga.marker_line("b" * 64, "a" * 64, "github-1-1", "2026-10-01T00:00:00Z"))
         before = copy.deepcopy(fake.issues)
         result = self.publish(lowest_report(), fake)
-        self.assertEqual((result.created, result.codes), ([7], []))
+        # the bot-owned issue for another fingerprint is a Task 8.3 warning, never written
+        self.assertEqual((result.created, result.codes, result.outcome), ([7], ["resource_not_in_report"], "ok"))
         for n, item in before.items():
             self.assertEqual(fake.issues[n], item)
         self.assertEqual(fake.count("PATCH"), 0)
@@ -1081,7 +1101,7 @@ class CliTests(_Base):
         self.assertIn("--publish", out)
 
     def test_skip_exit_zero_and_internal_error(self):
-        rc, out, _ = self.main(["--report", "x", "--environment", "dev", "--drift-detected", "false", "--publish"], env=ENV)
+        rc, out, _ = self.main(["--report", "x", "--environment", "dev", "--drift-detected", "unknown", "--publish"], env=ENV)
         self.assertEqual((rc, json.loads(out)["outcome"]), (0, "skipped"))
         original = ga.run
         ga.run = lambda *a, **k: (_ for _ in ()).throw(RuntimeError(TOKEN))
@@ -1245,7 +1265,8 @@ class WorkflowStructureTests(unittest.TestCase):
         job = self.job
         self.assertEqual(job["permissions"], {"contents": "read", "issues": "write"})
         self.assertEqual(job["needs"], ["preflight", "plan-and-analyze"])
-        self.assertEqual(job["if"], "${{ needs.plan-and-analyze.outputs.drift_detected == 'true' }}")
+        self.assertEqual(job["if"], "${{ needs.plan-and-analyze.outputs.drift_detected == 'true' || "
+                                    "needs.plan-and-analyze.outputs.drift_detected == 'false' }}")  # Task 8.3
         self.assertNotIn("environment", job)
         self.assertNotIn("continue-on-error", job)
         self.assertNotIn("concurrency", job)
@@ -1280,8 +1301,8 @@ class WorkflowStructureTests(unittest.TestCase):
 # --------------------------------------------------------------------------- safeguard mutants
 
 MUTANTS = {
-    "gate-drift-detected": ('        if args.drift_detected != "true":\n', '        if False:\n'),
-    "gate-has-drift": ("    if report.has_drift is not True:\n", "    if False:\n"),
+    "gate-drift-detected": ('        if args.drift_detected not in ("true", "false"):', '        if False:'),
+    "false-run-create-update": ("    if report.has_drift is not drift_detected:\n", "    if False:\n"),
     "gate-environment": ("    if report.run.environment != environment:\n", "    if False:\n"),
     "issue-set": ("    drifted = [r for r in report.resources if r.drift_action is not None]\n",
                   "    drifted = list(report.resources)\n"),
@@ -1319,6 +1340,30 @@ MUTANTS = {
                      "    client.label_exists(LABEL)\n"),
     "per-run-cap": ("        if writes >= MAX_WRITES_PER_RUN:", "        if False:"),
     "next-link-check": ("        if url is not None and not self._url_allowed(url):", "        if False:"),
+    # Task 8.3 lifecycle safeguards ("closed issue reopened" is covered by open-state: closed issues never match)
+    "close-no-timestamp": ("        if marker.plan_timestamp < evidence.plan_timestamp:", "        if True:"),
+    "close-ge": ("marker.plan_timestamp < evidence.plan_timestamp", "marker.plan_timestamp <= evidence.plan_timestamp"),
+    "resolvable-includes-unknown": ("        if fp not in resolvable:", "        if False:"),
+    "drifted-exclusion-removed": ("        if fp is None or fp in drifted:", "        if fp is None:"),
+    "lowest-duplicate-only": (
+        '    candidates = sorted((i for i in items if is_automation_issue(i)), key=lambda i: i["number"])',
+        '    candidates = sorted({marker_fingerprint(i.get("body"))[1]: i for i in sorted((i for i in items if '
+        'is_automation_issue(i)), key=lambda i: -i["number"])}.values(), key=lambda i: i["number"])'),
+    "close-state-reason-dropped": ('CLOSE_PAYLOAD = {"state": "closed", "state_reason": "completed"}',
+                                   'CLOSE_PAYLOAD = {"state": "closed"}'),
+    "close-comment-post": ('        response = self.request("PATCH", f"/repos/{self.repository}/issues/{int(number)}", dict(CLOSE_PAYLOAD))',
+                           '        self.request("POST", f"/repos/{self.repository}/issues/{int(number)}/comments", {"body": "closed"})\n'
+                           '        response = self.request("PATCH", f"/repos/{self.repository}/issues/{int(number)}", dict(CLOSE_PAYLOAD))'),
+    "close-payload-body": ("dict(CLOSE_PAYLOAD))", 'dict(CLOSE_PAYLOAD, body=""))'),
+    "close-marker-unchecked": ('            decisions.append(Decision("refused", number, exc.code, duplicates))',
+                               '            decisions.append(Decision("close", number, None, duplicates))'),
+    "close-cap": ("        if MAX_WRITES_PER_RUN <= writes:", "        if False:"),
+    "per-issue-aborts": ('        if decision_.action != "close":\n            continue\n',
+                         '        if decision_.action != "close":\n            return\n'),
+    "per-issue-exit-0": ("        if decision_.code:\n            result.add(decision_.code)",
+                         "        if decision_.code in WARNING_CODES:\n            result.add(decision_.code)"),
+    "not-in-report-closes": ('            decisions.append(Decision("skip", number, "resource_not_in_report"))',
+                             '            decisions.append(Decision("close", number, "resource_not_in_report"))'),
     "no-redirect": ("            return None  # a 3xx then surfaces as HTTPError -> blocked_request",
                     "            return super().redirect_request(req, fp, code, msg, headers, newurl)"),
 }
@@ -1419,12 +1464,25 @@ class SafeguardMutationTests(_Base):
         redacted = lowest_report()
         redacted["resources"][0]["attribute_changes"][0]["redacted"] = True
         nsg_low = fixture_report("nsg_tags_only")
+
+        def seed_life(address, plan, *, environment="dev", body=None, number=None, state="open"):
+            def seed(m, fake):
+                fp = m.fingerprint(environment, address)
+                fake.add_issue(body.format(fp=fp) if body else m.marker_line(fp, "a" * 64, "github-100-1", plan),
+                               number=number, state=state)
+            return seed
+
+        def seeds(*fns):
+            return lambda m, fake: [fn(m, fake) for fn in fns]
+
+        s01 = 'module.resource_group.azurerm_resource_group.this["s01"]'
+        old = "2026-10-02T00:00:00Z"
         medium_rg = lowest_report()
         medium_rg["resources"][0]["severity"]["level"] = "MEDIUM"
         has_drift_false = lowest_report()
         has_drift_false["has_drift"] = False
         return {
-            "skip": publish(lowest_report(), "a.json", drift="false"),
+            "skip": publish(lowest_report(), "a.json", drift="unknown"),
             "in-sync": publish(fixture_report("in_sync"), "b.json"),
             "env-mismatch": publish(env_mismatch, "c.json"),
             "mixed": publish(mixed, "d.json"),
@@ -1458,6 +1516,22 @@ class SafeguardMutationTests(_Base):
                                        seed=lambda m, f: (f.add_issue("x"), f.add_issue("y"))),
             "foreign-next": publish(lowest_report(), "u.json", page_size=1, next_base="https://evil.example/repositories/1/issues",
                                     seed=lambda m, f: (f.add_issue("x"), f.add_issue("y"))),
+            "life-close": publish(resolved_report(), "l1.json", drift="false", seed=seed_life(RG_ADDR, old)),
+            "life-equal": publish(resolved_report(), "l2.json", drift="false", seed=seed_life(RG_ADDR, "2026-10-03T10:00:00Z")),
+            "life-stale": publish(resolved_report(), "l3.json", drift="false", seed=seed_life(RG_ADDR, "2026-10-04T00:00:00Z")),
+            "life-not-in-report": publish(resolved_report(), "l4.json", drift="false",
+                                          seed=seed_life(RG_ADDR, old, environment="prod")),
+            "life-unknown": publish(resolved_report(), "l5.json", drift="unknown", seed=seed_life(RG_ADDR, old)),
+            "life-false-drifted": publish(lowest_report(), "l6.json", drift="false"),
+            "life-dupes": publish(resolved_report(), "l7.json", drift="false",
+                                  seed=seeds(seed_life(RG_ADDR, old, number=3), seed_life(RG_ADDR, old, number=5))),
+            "life-bad-then-valid": publish(resolved_report(2), "l8.json", drift="false", seed=seeds(
+                seed_life(RG_ADDR, old, number=2, body="<!-- drift-issue v=1 fp={fp} broken -->"),
+                seed_life(s01, old, number=4))),
+            "life-cap": publish(resolved_report(ga.MAX_WRITES_PER_RUN + 1), "l9.json", drift="false", seed=seeds(
+                seed_life(RG_ADDR, old), *[seed_life(f'module.resource_group.azurerm_resource_group.this["s{i:02d}"]', old)
+                                           for i in range(1, ga.MAX_WRITES_PER_RUN + 1)])),
+            "life-true-not-in-report": publish(lowest_report(), "l10.json", seed=seed_life(s01, old)),
             "hostile": render(hostile_report()),
             "redacted": render(redacted),
             "medium": render(fixture_report("unconfigured_attribute_drift")),
