@@ -2,8 +2,18 @@
 
 > **Status**: Defined by Task 3.1 (2026-10-01). This is the technical contract that
 > Task 3.2 (plan generation), Tasks 3.3–3.5 (deterministic classification and schema)
-> and Phase 4 (Python engine) must implement. Nothing in this document is implemented
-> yet; it defines *what* must be built and *how results must be interpreted*.
+> and Phase 4 (Python engine) implement. It defines *what* is built and *how results must
+> be interpreted*.
+>
+> **Implemented (as of 2026-10-03):**
+> - Tasks 3.2–3.7 and Phase 4: `scripts/generate_plan_json.sh`, `scripts/detect_drift.py`,
+>   `src/drift_engine`, `schemas/drift_report.schema.json`, validated against a real Azure
+>   tag change;
+> - Phase 5: the scheduled `drift-detection.yml`;
+> - Phase 8: drift issues (§8.3);
+> - the AI boundary (§10), held by the Phase 6 engine.
+>
+> Static scanners (Phase 9) are outside this contract (§10, rule 9).
 >
 > Every behavioral claim marked **[verified]** was observed on Terraform **1.14.7** with
 > azurerm **~> 5.0** against the real `aitdd-dev-main-rg` — see
@@ -28,7 +38,7 @@ override a drift finding.
 |---|---|
 | Terraform root | `terraform/environments/dev` |
 | Remote state | `aitdd-tfstate-rg` / `aitddtfstatesa001` / `tfstate` / `dev.tfstate` |
-| Managed resources | Exactly one: `module.resource_group.azurerm_resource_group.this["main"]` → `aitdd-dev-main-rg` |
+| Managed resources | Phase 3 MVP: exactly one, `module.resource_group.azurerm_resource_group.this["main"]` → `aitdd-dev-main-rg`. Since Task 5A.1 there are five: the resource group plus `module.network["main"]`'s VNet, subnet, NSG and subnet–NSG association. The contract is unchanged (§9). |
 | Variable input | `dev.tfvars` (**mandatory**) |
 | Terraform version | `1.14.7` (pinned in CI; must match the version that wrote `dev.tfstate`) |
 | Identity (CI) | `aitdd-github-oidc` — `Reader` (subscription) + `Storage Blob Data Contributor` (`tfstate` container). Plan-only; sufficient for refresh, plan and state locking. |
@@ -288,6 +298,11 @@ was altered while live Azure was only read. This proves the azurerm provider ref
 Azure mutation is not performed here; it remains Task 3.6/3.7 work and requires explicit
 approval at that point.
 
+**Done (Tasks 3.6–3.7, 2026-10-02, user-approved):** `tests/scenarios/run_rg_tag_drift_scenario.sh --apply`
+added the tag `aitdd_drift_probe` to `aitdd-dev-main-rg` with the Azure CLI. Detection
+reported `external_drift` with exactly one attribute change, `tags.aitdd_drift_probe` =
+`drifted`. The tag was then reverted and the result was `in_sync` again (18/18 checks).
+
 ## 8. Evidence Contract for Python (Phase 4 Input)
 
 ### 8.1 Evidence Bundle (produced per run by Task 3.2 tooling)
@@ -498,8 +513,9 @@ The contract stays valid as resources are added:
     `unconfigured`, or `undetermined` (no configuration evidence for the resource).
   - Configuration always wins over a rule, and nothing is dropped. Only proven noise is
     left out of the "significant" view.
-  - Classification and the report are unchanged. Recording the assessment in the report
-    is not done yet; it needs a schema change (Task 4.6 or later).
+  - Classification is unchanged. Since Task 6.2A (`classification_version` 2), every
+    attribute change records its `assessment` (`category`, `noise_rule`) next to its
+    deterministic `severity` (§8.2).
 - `lifecycle.ignore_changes`, moved blocks (`previous_address`) and import blocks
   (`change.importing`) affect `resource_changes`. Their interaction with `resource_drift`
   must be verified empirically when first introduced; they are not exercised by the MVP.
@@ -536,6 +552,10 @@ The contract stays valid as resources are added:
    classes, actions, `ambiguous`, `redacted`, counts and severity are decided
    deterministically. The Phase 6 `classify_drift` node (Task 6.3) is deterministic routing
    of changes that are security-relevant for analysis; it does not re-classify drift.
+9. **Static scanners are not drift detection (Phase 9).** TFLint and Trivy config run in
+   `security-scan.yml` on code changes, without Azure access. Their findings are lint or
+   security-scan failures, never drift results. They never run inside or gate
+   `drift-detection.yml`, and they never publish drift outputs, issues or labels.
 
 ## 11. Verification Evidence
 
@@ -576,12 +596,14 @@ the real remote state was neither locked nor written.
 - [x] AI boundary stated (§10).
 - [x] Behavior verified on the installed Terraform version (§11).
 
-**For implementations of this contract (Tasks 3.2 → Phase 4), verified when built:**
+**For implementations of this contract (Tasks 3.2 → Phase 4, and the Phase 5 workflow),
+verified when built.** The evidence is in the `PROJECT_PLAN.md` completion notes of Tasks
+3.2–3.7, 4.x, 5.x and 6.2A:
 
-- [ ] Exit 1 / other / show failure / integrity-gate failure ⇒ `outcome: failed`, drift `unknown`.
-- [ ] Exit 2 does not fail the CI job by itself.
-- [ ] An errored plan file with `errored: true` is rejected even though `show -json` succeeds.
-- [ ] The S2 and S3 signatures are both classified as drift (S3 despite exit 0).
-- [ ] The S1 signature is classified as `config_change`, not drift.
-- [ ] Forbidden flags (`-refresh=false`, `-target`, `-lock=false`, `-var`) are absent.
-- [ ] Plan artifacts are never committed; sensitive values are redacted before AI.
+- [x] Exit 1 / other / show failure / integrity-gate failure ⇒ `outcome: failed`, drift `unknown`.
+- [x] Exit 2 does not fail the CI job by itself.
+- [x] An errored plan file with `errored: true` is rejected even though `show -json` succeeds.
+- [x] The S2 and S3 signatures are both classified as drift (S3 despite exit 0).
+- [x] The S1 signature is classified as `config_change`, not drift.
+- [x] Forbidden flags (`-refresh=false`, `-target`, `-lock=false`, `-var`) are absent.
+- [x] Plan artifacts are never committed; sensitive values are redacted before AI.

@@ -2,16 +2,35 @@
 
 > Detect, analyze, and remediate infrastructure drift in Azure using Terraform, Python, LangGraph, and GitHub automation.
 
-The **deterministic** part works today: Terraform plan evidence, drift classification and a
-typed Python drift engine. The AI part (LangGraph/LLM analysis) and the automation around
-it are **planned, not yet built**. See [What works today](#-what-works-today) and
+Working today:
+- the **deterministic** core: Terraform plan evidence, drift classification and a typed
+  Python drift engine;
+- **scheduled drift detection** in GitHub Actions, with one GitHub Issue per drifted resource;
+- an **AI analysis engine** (LangGraph, LLM opt-in) as a Python library;
+- Activity Log attribution tooling;
+- **static Terraform security scanning** (TFLint and Trivy) in CI.
+
+The AI engine is not yet wired into a CLI or CI (Phase 9A). Remediation is planned, not
+built (Phase 11). See [What works today](#-what-works-today) and
 [Planned](#-planned-not-yet-implemented).
 
 ---
 
 ## 📌 Current Status
 
-**Phase 4 — Python Drift Engine** ✅ Complete (Tasks 4.1–4.7). **Phase 5 — Automated drift detection workflow** ✅ Complete: Task 5.1 ✅ (daily + manual drift-detection workflow triggers, verified by a green manual run); Task 5.2 ✅ (OIDC login + Terraform init/validate against the remote backend, verified by a green run); Task 5.3 ✅ (plan evidence + `drift-engine analyze` in the workflow, verified by a green real run: `dev` in sync); Task 5.4 ✅ (report + manifest artifact `drift-report-<run_id>`, 30 days, verified by downloading a real run's artifact); Task 5.5 ✅ (failure reporting + `drift_detected` job output, verified by a green real run). **Phase 5A — Dev infrastructure expansion** ✅ Complete: Task 5A.1 ✅ (Virtual Network, Subnet, Network Security Group and Subnet–NSG association added to `dev` inside the existing resource group; applied with approval and verified in sync: plan exit 0, `drift-engine` `in_sync=5`). Next: Phase 6, Task 6.1.
+**Phases 1–8 are complete**, and so is the lettered expansion Phase 5A.
+
+`PROJECT_PLAN.md` reports **"Phases Completed: 8 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
+- **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
+  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "8 of 14".
+- **Phase 9A** (AI Analysis Integration) is planned and not started, placed before Phase 10.
+
+- **Phase 8:** Task 8.2 (automated remediation PRs) is blocked: it was superseded by
+  Phase 11 in the 2026-10-03 design review.
+- **Phase 9 — DevSecOps Integration** is in progress. Done: Task 9.1 (TFLint) and
+  Task 9.2 (Trivy config security scan), both validated in real CI runs. **Current active
+  task: Task 9.3 — TruffleHog Secret Scanning**, which starts with its dedicated design
+  review. Task 9.4 (Super-Linter) also needs a design review.
 
 | Phase | Status |
 |---|---|
@@ -21,6 +40,10 @@ it are **planned, not yet built**. See [What works today](#-what-works-today) an
 | 4 — Python drift engine | ✅ Complete |
 | 5 — Automated drift detection workflow (scheduled + manual) | ✅ Complete |
 | 5A — Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
+| 6 — LangGraph AI analysis engine (library; no CLI/CI integration yet) | ✅ Complete |
+| 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
+| 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
+| 9 — DevSecOps integration | 🟡 In progress (9.1 ✅, 9.2 ✅, 9.3 next, 9.4 pending) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -55,23 +78,49 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   above 99%). See [Python drift engine](#-python-drift-engine).
 - **Plan-only CI with OIDC**: GitHub Actions authenticates to Azure without stored secrets
   and runs `terraform plan`; the identity has no write permissions.
+- **Scheduled drift detection** (Phase 5): `drift-detection.yml` runs daily and on demand.
+  It publishes the redacted report as an artifact and a `drift_detected` output. A failed
+  run is reported as `unknown`, never as "no drift".
+- **GitHub drift issues** (Tasks 8.1 and 8.3): one public, structure-only issue per drifted
+  resource, closed again only on evidence. Both were validated in real workflow runs. See
+  [GitHub Drift Issues](#-github-drift-issues-tasks-81-and-83).
+- **AI analysis engine** (Phase 6, `src/ai_engine/`): a LangGraph pipeline over the drift
+  report covering security, cost/configuration, root cause/risk and remediation options. It
+  produces a JSON + Markdown report via `write_report`.
+  - The LLM is opt-in (`AI_LLM_PROVIDER`, default `none`).
+  - AI output is validated against the evidence. The deterministic drift result and
+    severity are never changed.
+  - No CLI or CI integration yet (Phase 9A).
+- **Activity Log attribution** (Phase 7): `drift-engine activity-logs` collects Azure Activity
+  Log evidence (opt-in `[azure]` extra), and `drift-engine attribute` correlates it with
+  drifted resources, falling back to "unknown" when logs are missing.
+  - Tested with fake log sources; the collector hasn't been run against real Azure.
+  - Not used by any workflow.
+- **Static security scanning** (Tasks 9.1–9.2): TFLint and Trivy config check `terraform/` on
+  every push and pull request in `security-scan.yml`, without Azure access. See
+  [Static Terraform linting](#static-terraform-linting-tflint-task-91) and
+  [Terraform security scan](#terraform-security-scan-trivy-config-task-92).
 
 ### 🔜 Planned (not yet implemented)
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- **AI-powered analysis with LangGraph + an LLM** (Phase 6)
-- Azure Activity Log investigation of who or what changed a resource (Phase 7)
-- Remediation PRs (Phase 8, Task 8.2). Drift issues (Task 8.1) are validated in real workflow
-  runs; evidence-based issue closure (Task 8.3) is implemented but not yet validated in a real run.
-- DevSecOps scanning and FinOps cost analysis (Phases 9–10)
-- Human-approved remediation (Phase 11)
-- Dashboard (Phase 13)
+- Secret scanning with TruffleHog (Task 9.3) and Super-Linter code-quality checks (Task 9.4);
+  both need their own design review first.
+- An AI analysis CLI and no-LLM CI integration (Phase 9A).
+- FinOps cost analysis with Infracost (Phase 10).
+- Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
+  superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
+  and no apply triggered by a merge.
+- Testing and security hardening (Phase 12), dashboard (Phase 13), final documentation and
+  demo (Phase 14).
 
 ### Core principles
 
-- Terraform is the source of truth for **whether** drift exists. AI will interpret,
-  explain and recommend; it never decides drift.
+- Terraform is the source of truth for **whether** drift exists. AI interprets, explains
+  and recommends; it never decides drift.
+- Static scanners (TFLint, Trivy) check code quality and security. Their findings are never
+  drift results, and they never touch the drift-detection workflow.
 - Detection works **without an LLM**. A failed detection is reported as *unknown*, never
   as "no drift".
 - "Drift detected" is a valid result, not a pipeline failure.
@@ -109,13 +158,14 @@ flowchart TD
     end
 
     DEV_ENV -.->|"read-only plan"| GEN
-    REPORT -.-> FUTURE["Planned: scheduled CI,<br/>AI analysis, issues/PRs"]
+    REPORT -.-> CONSUMERS["drift-detection.yml (Phase 5) → drift issues (8.1/8.3)<br/>AI engine library (Phase 6; CI in 9A)<br/>remediation (Phase 11, planned)"]
+    SCAN["security-scan.yml: TFLint + Trivy config<br/>(Phase 9, no Azure access)"] -.->|"static checks"| DEV_ENV
 ```
 
 The [drift detection spec](docs/drift-detection-spec.md) defines the detection contract:
 commands, exit codes, integrity gate, classification rules and the AI boundary.
-[docs/architecture.md](docs/architecture.md) documents the Phase 1–2 design (backend,
-security controls, OIDC flow). It predates Phases 3–4 and has not been updated for them.
+[docs/architecture.md](docs/architecture.md) documents the infrastructure and security
+design: backend, security controls, OIDC flow, and the CI workflows' access model.
 
 ---
 
@@ -130,7 +180,11 @@ security controls, OIDC flow). It predates Phases 3–4 and has not been updated
 | Pydantic | `>= 2.11, < 3` | Strict report models |
 | PyYAML | `>= 6.0, < 7` | `--format yaml` output |
 | pytest, pytest-cov, jsonschema | dev extras | Tests and schema validation |
-| GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3` | Plan-only CI with OIDC |
+| LangGraph, langchain-openai | `ai` extra | AI analysis engine (Phase 6); LLM opt-in |
+| azure-mgmt-monitor, azure-identity | `azure` extra | Activity Log collector (Phase 7) |
+| TFLint + `tflint-ruleset-azurerm` | `0.64.0` + `0.32.0` | Static Terraform linting (Task 9.1) |
+| Trivy (`trivy config`) | `0.75.0`, SHA-256-pinned Linux binary in CI | Terraform security scan (Task 9.2) |
+| GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3`, `actions/setup-python@v5`, `actions/upload-artifact@v4` / `download-artifact@v4`, `terraform-linters/setup-tflint@v6` | Plan-only CI with OIDC, drift detection, security scans |
 
 `scripts/detect_drift.py` and the engine modules it imports use only the Python standard
 library, so they run with plain `python3`. Pydantic and PyYAML are needed only for
@@ -178,7 +232,7 @@ each network inherits its resource group's name and location.
 ```
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
-├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → report (Phase 5)
+├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → issues / report (Phases 5, 8)
 └── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2)
 
 terraform/
@@ -192,6 +246,8 @@ terraform/
 scripts/
 ├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
 ├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
+├── github_automation.py          # Drift issue create/update/close (Tasks 8.1, 8.3)
+├── run_mutation_checks.py        # AI-engine safeguard mutation harness (Task 6.7)
 ├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
 ├── run_trivy_config.sh           # Trivy config security scan + risk-acceptance gate (local and CI; Task 9.2)
 └── validate.sh                   # terraform fmt -check + validate (no Azure auth)
@@ -203,8 +259,15 @@ src/drift_engine/                 # Python drift engine (Phase 4)
 ├── severity.py                   # Rules-based severity rating (4.5)
 ├── classifier.py                 # Resource classification and report building (moved in 4.6)
 ├── formatters.py                 # JSON / YAML / console rendering (4.6)
-├── cli.py                        # drift-engine command (4.6; error handling 4.7)
-└── logs.py                       # Structured logging (4.7)
+├── cli.py                        # drift-engine command (4.6; error handling 4.7; activity-logs 7.1; attribute 7.2)
+├── logs.py                       # Structured logging (4.7)
+├── activity_logs.py              # Azure Activity Log collector, opt-in [azure] extra (7.1)
+└── attribution.py                # Drift ↔ Activity Log correlation and fallback (7.2, 7.3)
+
+src/ai_engine/                    # LangGraph AI analysis engine (Phase 6; library only)
+├── config.py, llm.py, graph.py   # Opt-in LLM configuration and the analysis graph
+├── evidence.py, verify.py        # Evidence views and evidence-vs-inference checks (6.7)
+└── nodes/                        # parse, security, cost/config, root cause, remediation, report nodes
 
 schemas/
 ├── drift_report.schema.json      # Report contract (JSON Schema 2020-12)
@@ -212,13 +275,15 @@ schemas/
 
 tests/
 ├── fixtures/plan_evidence/       # Sanitized real plan evidence (11 scenarios)
+├── fixtures/*_plans/             # Synthetic plans for the AI-engine tests (Phase 6)
+├── corpora/, mutation/           # Guard/injection corpora and safeguard mutants (Task 6.7)
 ├── scenarios/                    # Azure CLI tag-drift inject / revert / runner (Task 3.6)
 └── test_*.py                     # Unit tests (see Testing)
 
 docs/
-├── drift-detection-spec.md       # Detection contract (Phases 3–4)
+├── drift-detection-spec.md       # Detection contract (Phases 3–4; publication rules of Phases 5 and 8)
 ├── MASTER_PROJECT_GUIDE.md       # Project walkthrough
-└── architecture.md               # Phase 1–2 design
+└── architecture.md               # Infrastructure, security and CI access design
 
 pyproject.toml / requirements.txt # Python package and dev environment
 .tflint.hcl                       # TFLint configuration with exact version pins (Task 9.1)
@@ -319,6 +384,8 @@ The script's output is unchanged.
 | `classifier.py` | 4.6 | Resource classification (spec §6) and report building, moved from the script so the CLI and the script share one implementation. |
 | `formatters.py`, `cli.py` | 4.6 | `drift-engine analyze`: JSON (default), YAML or console output. See below. |
 | `logs.py` | 4.7 | Structured logging on the standard `logging` module. Silent by default; each event has a stable name and fields (identifiers, counts, stages, reasons), never attribute values. |
+| `activity_logs.py` | 7.1 | `drift-engine activity-logs --plan --manifest [--lookback-days N] [--output]`: collects Azure Activity Log evidence (`activity_log_evidence.json`) for the drifted resources. Needs the opt-in `[azure]` extra and an Azure login; detection itself never imports it. |
+| `attribution.py` | 7.2, 7.3 | `drift-engine attribute --report --evidence [--output]`: correlates drifted resources with exact-resource write/delete operations and records the logged caller only where the correlation rules establish it, otherwise "unknown" (`drift_attribution.json`). Not used by any workflow; Phase 8 never publishes caller identity. |
 | `severity.py` | 4.5 | Deterministic, rules-based `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` per change and per resource. Examples: Key Vault access policies, NSG inbound rules open to any source and public storage access rate `CRITICAL`/`HIGH`; tags and descriptions rate `LOW`; proven noise rates `INFO`; changes no rule covers default to `MEDIUM`. |
 
 Install for development (a virtual environment is recommended):
@@ -433,6 +500,15 @@ python3 -m unittest discover -s tests
 State after Task 4.7: **319 tests pass** with `pytest` (Python 3.13 and 3.14), with **99.87%**
 line and branch coverage of `src/drift_engine`. With plain `python3` and no installation, the
 same 319 run and 90 are skipped (they need Pydantic and PyYAML).
+
+Latest recorded full run (Task 9.2): **1137 passed, 679 skipped**, with the optional `ai` and
+`azure` extras not installed, and 96.05% coverage of `src/drift_engine` (the gate is 85%).
+Later phases added the test files below. Their per-task counts are in the
+[PROJECT_PLAN.md](PROJECT_PLAN.md) completion notes:
+- `test_ai_*.py`, `test_mutation_corpus.py`: Phase 6;
+- `test_activity_logs.py`, `test_attribution*.py`: Phase 7;
+- `test_github_*.py`: Phase 8;
+- `test_tflint_integration.py`, `test_trivy_config.py`: Phase 9.
 
 | Test file | Covers | Tests |
 |---|---|---|
@@ -671,6 +747,9 @@ registration holds zero credentials.
 | Plan-Only CI | GitHub Actions has **no autonomous `terraform apply` capability**, enforced by RBAC rather than convention — the identity holds no write actions. Any future remediation/apply capability would require explicit human approval. |
 | No Storage Account Keys | `listkeys` is denied to the CI identity, so state access uses Entra ID on the data plane (`ARM_USE_AZUREAD=true`) instead of account keys. |
 | Sensitive Values Redacted | Values Terraform marks sensitive are never emitted in drift reports. |
+| Static Security Scanning | TFLint and Trivy config check `terraform/` on every push and PR (`security-scan.yml`, `contents: read`, no Azure, no OIDC). HIGH/CRITICAL Trivy findings fail the job except one documented, expiring risk acceptance (AZU-0012, until 2027-03-31). |
+| State Destroy Protection | `prevent_destroy` on the remote-state storage account and container (Task 9.1). |
+| Public Issue Profile | Drift issues carry structure only: no values, HCL, AI output, Activity Log data or caller identity (Task 8.1). |
 
 ---
 
@@ -684,10 +763,11 @@ registration holds zero credentials.
 | 4 | Python drift engine | ✅ Complete |
 | 5 | Scheduled GitHub Actions drift detection | ✅ Complete |
 | 5A | Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
-| **6** | **LangGraph AI analysis** | ⬜ Next |
-| 7 | Azure Activity Log investigation | ⬜ Planned |
-| 8 | GitHub Issue/PR automation | 🟡 In progress (Tasks 8.1 and 8.3) |
-| 9 | DevSecOps scanning | ⬜ Planned |
+| 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI in 9A) |
+| 7 | Azure Activity Log investigation | ✅ Complete |
+| 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
+| **9** | **DevSecOps scanning** | 🟡 In progress: 9.1 TFLint ✅, 9.2 Trivy config ✅, **9.3 TruffleHog next** (design review), 9.4 Super-Linter |
+| 9A | AI analysis CLI & no-LLM CI integration | ⬜ Planned |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
@@ -718,6 +798,17 @@ registration holds zero credentials.
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.
   Both refer to the same document.
+- The AI engine is a library only: no CLI, and it doesn't run in any workflow (Phase 9A). A
+  real model's analysis quality hasn't been verified; tests use fake chat models.
+- Activity Log collection and attribution have been tested with fake log sources. The
+  collector itself hasn't been run against real Azure. A read-only Azure check during the
+  Task 7.2 design showed that Activity Log events carry no property diffs, so attributes
+  can't be attributed; only exact-resource writes and deletions are correlated.
+- Trivy reports four non-blocking MEDIUM/LOW findings on the state storage account, and
+  AZU-0012 (no network rules) is an accepted risk until 2027-03-31. Fixing them needs Azure
+  architecture or apply decisions outside Phase 9.
+- `tflint-ruleset-azurerm` 0.32.0 was generated from the AzureRM 4.65.0 schema, although
+  the repository uses AzureRM 5.x (see the TFLint section).
 
 ---
 

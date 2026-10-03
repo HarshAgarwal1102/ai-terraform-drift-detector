@@ -4,7 +4,7 @@
 
 This platform detects, analyzes, and remediates **infrastructure drift** — the gap between what Terraform expects and what actually exists in Azure. The final product will combine Terraform, Python, LangGraph/LLM analysis, GitHub automation, and a professional dashboard.
 
-**Current Status: Phase 1 completed (Minimal Foundation in Central India). Phase 2 in progress (infrastructure deployment pending).**
+**Current Status (2026-10-03):** Phases 1–8 are complete, and so is the lettered expansion Phase 5A (placed after Phase 5 and before Phase 6). `PROJECT_PLAN.md`'s "Phases Completed: 8 of 14" counts only the numbered phases. Phase 9A (AI analysis integration, before Phase 10) is planned and not started. Phase 9 (DevSecOps) is in progress: Task 9.1 TFLint and Task 9.2 Trivy config are complete; Task 9.3 TruffleHog (design review) is next. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
 
 ---
 
@@ -12,14 +12,17 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 
 | Phase | Description | Scope | Status |
 |---|---|---|---|
-| **1** | **Azure + Terraform Infrastructure** | Minimal Resource Group baseline in `Central India`; reusable modules preserved for Network, Storage, Key Vault | ✅ Complete |
+| **1** | **Azure + Terraform Infrastructure** | Minimal Resource Group baseline in `Central India` | ✅ Complete |
 | **2** | **Remote State & Secure Auth** | Dedicated Storage Backend (`Central India`), Bootstrap module, Remote State, GitHub OIDC (plan-only CI) | ✅ Complete |
-| 3 | Drift Detection Engine | Scheduled plan analysis, state vs actual state comparison | ⬜ Planned |
-| 4 | Python Drift Parser | Structured JSON extraction from plan files | ⬜ Planned |
-| 5 | GitHub Actions Automation | CI/CD scheduled workflow for drift runs | ⬜ Planned |
-| 6 | LangGraph AI Analysis | Root cause analysis using LLM agents | ⬜ Planned |
-| 7 | Azure Activity Log | Identify who/what mutated Azure resources out-of-band | ⬜ Planned |
-| 8 | GitHub Issue / PR Remediation | Human-in-the-loop approval workflows | ⬜ Planned |
+| **3** | **Deterministic Drift Detection** | Plan evidence, integrity gate, classification, report schema, real Azure drift validation | ✅ Complete |
+| **4** | **Python Drift Engine** | `src/drift_engine`: parser, models, comparator, severity, `drift-engine analyze` | ✅ Complete |
+| **5** | **Automated Drift Detection Workflow** | `drift-detection.yml`: daily + manual, OIDC, report artifact, `drift_detected` output | ✅ Complete |
+| **5A** | **Dev Infrastructure Expansion** | VNet, Subnet, NSG and Subnet–NSG association in `dev` | ✅ Complete |
+| **6** | **LangGraph AI Analysis** | `src/ai_engine` library; LLM opt-in; no CLI/CI integration yet (Phase 9A) | ✅ Complete |
+| **7** | **Azure Activity Log Investigation** | Activity Log collector and deterministic attribution (opt-in, not in any workflow) | ✅ Complete |
+| **8** | **GitHub Issue / PR Automation** | Drift issues create/update/close (8.1, 8.3); remediation PRs (8.2) superseded by Phase 11 | ✅ Complete |
+| 9 | DevSecOps Integration | `security-scan.yml`: TFLint (9.1 ✅), Trivy config (9.2 ✅); TruffleHog (9.3), Super-Linter (9.4) pending | 🟡 In progress |
+| 9A–14 | AI CI integration, FinOps, human-approved remediation, hardening, dashboard, final docs | See `PROJECT_PLAN.md` | ⬜ Planned |
 
 ---
 
@@ -64,7 +67,7 @@ flowchart TD
 
 | Security Control | Implementation |
 |---|---|
-| Dedicated Isolation | State storage is entirely isolated from application storage (`aitddtfstatesa001` vs `aitdddevsa001`). |
+| Dedicated Isolation | State storage lives in its own resource group (`aitdd-tfstate-rg` / `aitddtfstatesa001`), separate from the application resources. No application storage account is deployed. |
 | Encryption | Encrypted at rest using Azure-managed keys with TLS 1.2 minimum in transit. |
 | Access Control | Container access is private (`container_access_type = "private"`). No public blob access. |
 | State Versioning | Storage Blob Versioning enabled for recovery from state corruptions. |
@@ -72,6 +75,8 @@ flowchart TD
 | No Committed Secrets | Local state, plan artifacts, and credentials are in `.gitignore` (`*.tfstate`, `*.tfstate.*`, `.terraform/`, `tfplan`, `*.tfplan`, `plan.json`). Only `.terraform.lock.hcl` and the secret-free `dev.tfvars` are committed. |
 | Dev State Blob | The `dev` environment's state is the blob `dev.tfstate` inside the `tfstate` container. |
 | Bootstrap State | `terraform/bootstrap` intentionally keeps **local** state (it provisions the backend it would otherwise store state in). That state is never committed, so CI validates bootstrap offline only (`init -backend=false` + `validate`) and never plans it. |
+| Destroy Protection | `lifecycle { prevent_destroy = true }` on the state storage account and container (Task 9.1). Destroying them on purpose requires a reviewed change that removes it first. |
+| Network Access | The state account is reached over its public endpoint (no network rules), authenticated with Entra ID, from GitHub-hosted runners with dynamic IPs. Trivy reports this as AZU-0012 (CRITICAL). It is a documented, script-enforced risk acceptance until **2027-03-31** (`security/trivy-risk-acceptance.json`, Task 9.2). Restricting network access is an architecture change outside Phase 9. |
 
 ---
 
@@ -123,7 +128,7 @@ Deliberately **not** assigned to this identity:
 | `Storage Blob Data Contributor` at subscription or storage-account scope | Container scope is narrower; a broader grant would expose every blob container in the subscription. |
 | `Contributor` on any scope | CI is **plan-only**. Write access is not required and is withheld by design. |
 | `Owner`, `User Access Administrator` | Never required by this workload. |
-| `Key Vault Secrets Officer` | No Key Vault is deployed; the module is preserved but unused. |
+| `Key Vault Secrets Officer` | No Key Vault is deployed. |
 
 The identity has **no group or directory-role memberships**, so there are no inherited
 permission paths, and it requests **no** Microsoft Graph or API permissions.
@@ -141,6 +146,17 @@ State access therefore goes through Microsoft Entra ID on the storage data plane
 (`ARM_USE_AZUREAD=true`), with no account key and no client secret anywhere in the
 pipeline.
 
+### CI Workflows and Their Access
+
+| Workflow | Trigger | Azure access | GitHub permissions |
+|---|---|---|---|
+| `terraform-auth-test.yml` (Phase 2) | push / PR to `main` (or `master`), manual | OIDC; `terraform fmt`, `validate`, read-only `plan` | `id-token: write`, `contents: read` |
+| `drift-detection.yml` (Phases 5, 8) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only; never `apply` | workflow: `id-token: write`, `contents: read`; `issues` job: `contents: read`, `issues: write`, no Azure |
+| `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC) | `contents: read` only |
+
+Only the `main` branch has a federated credential, so `terraform-auth-test.yml` runs on pull
+requests fail at Azure login (`AADSTS700213`); this is known, existing behaviour.
+
 > **Future / conditional only — not current access.** Should a later phase introduce
 > automated remediation, any write capability (for example a narrowly scoped
 > `Contributor` on `aitdd-dev-main-rg`) would be a **future** change requiring explicit
@@ -149,30 +165,27 @@ pipeline.
 
 ---
 
-## 5. Modular Infrastructure Architecture (Phase 1)
+## 5. Modular Infrastructure Architecture (Phases 1 and 5A)
 
 ```mermaid
 flowchart LR
-    subgraph "terraform/environments/dev (Active Minimal Baseline)"
-        TFVARS["dev.tfvars<br/>(Resource Groups)"]
+    subgraph "terraform/environments/dev"
+        TFVARS["dev.tfvars<br/>(resource_groups, virtual_networks)"]
         MAIN["main.tf<br/>(Module Composition)"]
-        MOD_RG["modules/resource-group<br/>(Active)"]
+        MOD_RG["modules/resource-group<br/>(Phase 1)"]
+        MOD_NET["modules/network<br/>VNet · Subnets · NSGs · associations<br/>(Phase 5A)"]
         TFVARS -->|"feeds"| MAIN
         MAIN -->|"for_each"| MOD_RG
-    end
-
-    subgraph "terraform/modules (Preserved Reusable Modules)"
-        MOD_NET["modules/network<br/>(Deferred to Phase 3+)"]
-        MOD_ST["modules/storage<br/>(Deferred to Phase 3+)"]
-        MOD_KV["modules/key-vault<br/>(Deferred to Phase 3+)"]
+        MAIN -->|"for_each"| MOD_NET
     end
 ```
 
 ### Data-Driven Design & Incremental Expansion
 
-1. **Active Minimal Foundation**: Phase 1 activates only the Azure Resource Group (`aitdd-dev-main-rg`) in `Central India`. This provides the cleanest, smallest practical infrastructure baseline for establishing remote state and testing deterministic drift detection.
-2. **Preserved Reusable Modules**: Modules for Virtual Networks, Subnets, NSGs, Storage Accounts, and Key Vaults are implemented and preserved under `terraform/modules/`. They will be plugged into `dev/main.tf` in subsequent phases to produce rich multi-resource drift scenarios.
-3. **Data-Driven Scalability**: When activating additional resources, configurations are added to the corresponding map in `dev.tfvars` without redesigning core architectures.
+1. **Minimal Foundation**: Phase 1 activated only the Azure Resource Group (`aitdd-dev-main-rg`) in `Central India`, the smallest practical baseline for establishing remote state and testing deterministic drift detection.
+2. **Network Expansion (Phase 5A)**: the `network` module adds one VNet with a subnet, an NSG (rule set declared empty, so out-of-band rules show as drift) and the subnet–NSG association, all inside the existing resource group. Only `modules/resource-group` and `modules/network` exist; there are no storage or Key Vault modules.
+3. **Data-Driven Scalability**: additional resources are added to the corresponding map in `dev.tfvars` without redesigning core architectures.
+4. **Static Checks (Phase 9)**: every module declares its Terraform and AzureRM constraints (`versions.tf`, matching the roots), and `terraform/` is checked by TFLint and Trivy config in `security-scan.yml`.
 
 ---
 
@@ -188,7 +201,5 @@ flowchart LR
 | `aitddtfstatesa001` | Dedicated storage account for state (3-24 lowercase alphanumeric) |
 | `aitdd-dev-main-rg` | Application dev resource group |
 | `aitdd-dev-main-vnet` | Main dev virtual network (10.10.0.0/16) |
-| `aitdd-dev-app-snet` | Application subnet (10.10.1.0/24) |
-| `aitdd-dev-app-nsg` | Application Network Security Group |
-| `aitdddevsa001` | Application dev storage account |
-| `aitdd-dev-kv-001` | Application dev Key Vault |
+| `aitdd-dev-main-app-snet` | Application subnet (10.10.1.0/24) |
+| `aitdd-dev-main-app-nsg` | Application Network Security Group |
