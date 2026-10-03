@@ -456,6 +456,21 @@ otherwise persisted by this workflow. The published report is the contract repor
 redacted: when a resource `id` changes, its before/after values (which contain the
 subscription ID) can appear in the report.
 
+**Issue publication (Task 8.1):** for a valid drifted run (`drift_detected` literally
+`"true"`), the workflow's `issues` job (`contents: read`, `issues: write`; no `id-token`, no
+Azure) downloads this run's `drift-report-<run_id>` artifact and `scripts/github_automation.py`
+creates or updates one GitHub Issue per resource with `drift_action != null`. Issues are
+public and permanent, so they follow a stricter profile than the artifact: structure only
+(address, type, classification, drift action, severity, changed paths and S/R/D value
+*status*), never real/state/desired values, HCL fragments, severity reasons, Activity Log
+data or caller identity; paths are withheld (reduced body) unless the resource is INFO/LOW,
+not a security-sensitive type and has no redacted change; subscription/tenant GUIDs and ARM
+IDs are masked; map keys outside `[A-Za-z0-9_.-]{1,64}` are replaced by a placeholder; all
+untrusted text is rendered only inside code spans. The script accepts only evidence from
+the same run attempt (`run.run_id == github-<run_id>-<run_attempt>`), publishes only inside
+GitHub Actions, and updates an issue only when the evidence is newer (`plan.timestamp`) and
+the content differs.
+
 ## 9. Future Extensibility
 
 The contract stays valid as resources are added:

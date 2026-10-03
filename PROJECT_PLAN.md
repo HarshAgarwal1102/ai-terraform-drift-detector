@@ -1864,7 +1864,7 @@ Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azur
 ---
 
 ### PHASE 8 — GitHub Issue / PR Automation
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS
 
 Phase 8 automates workflow actions upon drift detection by creating structured GitHub Issues and proposing remediation PRs.
 
@@ -1874,7 +1874,8 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 > - **No AI analysis in Phase 8**: the deferred Task 6.6 AI CLI/workflow integration is owned by Phase 9A, not by Phase 8.
 
 #### Task 8.1 — Deterministic Drift Issue Creator
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS
+- **Started**: 2026-10-03
 - **Objective**: For a valid drifted detection run, deterministically create or update one structured GitHub Issue per drifted resource from the run's drift report artifact. *(Reworded 2026-10-03 per the approved Task 8.1 design review: the drift report is the only input; "AI security analysis", "cost impact" and "recommended HCL fix" are removed — the AI report is not produced in CI (Phase 9A) and Task 6.6 options are never ranked or recommended.)*
 - **Dependencies**: Task 4.6 (drift report contract), Task 5.4 (`drift-report-<run_id>` artifact), Task 5.5 (`drift_detected` output)
 - **Files/Areas**: new `scripts/github_automation.py` (not in `src/drift_engine/`: that package must not call the network), new `tests/test_github_automation.py` (incl. workflow structure tests), `.github/workflows/drift-detection.yml` (one new issues job; other jobs unchanged; workflow change requires explicit approval), `README.md`, `docs/drift-detection-spec.md` §8.3. **Unchanged**: `src/drift_engine/`, `src/ai_engine/`, `schemas/`, Terraform, `pyproject.toml` / `requirements.txt` (no new dependency), other workflows. *(Expanded 2026-10-03 per the approved Task 8.1 detailed design review.)*
@@ -1908,6 +1909,11 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
   - The GitHub API client approach (REST client vs PyGithub) was decided in the Task 8.1 detailed design review (2026-10-03): standard-library `urllib` REST client; no new dependency may be added without explicit approval.
   - Untrusted text is rendered only in code spans, so the Task 6.6 `md_text` escaping is not reused and `ai_engine` is never imported.
   - Known limitation (accepted, decision C): a reduced body still shows type, address and severity.
+- **Progress Notes (2026-10-03)** — implementation and local validation done; **not completed**: the real-run validation below needs user approval at each step.
+  - **Files**: new `scripts/github_automation.py`, `tests/test_github_automation.py`; changed `.github/workflows/drift-detection.yml` (new `issues` job + header comment only; local, **not pushed**), `README.md` (Task 8.1 section, label setup, local preview, Phase 8 status/limitation), `docs/drift-detection-spec.md` §8.3 ("Issue publication (Task 8.1)"). No dependency, `src/`, schema or Terraform change.
+  - **Implementation decisions within the approved design**: label `drift-detected`; per-run write cap 10 (creates + updates; unchanged issues do not count); dry-run requires `--out-dir` and an empty directory (`out_dir_not_empty`); dry-run and publish both require a `github-<run>-<attempt>` run ID (it is written raw into the marker); `duplicate_issues` is a warning (exit 0), `stale_evidence` / `conflicting_evidence` / marker errors / `cap_exceeded` exit 1; the first API failure stops the run; line breaks in untrusted text become spaces before stripping.
+  - **Local validation** (session-scratchpad venvs, Python 3.14; script syntax checked for 3.12): `tests/test_github_automation.py` **63 passed** (209 subtests), `scripts/github_automation.py` **100% lines and branches**; safeguard mutants **32/32 caught**, no-op control not caught; full suite **1746 passed** (1549 subtests), `drift_engine` gate 99.94%; core-only venv **1067 passed / 679 skipped**; `unittest discover` OK in both venvs; `./scripts/validate.sh` passed; gitleaks 8.30.1 on the changed files: no leaks. Two defects found by the tests and fixed: `$` accepted a trailing newline (all patterns now `\Z`); stripping `\n` joined words.
+  - **Remaining (requires explicit user approval, Execution Rules 10/13)**: create the `drift-detected` label; inject tag drift (`rg_tag_drift_inject.sh`) → dispatch the **current** workflow → download its artifact to `.artifacts/` → local dry-run reviewed by the user → commit/push the issues job → dispatch → issue created → re-dispatch → no duplicate and no edit → revert (`rg_tag_drift_revert.sh`). Whether `actions: read` is needed for the same-run artifact download is confirmed only by that real run.
 - **Completion Notes**:
   - None.
 

@@ -62,7 +62,8 @@ These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist
 
 - **AI-powered analysis with LangGraph + an LLM** (Phase 6)
 - Azure Activity Log investigation of who or what changed a resource (Phase 7)
-- GitHub Issue/PR automation (Phase 8)
+- GitHub drift-issue closure and remediation PRs (Phase 8, Tasks 8.3 and 8.2). Drift issues
+  (Task 8.1) are implemented but not yet validated in a real workflow run.
 - DevSecOps scanning and FinOps cost analysis (Phases 9–10)
 - Human-approved remediation (Phase 11)
 - Dashboard (Phase 13)
@@ -240,6 +241,44 @@ command produces the same report (see below).
 
 Evidence bundles and reports can contain resource IDs and must stay outside the repository.
 `plan.json` and `tfplan` are gitignored.
+
+---
+
+## 🐙 GitHub Drift Issues (Task 8.1)
+
+When a scheduled or manual detection run finds drift (`drift_detected` is `"true"`), the
+`issues` job of [`drift-detection.yml`](.github/workflows/drift-detection.yml) runs
+[`scripts/github_automation.py`](scripts/github_automation.py) on that run's
+`drift-report-<run_id>` artifact and creates or updates **one issue per drifted resource**.
+
+- **Public by design, so minimal**: structure only (address, type, classification, drift
+  action, severity, changed paths with value *status*). Never attribute values, HCL, AI
+  output, Activity Log data or caller identity. Paths are withheld for security-sensitive,
+  higher-severity or redacted drift. GUIDs and ARM IDs are masked.
+- **Idempotent**: the first body line is a versioned marker (fingerprint of environment and
+  address, content hash, run that last changed the content). An issue is updated only when
+  the evidence is newer and the content differs; matching requires the `drift-detected`
+  label, the `github-actions[bot]` author and the marker.
+- **Least privilege**: the job has `contents: read` and `issues: write` only (no Azure, no
+  `id-token`); the token reaches only the script step. Re-running only failed jobs never
+  publishes (the evidence must come from the same run attempt).
+- Issues are never closed, reopened or assigned by this task (closure is Task 8.3).
+
+**One-time setup** (a repository maintainer, before the first drifted run): the script never
+creates labels and fails with `label_missing` if this one is absent.
+
+```bash
+gh label create drift-detected --color B60205 --description "Opened by the drift detection workflow"
+```
+
+**Local preview** (no network, no token; `--publish` is refused outside GitHub Actions):
+download a run's `drift-report-<run_id>` artifact into `.artifacts/`, then
+
+```bash
+python3 scripts/github_automation.py --report .artifacts/drift-report/drift_report.json --environment dev --drift-detected true --out-dir .artifacts/issue-preview --repository HarshAgarwal1102/ai-terraform-drift-detector
+```
+
+The preview directory receives `requests.json` and one Markdown file per issue.
 
 ---
 
@@ -522,7 +561,7 @@ registration holds zero credentials.
 | 5A | Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
 | **6** | **LangGraph AI analysis** | ⬜ Next |
 | 7 | Azure Activity Log investigation | ⬜ Planned |
-| 8 | GitHub Issue/PR automation | ⬜ Planned |
+| 8 | GitHub Issue/PR automation | 🟡 In progress (Task 8.1) |
 | 9 | DevSecOps scanning | ⬜ Planned |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
@@ -546,6 +585,8 @@ registration holds zero credentials.
   Raw plan evidence (`tfplan`, `plan.json`, `plan.log`) is kept only on the ephemeral runner and is
   not uploaded or otherwise persisted. The report can contain resource identifiers (e.g. the
   subscription ID) when an `id` attribute changes.
+- Drift issues (Task 8.1) are public: a reduced body still shows the resource type, address and
+  severity. Values, paths of security-relevant drift and callers are never published.
 - Terraform reports drift only for resources and attributes it manages. Unmanaged resources
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.

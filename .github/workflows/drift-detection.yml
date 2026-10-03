@@ -5,10 +5,11 @@ name: "Phase 5 - Drift Detection"
 # Implemented so far: triggers and environment selection (Task 5.1), Azure OIDC
 # login and Terraform init/validate against the remote backend (Task 5.2), plan
 # evidence via scripts/generate_plan_json.sh and classification via
-# `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), and failure
-# reporting with the `drift_detected` output (Task 5.5).
+# `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), failure
+# reporting with the `drift_detected` output (Task 5.5), and one GitHub Issue per
+# drifted resource (Task 8.1).
 #
-# Jobs: preflight -> plan-and-analyze -> report.
+# Jobs: preflight -> plan-and-analyze -> issues / report.
 #   preflight         main-branch guard and environment/path validation.
 #   plan-and-analyze  OIDC, Terraform init/validate, plan evidence, drift-engine
 #                     analyze, and upload of the two-file report artifact. Plan
@@ -16,6 +17,12 @@ name: "Phase 5 - Drift Detection"
 #                     evidence (tfplan, plan.json, plan.log) must never leave this
 #                     ephemeral runner (spec §8.3), so it is never passed between
 #                     jobs. Only the redacted report and the manifest are uploaded.
+#   issues            Task 8.1: one GitHub Issue per drifted resource, only when
+#                     drift_detected is the literal "true". Least privilege
+#                     (contents: read, issues: write; no id-token, no Azure); reads
+#                     only this run's drift report artifact (no raw plan evidence).
+#                     Issue publication relies on the workflow-level concurrency
+#                     group below (runs are serialized per environment).
 #   report            run summary, also after failures (reporting only).
 #
 # Job status reflects process validity only: detected drift is a valid result and
@@ -394,6 +401,63 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           overwrite: true
+
+  # Task 8.1: deterministic drift issues (scripts/github_automation.py). Runs only
+  # for a valid drifted run (literal "true"; the implicit success() also requires
+  # preflight and plan-and-analyze to have succeeded). Its own permissions block
+  # replaces the workflow-level one: no id-token, no Azure login, no Terraform.
+  # GITHUB_TOKEN is passed only to the script step. The script refuses evidence
+  # from any other run attempt (run.run_id == github-<run_id>-<run_attempt>), so a
+  # "re-run failed jobs" attempt never publishes. Issues are created/updated only;
+  # closing them is Task 8.3. A failure here does not change drift_detected.
+  issues:
+    name: "Drift Issues (${{ github.event.inputs.environment || 'dev' }})"
+    needs: [preflight, plan-and-analyze]
+    if: ${{ needs.plan-and-analyze.outputs.drift_detected == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      DRIFT_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Runtime dependencies only (pydantic, PyYAML); no dev/AI/Azure extras.
+      - name: Install drift-engine
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input .
+
+      # Same-run artifact (Task 5.4): drift_report.json and detection_run.json only.
+      - name: Download Drift Report
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/drift-report
+
+      - name: Create or Update Drift Issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_DETECTED: ${{ needs.plan-and-analyze.outputs.drift_detected }}
+          REPORT: ${{ runner.temp }}/drift-report/drift_report.json
+        run: |
+          set -euo pipefail
+          python scripts/github_automation.py \
+            --report "${REPORT}" \
+            --environment "${DRIFT_ENVIRONMENT}" \
+            --drift-detected "${DRIFT_DETECTED}" \
+            --publish
 
   # Runs after failures too (not after cancellation) so every completed run
   # reports its result. It only reports: the run's red/green status comes from the
