@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 8 — GitHub Issue / PR Automation
-- **Current Active Task**: Task 8.1 — Automated GitHub Drift Issue Creator
+- **Current Active Task**: Task 8.1 — Deterministic Drift Issue Creator
 - **Phases Completed**: 7 of 14
 
 ---
@@ -1868,49 +1868,75 @@ Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azur
 
 Phase 8 automates workflow actions upon drift detection by creating structured GitHub Issues and proposing remediation PRs.
 
-#### Task 8.1 — Automated GitHub Drift Issue Creator
+> **Phase 8 restructuring (approved 2026-10-03, Task 8.1 design review and final architectural review):**
+> - **Execution order: 8.1 → 8.3 → 8.2** (tasks keep their numbers; they are listed here in execution order and the dependency fields enforce it).
+> - **Public-repository profile** for every Phase 8 GitHub surface (issue titles/bodies, comments, PRs, labels, workflow logs, step summary): no Activity Log caller identity in any form (UPN, object ID, claim text, hash); no Phase 7 inputs (`activity_log_evidence.json`, `drift_attribution.json`) and no import of `drift_engine.activity_logs` / `drift_engine.attribution`; no LLM; `GITHUB_TOKEN` only, job-level permissions. **This resolves blocker B4 (Task 7.2).**
+> - **No AI analysis in Phase 8**: the deferred Task 6.6 AI CLI/workflow integration is owned by Phase 9A, not by Phase 8.
+
+#### Task 8.1 — Deterministic Drift Issue Creator
 - **Status**: ⬜ NOT STARTED
-- **Objective**: Build script using GitHub REST API / PyGithub to automatically create or update structured GitHub Issues when drift is detected.
-- **Dependencies**: Tasks 5.5, 6.6
-- **Files/Areas**: `scripts/github_automation.py`
+- **Objective**: For a valid drifted detection run, deterministically create or update one structured GitHub Issue per drifted resource from the run's drift report artifact. *(Reworded 2026-10-03 per the approved Task 8.1 design review: the drift report is the only input; "AI security analysis", "cost impact" and "recommended HCL fix" are removed — the AI report is not produced in CI (Phase 9A) and Task 6.6 options are never ranked or recommended.)*
+- **Dependencies**: Task 4.6 (drift report contract), Task 5.4 (`drift-report-<run_id>` artifact), Task 5.5 (`drift_detected` output)
+- **Files/Areas**: `scripts/github_automation.py`, `tests/test_github_automation.py`, `.github/workflows/drift-detection.yml` (new dedicated issues job; workflow change requires explicit approval)
 - **Acceptance Criteria**:
-  - [ ] Creates GitHub Issue formatted with drift summary, AI security analysis, cost impact, and recommended HCL fix.
-  - [ ] Deduplicates issues (updates existing open issue for same resource drift instead of creating duplicates).
+  - [ ] Acts only on a valid drifted run: literal `drift_detected == 'true'`, report `outcome = succeeded`, `has_drift = true`; no action for `false`, `unknown` or failed runs.
+  - [ ] Input is the drift report from the same run's artifact only: no AI report input, no Activity Log evidence or attribution input, no caller/origin line.
+  - [ ] Public-repository content: structure-only issue body (environment, address, type, classification, action, severity, changed paths, value status, link to the run); no real/state/desired values and no HCL fragments; reduced body (no paths) for security-classified resources and high/critical security drift; subscription/tenant GUIDs and ARM IDs masked anywhere in title and body.
+  - [ ] Versioned fingerprint/marker/label contract owned by 8.1 and consumed by 8.3: fingerprint `(environment, address)`; marker carries fingerprint version, environment, address, last `run_id` and `plan_timestamp`.
+  - [ ] Open-issue deduplication: updates the existing open issue for the same fingerprint instead of creating a duplicate; an issue matches only if it has the automation label, author `github-actions[bot]` and the exact marker (spoofed issues ignored); open issues only (recurrence/reopen is 8.3).
+  - [ ] Stale-run protection: never overwrites an issue with evidence older than the run recorded in its marker.
+  - [ ] Deterministic rendering: byte-identical title/body for identical input; no edit when content is unchanged; bounded body size; deterministic per-run issue cap.
+  - [ ] Dedicated least-privilege GitHub job: `issues: write` and `actions: read` only; no `id-token`, no Azure login, no raw plan evidence; requests only to `api.github.com`; fixed error codes; a GitHub API failure never changes the drift result or `drift_detected`.
+  - [ ] Labels are created once by the user (documented); the script never creates labels and fails closed if a label is missing.
 - **Validation**:
-  - [ ] Run issue creator script against test GitHub repository.
+  - [ ] Fake-transport test suite: gating, dedup/spoofing, stale runs, pagination, failure codes, masking and no-caller/no-value checks, escaping of hostile fixtures, determinism, import boundaries (no `ai_engine`, `activity_logs`, `attribution`).
+  - [ ] Dry-run mode (renders request bodies to `.artifacts/`, zero API calls) reviewed by the user before any real run.
+  - [ ] Real run on this repository via `workflow_dispatch`, with explicit user approval of each step: approved tag-drift scenario (`tests/scenarios/rg_tag_drift_inject.sh`) → issue created → re-dispatch → no duplicate and no edit → revert (`rg_tag_drift_revert.sh`); the issue stays open for 8.3.
+- **Out of Scope**: AI report input or any LLM; Activity Log evidence/attribution and caller identity in any form; closing or reopening issues (8.3); PRs and branches (8.2); label creation by the script; new workflow triggers (`pull_request_target`, `issue_comment`, `issues`); test-input paths in the production workflow; Azure changes other than the approved tag-drift validation scenario.
 - **Implementation Notes**:
   - Automated tracking of active infrastructure drifts.
+  - Reusing the Task 6.6 Markdown escaping must not import `ai_engine` into the issues job (shared neutral module or tested copy; decided in the 8.1 implementation design).
+  - The GitHub API client approach (REST client vs PyGithub) is decided during the Task 8.1 implementation design; no new dependency may be added without explicit approval.
+- **Completion Notes**:
+  - None.
+
+#### Task 8.3 — Drift Issue Lifecycle / Resolution
+- **Status**: ⬜ NOT STARTED
+- **Objective**: Close 8.1-owned open drift issues, based on evidence, when a later valid detection run of the same environment shows the resource is no longer drifted. *(Reframed 2026-10-03 per the approved Phase 8 restructuring: executes second, after 8.1; deduplication is owned by 8.1; PR lifecycle/closure moved to 8.2.)*
+- **Dependencies**: Task 8.1 (fingerprint/marker/label contract)
+- **Files/Areas**: `scripts/github_automation.py`, `tests/test_github_automation.py`, `.github/workflows/drift-detection.yml` (issues job condition widened to `'true' || 'false'`; workflow change requires explicit approval)
+- **Acceptance Criteria**:
+  - [ ] Scans open drift issues matching the 8.1 contract (label + `github-actions[bot]` author + exact marker).
+  - [ ] Closes an issue with a public-profile closing comment only on evidence from a valid run of the same environment (`drift_detected == 'false'`, or `'true'` with that address absent from the drifted set).
+  - [ ] Unknown/failed runs never close issues; stale-run protection applies.
+  - [ ] Recurrence/reopen policy (reopen the closed issue vs create a new one) is defined and implemented here; address changes (`moved`, renamed keys) are documented.
+- **Validation**:
+  - [ ] Fake-transport closure matrix.
+  - [ ] Test auto-close flow after the drift is resolved (by the approved revert scenario, or by an independently approved Terraform apply that 8.3 does not execute): 8.3 only observes the resulting valid detection run and performs the GitHub lifecycle action; confirm an `unknown` run leaves the issue open.
+- **Out of Scope**: PRs and PR closure (8.2); executing `terraform apply` (8.3 never applies; it only observes valid detection runs); Activity Log evidence and caller identity; closing on anything other than evidence from a valid run.
+- **Implementation Notes**:
+  - Complete issue lifecycle management.
 - **Completion Notes**:
   - None.
 
 #### Task 8.2 — Automated Remediation Branch & PR Generator
 - **Status**: ⬜ NOT STARTED
-- **Objective**: Implement workflow step to generate a Git remediation branch and PR updating Terraform HCL to match desired/remediated state.
-- **Dependencies**: Task 8.1
+- **Objective**: Implement workflow step to generate a Git remediation branch and PR updating Terraform HCL to match desired/remediated state. *(Executes third per the approved Phase 8 restructuring, 2026-10-03; requires its own design review before implementation.)*
+- **Dependencies**: Task 8.3, Task 6.6
 - **Files/Areas**: `scripts/create_remediation_pr.py`
 - **Acceptance Criteria**:
-  - [ ] Creates branch `drift-remediation/<resource_name>-<date>`.
+  - [ ] Creates a remediation branch (proposed name `drift-remediation/<resource_name>-<date>`; not final — subject to the Task 8.2 design review).
   - [ ] Proposes HCL patch or state sync.
-  - [ ] Opens GitHub PR referencing original drift issue.
+  - [ ] Opens GitHub PR referencing the original drift issue with `Refs #n`, never a closing keyword (issues are closed only by 8.3 evidence-based resolution).
+  - [ ] Owns PR lifecycle, including closing stale remediation PRs.
 - **Validation**:
-  - [ ] Test PR generation in test repository.
+  - [ ] Test PR generation against the validation target decided in the Task 8.2 design review (a separate test repository is one candidate, not final).
+- **Design-review items (unresolved, must be decided before implementation)**:
+  - Public-PR value/HCL disclosure versus the Phase 8 public-repository profile (e.g. non-security drift only, or state sync only).
+  - Fragment location: Task 6.6 fragments are `location = "not_determined"`.
+  - PR permission scope (`contents` / `pull-requests: write`), branch naming and validation target.
 - **Implementation Notes**:
-  - PR must await human review before apply.
-- **Completion Notes**:
-  - None.
-
-#### Task 8.3 — Issue/PR Lifecycle & Deduplication
-- **Status**: ⬜ NOT STARTED
-- **Objective**: Automatically close GitHub Issues and PRs when subsequent drift scans confirm drift has been resolved.
-- **Dependencies**: Task 8.2
-- **Files/Areas**: `scripts/github_automation.py`
-- **Acceptance Criteria**:
-  - [ ] Scans open drift issues.
-  - [ ] Closes issue with comment when drift report confirms 0 drifts for target resource.
-- **Validation**:
-  - [ ] Test auto-close flow after applying Terraform fix.
-- **Implementation Notes**:
-  - Complete issue lifecycle management.
+  - PR must await human review before apply. The Phase 11 human approval boundary is preserved: no apply or merge automation, no LLM-generated patches.
 - **Completion Notes**:
   - None.
 
@@ -1984,6 +2010,32 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 
 ---
 
+### PHASE 9A — AI Analysis Integration (pre-Phase 10)
+**Status**: ⬜ NOT STARTED
+
+Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consumers. It owns the deferred Task 6.6 AI CLI/workflow integration (Task 6.6 limitation (d): "no CLI or workflow integration yet"). Phase 6 stays COMPLETED and is not reopened. *(Recorded 2026-10-03 per the approved Phase 8 restructuring.)*
+
+#### Task 9A.1 — AI Analysis CLI & No-LLM CI Integration
+- **Status**: ⬜ NOT STARTED
+- **Objective**: Provide an AI analysis CLI over `run_analysis` / `write_report` and integrate it into CI without an LLM first, publishing the AI report as its own artifact for downstream consumers.
+- **Dependencies**: Task 6.6, Task 5.4
+- **Downstream consumers**: Task 10.3 (AI cost explanation), Task 13.1 (consumes real AI report artifacts).
+- **Files/Areas**: to be decided in the Task 9A.1 design review.
+- **Acceptance Criteria**:
+  - [ ] AI analysis CLI producing `ai_analysis_report.json` / `.md` from a drift report.
+  - [ ] No-LLM CI integration first (`AI_LLM_PROVIDER` stays `none` in CI).
+  - [ ] Separate AI artifact and isolated status: an AI failure is reported separately and does not change the detection run's result.
+  - [ ] Must not modify the drift detection result, the drift report or `drift_detected`.
+  - [ ] No Azure or `id-token` permissions for the AI step.
+- **Validation**:
+  - [ ] To be defined in the Task 9A.1 design review.
+- **Implementation Notes**:
+  - Real LLM in CI remains a separate gated decision (secrets, data egress, cost) requiring explicit approval.
+- **Completion Notes**:
+  - None.
+
+---
+
 ### PHASE 10 — FinOps / Cost Analysis
 **Status**: ⬜ NOT STARTED
 
@@ -2022,7 +2074,7 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
 #### Task 10.3 — AI Cost Impact Explanation Engine
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Pass Infracost cost delta data into LangGraph node `analyze_cost` to generate human-readable financial explanations.
-- **Dependencies**: Task 10.2, Task 6.4
+- **Dependencies**: Task 10.2, Task 6.4, Task 9A.1
 - **Files/Areas**: `src/ai_engine/nodes/cost_analysis.py`
 - **Acceptance Criteria**:
   - [ ] AI output explains exact monthly cost increase/decrease using Infracost numbers.
@@ -2148,7 +2200,7 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 #### Task 13.1 — Dashboard Data API & State Engine
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Build lightweight Python backend API (FastAPI) to serve live drift reports, history, and status metrics.
-- **Dependencies**: Tasks 4.6, 8.3
+- **Dependencies**: Tasks 4.6, 8.3, 9A.1
 - **Files/Areas**: `src/dashboard_api/`
 - **Acceptance Criteria**:
   - [ ] Endpoints for `/api/summary`, `/api/drifts`, `/api/reports/{id}`, `/api/remediations`.
