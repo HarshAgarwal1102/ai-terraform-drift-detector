@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.2 — tfsec Infrastructure Security Scanner (Design Review)
+- **Current Active Task**: Task 9.2 — Infrastructure Security Scanner (Trivy config); design locked, implementation next
 - **Phases Completed**: 8 of 14
 
 ---
@@ -2173,25 +2173,142 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - Evidence summary kept in `.artifacts/task-9.1-ci-proof/evidence.md` (gitignored).
     - Observation: the `pull_request` OIDC subject uses GitHub's ID-qualified format (`repo:<owner>@<id>/<repo>@<id>:pull_request`). Relevant only if a `pull_request` federated credential is added (Task 12.3).
 
-#### Task 9.2 — tfsec Infrastructure Security Scanner
-- **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
-- **Objective**: Integrate a static Terraform security scanner to check for Azure security misconfigurations. tfsec was the original plan, but the scanner choice is **unresolved**: tfsec, or an alternative such as Trivy or Checkov, is decided in the Task 9.2 design review. The task title keeps the original name.
+#### Task 9.2 — Infrastructure Security Scanner (Trivy config)
+- **Status**: ⬜ NOT STARTED — design locked 2026-10-03 (Task 9.2 design review + user decisions D1–D6 and follow-up decisions)
+- **Objective**: Integrate static Terraform security scanning with Trivy (`trivy config`, misconfiguration scanning only) to check for Azure security misconfigurations. It runs in its own job in `security-scan.yml`, credential-free. A finding is a security-scan failure, never a drift result. *(Retitled and reworded 2026-10-03; originally "tfsec Infrastructure Security Scanner". Task ID unchanged. tfsec and Checkov were rejected; see the Design Review.)*
 - **Dependencies**: Task 9.1
-- **Files/Areas**: `.github/workflows/security-scan.yml` (further files to be decided in the Task 9.2 design review)
-- **Acceptance Criteria** *(provisional; finalized by the Task 9.2 design review)*:
-  - [ ] The scanner covers every Terraform root (`terraform/bootstrap`, `terraform/environments/dev`) and the modules they call, including evaluation of the variable values used by each root. The exact scope is defined in the design review.
-  - [ ] High/Critical security findings fail the job. Handling of Medium/Low/informational findings is not yet defined and must be decided in the design review.
+- **Locked versions and flags** *(exact; one reviewed change bumps them everywhere)*:
+  - Trivy **v0.75.0**, installed as the pinned release binary (`trivy_0.75.0_Linux-64bit.tar.gz` in CI). Its SHA-256 is committed in the repository and verified before use.
+    - The hash is established once during implementation from the official checksums file, with that file's cosign signature verified (D4 approves the downloads).
+    - Only this Linux CI hash is committed. A local macOS Trivy v0.75.0 is verified once against the official checksums during validation (recorded in the Completion Notes). No macOS hash is committed unless the repository itself comes to install or manage the macOS binary. *(Decided 2026-10-03.)*
+    - No `aquasecurity/trivy-action`, no `setup-trivy`, no Docker image tag.
+  - Embedded checks only: `--skip-check-update`, so the checks bundle is the one built into v0.75.0 and is never fetched from `mirror.gcr.io/aquasec/trivy-checks`. No embedded checks-bundle version is recorded or inferred: Trivy v0.75.0 does not report one (`trivy --version` prints only `Version: 0.75.0`). The embedded bundle is fixed by the binary, which is pinned by its version (`0.75.0`) and its committed SHA-256. *(Decision C, 2026-10-03.)*
+  - Always passed: `--disable-telemetry`, `--skip-version-check`, `--misconfig-scanners terraform`, `--cache-dir <fresh dir>`, and JSON output for the gate.
+  - **Fresh cache per scan** *(Decision D, 2026-10-03)*: every scan uses a newly created, empty cache directory outside the repository. With `--skip-check-update`, Trivy would otherwise use a checks bundle already present in its cache; a fresh cache guarantees the embedded checks of the verified binary.
+    - Trivy's expected log line `ERROR … Falling back to embedded checks` is not a failure when the command exits 0 and the JSON output is valid.
+  - **JSON parsing with `jq`** (preinstalled on `ubuntu-latest`). The script checks that `jq` is available before scanning and fails if it is missing. *(Decided 2026-10-03.)*
+  - Forbidden: `.trivyignore` / `.trivyignore.yaml`; `--ignorefile` pointing at any real file; `--ignore-policy`; `--skip-dirs` / `--skip-files` on Terraform paths; `--exit-code 0` on the gate; `--severity` filtering on the gate other than `HIGH,CRITICAL`; secret or vulnerability scanners.
+- **Files/Areas**:
+  - `.github/workflows/security-scan.yml`: new job `trivy-config`, independent of `tflint` (no `needs`); the `tflint` job is unchanged
+  - new `scripts/run_trivy_config.sh`: the single local/CI command
+  - new `security/trivy-risk-acceptance.json`: the committed risk-acceptance record (see Risk acceptance)
+  - new `tests/test_trivy_config.py`
+  - `tests/test_tflint_integration.py`: only its whole-workflow assertions change, to job-scoped ones. Today it asserts the job list is exactly `["tflint"]` and bans strings such as `cache` anywhere in the workflow, which a second job legitimately breaks. All `tflint` job assertions keep their meaning.
+  - `README.md`
+  - **Unchanged**:
+    - `drift-detection.yml` and `terraform-auth-test.yml`
+    - all Terraform files, including `terraform/bootstrap/main.tf` (no code change for AZU-0012)
+    - lock files, `.tflint.hcl`, `scripts/run_tflint.sh`
+    - `src/`, `schemas/`, `pyproject.toml` / `requirements.txt`
+- **Scan scope**: one invocation per Terraform root:
+  - `terraform/environments/dev` with `--tf-vars terraform/environments/dev/dev.tfvars`, which evaluates the `modules/resource-group` and `modules/network` calls with the real values;
+  - `terraform/bootstrap`.
+  
+  Scans run **from the repository root** with these repo-relative paths, so Trivy's JSON `ArtifactName` is exactly `terraform/environments/dev` or `terraform/bootstrap`. Nothing outside `terraform/` is scanned. Module coverage must be proven by mutations (see Validation): passing a scan of a root is not evidence that its modules were evaluated.
+- **Failure policy (D2)**:
+  - HIGH and CRITICAL findings fail the job.
+  - MEDIUM and LOW are printed on every run (full report) but do not block. This severity threshold is an explicit Phase 9 design decision; it differs from TFLint, where warnings fail.
+  - A scanner execution error, a download or hash-verification failure, a wrong Trivy version, or unreadable/unexpected JSON fails the job.
+  - No `continue-on-error`, `|| true` or forced success.
+- **Risk acceptance (D3, script-enforced; not a Trivy ignore)**:
+  - **Record** (`security/trivy-risk-acceptance.json`, committed) for exactly one finding:
+    - rule `AZU-0012` ("storage account network rules default action should be Deny", CRITICAL), matched exactly against the Trivy JSON field `ID`. `AVD-AZU-0012` appears only as a documentation alias/reference; there is no `AVD-` prefix mapping, and Trivy v0.75.0's JSON has no `AVDID` field *(Decision A, 2026-10-03)*;
+    - resource `azurerm_storage_account.tfstate`;
+    - source `terraform/bootstrap/main.tf`;
+    - justification;
+    - scope;
+    - expiry/review date **`2027-03-31`** *(decided 2026-10-03)*. After this date the gate fails until the acceptance is reviewed and renewed, or the risk is fixed, through a reviewed plan change.
+  - **Justification**: the Terraform remote-state account is reached over its public endpoint, authenticated with Entra ID and without account keys in CI (`ARM_USE_AZUREAD`), from GitHub-hosted runners with dynamic IPs. A default-Deny network rule would cut off drift detection and the auth workflow. Restricting network access (allowlist, private endpoint or self-hosted runners) is an architecture change outside Phase 9 that needs an approved Azure apply.
+  - **Scope**: this rule on this resource in this file only. It never covers another rule, resource, file or severity.
+  - **Enforcement by `scripts/run_trivy_config.sh`**: it parses Trivy's JSON and:
+    - fails on any HIGH/CRITICAL finding that does not exactly match the record on all three of: `ID` = `AZU-0012`; `CauseMetadata.Resource` = `azurerm_storage_account.tfstate`; and the repo-relative path derived as `ArtifactName + "/" + Target` = `terraform/bootstrap/main.tf`. This derivation is the locked file-matching rule *(Decision B, 2026-10-03)*;
+    - fails if no current finding matches the record (stale acceptance);
+    - fails if the record matches more than one finding;
+    - fails if today is after the expiry date;
+    - fails if the record is missing, malformed or has more than one entry;
+    - fails if `jq` is missing.
+  - **Never hidden**: the accepted finding is printed on every run, labelled "ACCEPTED RISK", with its justification and expiry.
+  - **No suppression**: no `.trivyignore` and no Trivy suppression flag. Trivy still reports the finding; only the script's gate classifies it.
+- **Acceptance Criteria**:
+  - [ ] **Pinned install**: CI downloads the exact v0.75.0 binary and verifies the committed SHA-256; a mismatch fails before any scan. The script fails unless `trivy --version` is exactly 0.75.0 (locally too), and prints the binary version. In CI it also prints the verified SHA-256. No checks-bundle version is reported.
+  - [ ] **Invocation**: `trivy config` per root as in Scan scope, with every locked flag; no forbidden flag, file or scanner.
+  - [ ] **Gate**: HIGH/CRITICAL findings fail except the single exact AZU-0012 match. All stale, multiple-match, expired and malformed-record cases fail. MEDIUM/LOW are reported and non-blocking. The exit code comes only from these rules, applied to Trivy's own findings.
+  - [ ] **Baseline**: the first real run (v0.75.0, embedded checks) must match the expected baseline in the Design Review. Expected: exactly one HIGH/CRITICAL finding (AZU-0012 on `azurerm_storage_account.tfstate`) and MEDIUM/LOW findings only among AZU-0057/0058/0060/0061 on the same account. Any other HIGH/CRITICAL finding, or a different AZU-0012 match: stop and return to design review (no new acceptance without approval).
+  - [ ] **Workflow job `trivy-config`**:
+    - triggers inherited from `security-scan.yml` (`push`/`pull_request` to `main`, `workflow_dispatch`);
+    - permissions exactly `contents: read`;
+    - checkout with `persist-credentials: false`;
+    - no `GITHUB_TOKEN` (public download);
+    - no `needs` on `tflint`;
+    - not allowed: `azure/login`, `id-token`, `ARM_*`/`TF_VAR_*`/Azure secrets, cache action, SARIF/`security-events`, artifacts, `continue-on-error`.
+  - [ ] **No drift semantics**: no `drift_detected` / `drift_status` outputs, no drift issues or labels, no drift artifacts. The log states "static security scan, not drift detection".
+  - [ ] **Existing workflows protected**: `drift-detection.yml` and `terraform-auth-test.yml` unchanged, verified once with `git diff --exit-code` against the pre-implementation commit. The `tflint` job is unchanged (diff), and `scripts/run_tflint.sh` still passes.
+  - [ ] **README**: documents:
+    - the local command;
+    - the pinned version, hash and upgrade procedure (one reviewed change updates the version, the hash, the tests and the README);
+    - the failure policy;
+    - the AZU-0012 risk acceptance (justification, scope, expiry, how it is enforced and reviewed);
+    - that no Azure access is needed.
 - **Validation**:
-  - [ ] To be defined in the Task 9.2 design review. The original `tfsec terraform/` command is not sufficient (see Design Review findings).
-- **Design Review findings (2026-10-03, Phase 9 re-evaluation; scanner choice intentionally left open)**:
-  - **tfsec is deprecated**: v1.28.14 (latest release, 2025-05-02) prints "tfsec is joining the Trivy family… engineering attention will be directed at Trivy".
-  - **False pass with the current AzureRM schema**: on a scratch copy of `terraform/bootstrap`, `https_traffic_only_enabled = false` (the AzureRM v4/v5 attribute name) produced no finding, and `azure-storage-enforce-https` reported passed. Setting `min_tls_version = "TLS1_0"` was detected.
-  - **Coverage of the planned command**: `tfsec terraform/` processed one module (`terraform/bootstrap`: 5 files, 3 checks). `terraform/environments/dev` evaluated no checks without `--tfvars-file dev.tfvars`; with it, 2 network checks ran. Current baseline: 0 findings.
-  - **Severity handling** is incomplete: only High/Critical is specified.
-  - **Version pin and installation method** are missing.
-  - The March 2026 Trivy ecosystem supply-chain compromise (`trivy-action` / `setup-trivy` tags force-pushed to a credential stealer) is an input to the pinning and installation decision if Trivy is considered.
+  - [ ] Static pytest (`tests/test_trivy_config.py`), checking:
+    - version, hash and flag pins;
+    - no forbidden flags, files or scanners;
+    - job permissions, triggers and absence of Azure/OIDC/drift elements;
+    - the acceptance record schema (exactly one entry, rule `AZU-0012`, resource `azurerm_storage_account.tfstate`, file `terraform/bootstrap/main.tf`, expiry `2027-03-31`);
+    - the path derivation `ArtifactName + "/" + Target`, and scans run from the repository root;
+    - a fresh cache directory per scan;
+    - the script's gate logic, on synthetic Trivy JSON: an exact accepted match passes; plus failure cases for an unexpected HIGH, an unexpected CRITICAL, a stale record, a double match, an expired record, a malformed record, and malformed/missing JSON; and MEDIUM/LOW only passing.
+    
+    `tests/test_tflint_integration.py` still passes with job-scoped assertions.
+  - [ ] Local real run with the pinned v0.75.0 binary (hash verified) matches the expected baseline, with the accepted finding printed.
+  - [ ] Mutation checks on **scratchpad copies only**. Each must fail with a non-zero exit except the control:
+    - `https_traffic_only_enabled = false` (the AzureRM v4/v5 name) on the bootstrap account;
+    - `min_tls_version = "TLS1_0"`;
+    - `container_access_type = "blob"`;
+    - an inbound NSG rule from `0.0.0.0/0` (e.g. port 22) inside `modules/network`, proving module coverage through dev's tfvars;
+    - a HIGH/CRITICAL finding in `modules/resource-group` or on a dev resource, if a check exists for it (otherwise record that none applies);
+    - a tampered SHA-256;
+    - a wrong local Trivy version;
+    - an expired acceptance;
+    - a stale acceptance (the finding removed in the scratch copy);
+    - a widened acceptance (matching a second resource);
+    - `jq` missing from `PATH`;
+    - a no-op control, which must pass with the accepted finding printed.
+  - [ ] CI proof (D6, approval-gated, same pattern as Task 9.1):
+    - a green `main` push run whose `trivy-config` log shows the AZU-0012 finding printed as accepted and the job passing;
+    - a draft PR with one deliberate unexpected HIGH/CRITICAL finding (planned: an open inbound NSG rule in `modules/network`) whose `trivy-config` job fails on that finding while AZU-0012 is still shown as accepted;
+    - no Azure/OIDC step in `security-scan.yml`; the PR closed unmerged and its branch deleted.
+    
+    The approval must acknowledge that these events also trigger the existing `terraform-auth-test.yml` (an Azure plan on push; the Azure login fails on a PR).
+- **Design Review (2026-10-03)**:
+  - **Scanner choice (D1: Trivy)**:
+    - **tfsec rejected**: deprecated (v1.28.14, 2025-05-02, "joining the Trivy family"). False pass shown: `https_traffic_only_enabled = false` reported `azure-storage-enforce-https` as passed. `tfsec terraform/` scanned only bootstrap; dev needs `--tfvars-file`.
+    - **Checkov rejected**: `CKV_AZURE_3` (3.3.21) reads only `enable_https_traffic_only`, with `missing_block_result=PASSED`, so it has the same false pass. Severities come from Prisma Cloud (`--skip-download` "will omit … severities"), so the High/Critical gate would need a third-party account and key.
+    - **Trivy chosen**: actively maintained (v0.75.0, 2026-10-01). Its v0.75.0 storage adapter reads `enable_https_traffic_only` *or* `https_traffic_only_enabled` (the v4+ name). Built-in severities.
+      - Known v5 gap: the adapter reads only `public_network_access_enabled` (AzureRM v5 uses `public_network_access`). No current storage check uses that value, so there is no false result today. Re-check on version bumps.
+  - **Supply chain**: in March 2026 Trivy binary v0.69.4 (and Docker images v0.69.5/0.69.6), `trivy-action` <0.35.0 (76 of 77 tags force-pushed) and `setup-trivy` <0.2.6 were replaced with credential-stealing code for hours (advisory GHSA-69fq-xp46-6x23). The vendor recommends pinning actions by full commit SHA and verifying signatures; Homebrew built from source and was unaffected.
+    - Hence: no Trivy action and no mutable image tag; a pinned binary verified against a committed SHA-256; a credential-free job (`contents: read`, no token).
+  - **Checks bundle**: by default Trivy pulls its checks from `mirror.gcr.io/aquasec/trivy-checks:1` every 24 h, which would change findings without a version bump. `--skip-check-update` uses the bundle embedded in the release. Telemetry is on by default, hence `--disable-telemetry` and `--skip-version-check`.
+  - **Expected baseline** (from the check definitions; to be confirmed by the first real run): on `azurerm_storage_account.tfstate`:
+    - AZU-0012 CRITICAL (no `network_rules` block);
+    - AZU-0057 MEDIUM (logging);
+    - AZU-0060 MEDIUM (customer-managed key);
+    - AZU-0061 MEDIUM (infrastructure encryption; enabling it forces replacement of the state account);
+    - AZU-0058 LOW (geo-redundant replication).
+    
+    Expected to pass: HTTPS (AZU-0008), TLS, container public access (AZU-0007) and the network checks on dev.
+  - **Overlap**: TFLint checks value validity and lint; Trivy checks security policy. Trivy's secret scanning stays off (TruffleHog, Task 9.3). Task 9.4 must exclude Super-Linter's bundled Trivy and Checkov.
+- **Out of Scope**:
+  - fixing AZU-0012 or the MEDIUM/LOW findings (they need Azure architecture or apply decisions, Phase 11/12)
+  - SARIF/code scanning, caching, secret and vulnerability scanning
+  - pinning other actions by SHA (Phase 12)
+  - any Azure access or change to the drift-detection or auth workflows
 - **Implementation Notes**:
-  - Runs on code changes (push/PR) in `security-scan.yml`. It is not part of the deterministic drift-detection execution path and never gates or runs inside the scheduled drift-detection workflow. *(Reworded 2026-10-03; previously "Security scanning prior to plan/apply".)*
+  - Runs on code changes (push/PR) in `security-scan.yml`. It is not part of the deterministic drift-detection path and never gates or runs inside the scheduled drift-detection workflow.
+  - **Stop rule (preserved)**: if Trivy v0.75.0's JSON does not expose sufficient stable fields (rule ID, resource address, source file) to enforce the exact-match acceptance safely, stop and report. Do not change the design or improvise the match rule.
+  - **Resolved 2026-10-03 (decisions A–D)**: the first real v0.75.0 JSON exposes `ID`, `Severity`, `Status`, `CauseMetadata.Resource`, `ArtifactName` and `Target`. Matching uses `ID` (A) and `ArtifactName + "/" + Target` (B). No checks-bundle version is reported (C), and the fresh cache is required (D).
+    - The first real baseline matched the expected one: dev 60 passed / 0 failed; bootstrap 46 passed plus 5 failures, all on `azurerm_storage_account.tfstate` (AZU-0012 CRITICAL; AZU-0057, AZU-0060, AZU-0061 MEDIUM; AZU-0058 LOW).
+    - Verified 2026-10-03: the official checksums file's cosign signature (cosign v3.1.3, identity `https://github.com/aquasecurity/trivy/.github/workflows/…`), and the Linux SHA-256 `c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f`.
 - **Completion Notes**:
   - None.
 
