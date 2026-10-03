@@ -85,3 +85,9 @@ variable "extra_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "ci_proof_unused" {
+  description = "Task 9.1 CI proof only: deliberately unused (never merged)."
+  type        = string
+  default     = "ci-proof"
+}
