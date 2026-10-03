@@ -35,8 +35,12 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, JsonValue
 
-from ai_engine.nodes.common import Strict
+from ai_engine.evidence import SECTIONS
+from ai_engine.nodes.common import CitedPath, Strict
+from ai_engine.nodes.cost_analysis import ConfigTopic
 from ai_engine.nodes.remediation import RemediationPlan
+from ai_engine.nodes.root_cause import Channel, Hypothesis, RiskKind
+from ai_engine.nodes.security_analysis import Exposure, Impact
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
@@ -111,22 +115,136 @@ class ResourceEntry(Strict):
     changes: list[ChangeEntry]
 
 
-class AnalysisSection(Strict):
+# Validated findings as they appear in the report (Task 6.7). Strict and extra="forbid": a finding carries exactly
+# the model's inference fields plus the deterministic fields the code attached, so no AI output can add a field
+# that claims deterministic authority (classification, severity rating, actor, remediation, price, ...).
+Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+Origin = Literal["outside_terraform", "outside_terraform_converged", "configuration_side", "both_sides",
+                 "value_unknown_until_apply", "undetermined"]
+Factor = Literal["apply_reverts_external_change", "apply_destroys_or_recreates", "ambiguous_intent",
+                 "unmanaged_setting", "value_unknown_until_apply", "redacted_unreadable", "moved_or_importing"]
+Address = Annotated[str, Field(min_length=1, max_length=512)]
+Explanation = Annotated[str, Field(min_length=1, max_length=1500)]
+
+
+class SecurityReportFinding(Strict):
+    address: Address
+    cited_paths: Annotated[list[CitedPath], Field(min_length=1)]
+    exposure: Exposure
+    deterministic_severity: Severity
+    ai_assessed_impact: Impact
+    ai_impact_below_deterministic: bool
+    explanation: Explanation
+    basis: Literal["inference"]
+
+
+class CostReportFinding(Strict):
+    address: Address
+    cited_paths: Annotated[list[CitedPath], Field(min_length=1)]
+    cost_driver: Literal["sku_or_tier", "capacity_or_count", "resource_lifecycle", "other"]
+    direction: Literal["likely_increase", "likely_decrease", "likely_neutral", "undetermined"]
+    monetary_impact: Literal["not_determinable_from_evidence"]
+    pricing_source: None
+    deterministic_severity: Severity
+    classification: str
+    action: str | None
+    explanation: Explanation
+    basis: Literal["inference"]
+
+
+class ConfigurationFact(Strict):
+    path: Annotated[list[str], Field(min_length=1)]
+    class_: str | None = Field(alias="class")
+    assessment: str
+
+    model_config = Strict.model_config | {"validate_by_name": True, "validate_by_alias": True,
+                                          "serialize_by_alias": True}
+
+
+class ConfigurationReportFinding(Strict):
+    address: Address
+    cited_paths: Annotated[list[CitedPath], Field(min_length=1)]
+    topic: ConfigTopic
+    evidence_facts: list[ConfigurationFact]
+    topic_conflicts_with_evidence: bool
+    deterministic_severity: Severity
+    explanation: Explanation
+    basis: Literal["inference"]
+
+
+class OriginFact(Strict):
+    path: Annotated[list[str], Field(min_length=1)]
+    origin: Origin
+    lifecycle: bool
+    risk_factors: list[Factor]
+
+
+class RootCauseReportFinding(Strict):
+    address: Address
+    cited_paths: Annotated[list[CitedPath], Field(min_length=1)]
+    hypothesis: Hypothesis
+    possible_channels: Annotated[list[Channel], Field(min_length=1)]
+    actor: Literal["unknown"]
+    confirmed: Literal[False]
+    confirmation_requires: Literal["activity_log"]
+    origin_facts: list[OriginFact]
+    deterministic_severity: Severity
+    explanation: Explanation
+    basis: Literal["inference"]
+
+
+class RiskReportFinding(Strict):
+    address: Address
+    cited_paths: Annotated[list[CitedPath], Field(min_length=1)]
+    risk_kind: RiskKind
+    risk_kind_unverified: bool
+    risk_factors: list[Factor]
+    deterministic_severity: Severity
+    explanation: Explanation
+    basis: Literal["inference"]
+
+
+class _SectionBase(Strict):
     status: Status
     reason: str | None
-    findings: list[dict[str, JsonValue]]
-    rejected_count: int
+    rejected_count: Annotated[int, Field(ge=0)]
     rejection_reasons: dict[str, int]
     summary: str | None
     basis: Literal["inference"]
 
 
+class SecuritySection(_SectionBase):
+    findings: list[SecurityReportFinding]
+
+
+class CostReportSection(_SectionBase):
+    findings: list[CostReportFinding]
+
+
+class ConfigurationReportSection(_SectionBase):
+    findings: list[ConfigurationReportFinding]
+
+
+class RootCauseReportSection(_SectionBase):
+    findings: list[RootCauseReportFinding]
+
+
+class RiskReportSection(_SectionBase):
+    findings: list[RiskReportFinding]
+
+
 class Analysis(Strict):
-    security: AnalysisSection
-    cost: AnalysisSection
-    configuration: AnalysisSection
-    root_cause: AnalysisSection
-    risk: AnalysisSection
+    security: SecuritySection
+    cost: CostReportSection
+    configuration: ConfigurationReportSection
+    root_cause: RootCauseReportSection
+    risk: RiskReportSection
+
+
+class EvidenceKey(Strict):
+    address: Address
+    path: Annotated[list[str], Field(min_length=1)]
+    sections: Annotated[list[Literal[SECTIONS]], Field(min_length=1)]
 
 
 class LlmInfo(Strict):
@@ -136,6 +254,7 @@ class LlmInfo(Strict):
     provider: str | None
     model: str | None
     max_retries: int | None
+    evidence_sent: list[EvidenceKey]  # exactly what the model was given (keys and sections, never values)
 
 
 class Attribution(Strict):
@@ -229,7 +348,8 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
         "remediation": state["remediation_plan"],
         "attribution": {"actor": "unknown", "confirmed": False, "pending": "phase_7_activity_log"},
         "cost": {"monetary_impact": "not_determinable_from_evidence", "pricing_source": None},
-        "llm": {key: call.get(key) for key in ("attempted", "status", "reason", "provider", "model", "max_retries")},
+        "llm": {key: call.get(key) for key in ("attempted", "status", "reason", "provider", "model", "max_retries")}
+        | {"evidence_sent": list(call.get("evidence_sent") or [])},
         "limitations": limitations,
     }
     return AiAnalysisReport.model_validate_json(json.dumps(report)).model_dump(mode="json")

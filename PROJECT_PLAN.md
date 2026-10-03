@@ -124,9 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 6 — LangGraph AI Analysis Engine
-- **Current Active Task**: Task 6.7 — Evidence vs Inference Validation & Unit Testing
-- **Phases Completed**: 5 of 14
+- **Current Active Phase**: Phase 7 — Azure Activity Log Investigation
+- **Current Active Task**: Task 7.1 — Azure Activity Log API Integration
+- **Phases Completed**: 6 of 14
 
 ---
 
@@ -1534,7 +1534,7 @@ The dedicated infrastructure expansion anticipated by the Phase 1 scope note: ad
   - **Lesson for later phases**: creating a subnet and its NSG association in one apply leaves computed attributes stale in state until a refresh is persisted; the engine reports that as `converged_drift`. After applies that add associated network resources, run a reviewed `apply -refresh-only` (or expect one converged-drift scan).
 
 ### PHASE 6 — LangGraph AI Analysis Engine
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI-compatible models to analyze detected drift, evaluate security and cost implications, and recommend remediation steps based on strict empirical evidence.
 
@@ -1747,19 +1747,39 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
   - **Limitations**: (a) the var file is not in the evidence, so commands carry the placeholder `<var_file>`; (b) fragments never locate the value (resource block, module input or tfvars) and cover only "keep the Azure value" — removing a key (`value_absent`) has no fragment; (c) Markdown safety is tested against GFM-style rules by a line-aware checker, not a full Markdown renderer; (d) no CLI or workflow integration yet (later task); (e) the report is not written anywhere automatically.
 
 #### Task 6.7 — Evidence vs Inference Validation & Unit Testing
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-03
+- **Completed**: 2026-10-03
 - **Objective**: Create automated evaluation test suite to verify that LLM outputs never invent non-existent resource attributes or false attributions.
 - **Dependencies**: Task 6.6
-- **Files/Areas**: `tests/test_ai_engine.py`
+- **Files/Areas**: `tests/test_ai_engine.py`; plus (approved design) `src/ai_engine/nodes/common.py`, `src/ai_engine/nodes/analyze_drift.py`, `src/ai_engine/nodes/security_analysis.py`, `src/ai_engine/nodes/report_generator.py`, `src/ai_engine/graph.py`, new `src/ai_engine/verify.py`, `tests/corpora/`, `tests/mutation/`, `scripts/run_mutation_checks.py`, tests
 - **Acceptance Criteria**:
-  - [ ] Unit tests for all individual nodes.
-  - [ ] Assertion tests checking that all cited attributes exist in `drift_report.json`.
+  - [x] Unit tests for all individual nodes.
+  - [x] Assertion tests checking that all cited attributes exist in `drift_report.json`.
 - **Validation**:
-  - [ ] `pytest tests/test_ai_engine.py` passes.
+  - [x] `pytest tests/test_ai_engine.py` passes.
 - **Implementation Notes**:
   - AI reliability guardrails.
+  - **Approved scope (Task 6.7 design review, 2026-10-03)** — cross-cutting hardening/validation of the Phase 6 engine; no new feature, no new LLM call or section, no prompt change unless strictly required:
+    - Harden the attribution, remediation and cost guards: `Cf` (format) characters and mixed-script words are detected **on the original text** and rejected as `suspicious_text`; matching then runs on a separately normalized copy (HTML-unescape, NFKC, `Cf` removal, lookalike folding, `[at]`/`[dot]` folding, spaced-letter collapsing) **and** on the original. Broadened patterns; targeted false-positive fixes only (no rule weakened); tradeoffs documented and asserted in the corpus.
+    - Protect state: `llm` write-once; `inferences` write-once per section key (frozen). Reject duplicate JSON keys in model replies.
+    - Record `llm_call.evidence_sent` (address, path, sections only — no values) and keep it in the final report.
+    - Strict per-section report finding models (`extra="forbid"`), so AI output cannot introduce deterministic-authority fields.
+    - Deterministic `verify_report(report_json, drift_report_json)` that validates the final report against the drift report **independently** (its own checks from the report contract, not a re-run of the report path).
+    - Data-driven guard and prompt-injection corpora; injection tests require deterministic state and remediation unchanged and unsafe AI findings rejected (not byte-identical AI sections).
+    - Committed, opt-in mutation harness (`scripts/run_mutation_checks.py` + `tests/mutation/mutants.json`) with a cheap staleness check in the default suite; no CI change.
+    - Close the identified uncovered paths (failed-report Markdown, atomic-write cleanup, client-construction failure, missing `openai`, non-JSON HCL, frozen-list copies, non-object writes).
+  - **Phase 7 boundary**: no Activity Log, `caller_identity` or attribution confirmation; `actor` stays `unknown` and `confirmed` false, enforced by `verify_report`.
 - **Completion Notes**:
-  - None.
+  - **Files**: new `src/ai_engine/verify.py`, `tests/test_ai_engine.py`, `tests/test_mutation_corpus.py`, `tests/corpora/{guards,injection}.json`, `tests/mutation/mutants.json`, `scripts/run_mutation_checks.py`; changed `nodes/common.py` (guards), `graph.py` (state), `nodes/analyze_drift.py` (strict JSON, `evidence_sent`), `nodes/security_analysis.py` (strict JSON), `nodes/report_generator.py` (strict finding models, `evidence_sent`), one Task 6.4 test (`llm_call` record now has `evidence_sent`). No prompt, LLM-call, `drift_engine`, Terraform, Azure, workflow or README change.
+  - **Guards**: `suspicious_text` (format characters or Latin mixed with a lookalike script inside a word) decided on the **original** text; matching then runs on the original **and** a normalized copy (HTML-unescape ×3, NFKC, `Cf`/`Mn` removed, Cyrillic/Greek lookalikes folded, `[at]`/`[dot]` folded, spaced letters collapsed), so normalization only adds detections. Broadened: bare/flagged/written Terraform commands, `az …`, `*-Az…` cmdlets, sentence-initial imperatives, "set … back", advice phrasing, passive "should be restored"; actor statements, "per the Activity Log", more actor nouns/verbs, `changed-by:` separators; "bucks", price multiples. Targeted false-positive fixes only: passive auxiliaries ("a managed identity *was* added") and "save(s) N <count noun>"; no existing rule weakened (all earlier guard tests unchanged). A dead lookahead found by the mutation harness was removed.
+  - **State / parsing**: `llm` write-once; `inferences` write-once per key and frozen (new keys may still be added); duplicate JSON keys (any depth) and NaN rejected in the envelope and the standalone security parser.
+  - **Evidence chain**: `llm_call.evidence_sent` = exactly the (address, path, sections) the model was given (empty without a call), copied to `report.llm.evidence_sent`; strict per-section report finding models (`extra="forbid"`, constants for actor/confirmed/monetary impact).
+  - **`verify_report(report_json, drift_report_json)`**: independent checks from the drift report's contract fields with its own restated rules (origin table, risk factors, routing eligibility, hypothesis table) — provenance, summary, every resource/change/origin/factor, `evidence_sent` existence and eligibility, section status/applicability, section-scoped citations, every code-attached finding field, guards re-run on all AI text, and remediation (scope, one `plan_default` per resource matching the plan action, destructive/data/human flags, readable-value fragments with escaped interpolation, catalogue-exact commands, dangerous commands rejected even if the catalogue regressed). `verify_markdown` checks the Markdown is the rendering of the JSON; a template-skeleton test proves the Markdown carries no word absent from the JSON or the renderer's template text.
+  - **Tests** (session-scratchpad venv; fake models / local `httpx.MockTransport`; network guard active): `test_ai_engine.py` **603 passed** — guard corpus (**139 cases**, each through the guards and end-to-end as an explanation and a summary; 4 documented tradeoffs asserted as-is), independent rule tables agree with the nodes on all 41 fixtures, redaction fail-closed corpus, **injection corpus 12 values × 3 placements** (value stays escaped data inside one delimiter; deterministic state/remediation unchanged vs. a no-LLM run; unrelated citations always and unsafe echoes rejected; `verify_report` and `verify_markdown` pass), duplicate keys, truncation at ~60 structural boundaries, framing variants, list content, oversized sections, **`verify_report` + determinism matrix on 41 fixtures × 4 LLM modes**, **54 tampered-report cases** (plus isolating tests for failed reports, noise evidence, unreadable fragments, no-call `evidence_sent` and a regressed catalogue) each detected, different-drift-report and Markdown tampering, write-once `llm`/`inferences`/`llm_call`, one HTTP attempt by default with `evidence_sent` == what the model saw, and the previously uncovered paths (failed-report Markdown, atomic-write cleanup, client-construction failure, missing `openai`, non-JSON HCL, frozen-list copies, non-object writes, duplicate routes, cost-section rejections). `test_mutation_corpus.py` 3 passed (154 mutants still apply). Earlier AI suites unchanged: 76 + 47 + 82 + 92 + 123 + 104.
+  - **Mutation harness**: `python scripts/run_mutation_checks.py` (opt-in, copies of `src/`+`tests/`, verifies the copy is imported and the baseline passes) — **154 / 154 caught** (93 earlier + 61 for 6.7; first runs found 6 + 2 survivors, each fixed by an isolating test or by removing dead code).
+  - **Totals**: full suite **1460 passed** (821 subtests); `drift_engine` gate 99.87%; `ai_engine` 99% with **0 missed lines** (3 partial branches: an unreachable section fall-through, the atomic-write "temp already gone" branch, package `__init__`); `unittest discover` OK; core-only: no LLM packages, 802 passed / 658 skipped.
+  - **Known gaps / tradeoffs**: (a) a plain person's name doing something ("alice did this") is not detectable without NER — mitigated by schema constants, the fixed attribution block and "AI inference" labelling; (b) conservative rejections: a sentence starting "Set …", emoji ZWJ sequences, any `Cf` character; gerund advice ("Restoring … is the way forward") passes; (c) guards are pattern-based — evasion beyond the corpus is possible, but evasions only affect inference text, never deterministic state, remediation or execution; (d) `verify_report` re-uses the shared guard code, the HCL renderer's output contract and the command catalogue (data), while deterministic facts are checked independently; (e) the mutation harness is opt-in (minutes), not in CI.
 
 ---
 

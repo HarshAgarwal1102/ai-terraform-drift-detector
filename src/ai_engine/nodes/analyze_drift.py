@@ -53,7 +53,7 @@ from pydantic import BaseModel, ValidationError
 
 from ai_engine.evidence import EVIDENCE_TAG, SECTIONS, EvidenceLimits, build_llm_evidence, render_evidence
 from ai_engine.llm import invoke_llm
-from ai_engine.nodes.common import free_text_violation
+from ai_engine.nodes.common import free_text_violation, strict_json_loads
 from ai_engine.nodes.cost_analysis import (
     ConfigurationSection,
     CostSection,
@@ -170,19 +170,15 @@ def build_messages(evidence: Mapping[str, Any]) -> list[Any]:
     return [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=human)]
 
 
-def _reject_constant(name: str) -> None:
-    raise ValueError(name)
-
-
 def parse_envelope(text: str) -> dict[str, Any]:
     body = (text or "").strip()
     fenced = _FENCE.match(body)
     if fenced:
         body = fenced.group("body").strip()
     try:
-        data = json.loads(body, parse_constant=_reject_constant)
+        data = strict_json_loads(body)  # duplicate keys and NaN / Infinity are rejected
     except ValueError:
-        raise InvalidEnvelope("reply is not a JSON object") from None
+        raise InvalidEnvelope("reply is not strict JSON (malformed, duplicate key or NaN)") from None
     if not isinstance(data, dict) or set(data) != set(OUTPUT_KEYS.values()):
         raise InvalidEnvelope("reply must be one JSON object with exactly the keys "
                               + ", ".join(sorted(OUTPUT_KEYS.values())))
@@ -227,9 +223,14 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
             return update
 
         def call_record(attempted: bool, outcome: str, reason: str | None, evidence: dict | None) -> dict[str, Any]:
+            # evidence_sent (Task 6.7): what the model was actually given (keys and sections, never values); empty
+            # unless a call was made. The final report keeps it so citations can be verified independently.
+            sent = [{"address": r["address"], "path": list(c["path"]),
+                     "sections": [s for s in SECTIONS if s in c["sections"]]}
+                    for r in evidence["resources"] for c in r["changes"]] if attempted and evidence else []
             return {"attempted": attempted, "status": outcome, "reason": reason, "provider": status.get("provider"),
                     "model": status.get("model"), "max_retries": max_retries,
-                    "truncation": evidence["truncation"] if evidence else None}
+                    "truncation": evidence["truncation"] if evidence else None, "evidence_sent": sent}
 
         def skip_all(reason: str) -> dict[str, Any]:
             results = {s: record(s, "skipped", reason if routes[s] else NO_ROUTES[s]) for s in SECTIONS}

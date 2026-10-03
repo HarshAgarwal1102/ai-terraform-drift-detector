@@ -41,7 +41,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, ValidationError
 
 from ai_engine.evidence import cited_keys, severity_rank
-from ai_engine.nodes.common import CitedPath, Strict, free_text_violation
+from ai_engine.nodes.common import CitedPath, Strict, free_text_violation, strict_json_loads
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,10 @@ def parse_model_output(text: str) -> AiSecurityOutput:
     fenced = _FENCE.match(body)
     if fenced:
         body = fenced.group("body").strip()
+    try:
+        strict_json_loads(body)  # rejects duplicate keys before schema validation
+    except ValueError:
+        raise InvalidModelOutput("reply is not strict JSON (malformed, duplicate key or NaN)") from None
     try:
         return AiSecurityOutput.model_validate_json(body)
     except ValidationError as exc:

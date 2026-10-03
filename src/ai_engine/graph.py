@@ -27,8 +27,10 @@
 - `llm_call` records the run's single LLM call: attempted or not, status,
   provider/model, configured `max_retries`, evidence truncation. Write-once.
 - `inferences` holds model-generated interpretation keyed by the node that
-  produced it. Nothing in it is evidence.
-- `llm` records whether an LLM was usable for this run, and why not.
+  produced it. Nothing in it is evidence. Each key is written once and frozen
+  (Task 6.7): no later node can overwrite or edit a section result.
+- `llm` records whether an LLM was usable for this run, and why not. Write-once
+  (Task 6.7).
 - `warnings` collects non-fatal problems such as an unreachable endpoint.
 
 The graph runs START -> `initialize` -> `parse_drift` -> `classify_drift` ->
@@ -150,11 +152,21 @@ write_once_llm_call = _write_once("llm_call")
 write_once_origin_facts = _write_once("origin_facts")
 write_once_remediation_plan = _write_once("remediation_plan")
 write_once_report = _write_once("report")
+write_once_llm = _write_once("llm")
 
 
-def merge_dicts(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any]:
-    """Reducer for `inferences`: each node adds its own key."""
-    return {**(left or {}), **(right or {})}
+def merge_once(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> FrozenDict:
+    """Reducer for `inferences`: each node adds its own keys; a key already written can never be replaced."""
+    left, right = left or {}, right or {}
+    if not isinstance(right, Mapping):
+        raise TypeError("inferences must be a JSON object")
+    clash = sorted(set(left) & set(right))
+    if clash:
+        raise EvidenceMutationError(f"inferences already written for {clash}; AI results are write-once")
+    return freeze_evidence({**left, **right})
+
+
+merge_dicts = merge_once  # Task 6.1 name, kept for imports
 
 
 class LlmStatus(TypedDict):
@@ -174,8 +186,8 @@ class AiState(TypedDict, total=False):
     remediation_plan: Annotated[dict[str, Any], write_once_remediation_plan]
     report: Annotated[dict[str, Any], write_once_report]
     llm_call: Annotated[dict[str, Any], write_once_llm_call]
-    llm: LlmStatus
-    inferences: Annotated[dict[str, Any], merge_dicts]
+    llm: Annotated[LlmStatus, write_once_llm]
+    inferences: Annotated[dict[str, Any], merge_once]
     warnings: Annotated[list[str], operator.add]
 
 

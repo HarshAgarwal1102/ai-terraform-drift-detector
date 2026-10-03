@@ -473,7 +473,7 @@ def test_no_routes_at_all_is_recorded_as_such():
     update = analyze(prepared(real_report("in_sync")), ScriptedLLM(envelope()))
     assert update["llm_call"] == {"attempted": False, "status": "not_attempted", "reason": "no relevant changes",
                                   "provider": "fake", "model": "fake-model", "max_retries": None,
-                                  "truncation": None}
+                                  "truncation": None, "evidence_sent": []}
 
 
 def test_unavailable_llm_skips_all_without_call():

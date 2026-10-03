@@ -1,0 +1,939 @@
+{
+  "version": 1,
+  "description": "Safeguard mutants (Tasks 6.3-6.7). Each replaces `old` (must occur exactly once in `file`) with `new`; the AI test suite must then fail. Run: python scripts/run_mutation_checks.py",
+  "tests": [
+    "tests/test_ai_config.py",
+    "tests/test_ai_parse_drift.py",
+    "tests/test_ai_security.py",
+    "tests/test_ai_cost_config.py",
+    "tests/test_ai_root_cause.py",
+    "tests/test_ai_report.py",
+    "tests/test_ai_engine.py"
+  ],
+  "mutants": [
+    {
+      "id": "no-integrity-check",
+      "file": "src/ai_engine/evidence.py",
+      "old": "    if has_value and (change[\"redacted\"] or \"redacted\" in statuses):",
+      "new": "    if False:"
+    },
+    {
+      "id": "no-delimiter-escaping",
+      "file": "src/ai_engine/evidence.py",
+      "old": "return text.replace(\"<\", \"\\\\u003c\").replace(\">\", \"\\\\u003e\")",
+      "new": "return text"
+    },
+    {
+      "id": "change-level-allowlist-leak",
+      "file": "src/ai_engine/evidence.py",
+      "old": "        entry[\"assessment\"] = change[\"assessment\"][\"category\"]",
+      "new": "        entry[\"assessment\"] = change[\"assessment\"][\"category\"]; entry[\"provider\"] = resource[\"provider_name\"]"
+    },
+    {
+      "id": "resource-level-allowlist-leak",
+      "file": "src/ai_engine/evidence.py",
+      "old": "        item[\"notes\"] = list(resource[\"notes\"])",
+      "new": "        item[\"notes\"] = list(resource[\"notes\"]); item[\"provider_name\"] = resource[\"provider_name\"]"
+    },
+    {
+      "id": "weak-security-citation",
+      "file": "src/ai_engine/nodes/security_analysis.py",
+      "old": "        if not all(key in known for key in keys):",
+      "new": "        if not any(key in known for key in keys):"
+    },
+    {
+      "id": "ai-replaces-severity",
+      "file": "src/ai_engine/nodes/security_analysis.py",
+      "old": "            \"deterministic_severity\": deterministic,",
+      "new": "            \"deterministic_severity\": finding.ai_assessed_impact,"
+    },
+    {
+      "id": "routes-low-to-security",
+      "file": "src/ai_engine/nodes/security_analysis.py",
+      "old": "    if severity[\"level\"] in ROUTED_LEVELS:",
+      "new": "    if severity[\"level\"] in ROUTED_LEVELS + (\"LOW\",):"
+    },
+    {
+      "id": "basis-not-enforced",
+      "file": "src/ai_engine/nodes/security_analysis.py",
+      "old": "    basis: Literal[\"inference\"]",
+      "new": "    basis: str"
+    },
+    {
+      "id": "ignores-llm-status",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "        if llm is None or not status.get(\"available\"):",
+      "new": "        if llm is None:"
+    },
+    {
+      "id": "two-calls",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "        call = invoke_llm(llm, build_messages(evidence))",
+      "new": "        invoke_llm(llm, build_messages(evidence)); call = invoke_llm(llm, build_messages(evidence))"
+    },
+    {
+      "id": "raw-reply-kept",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "record(s, \"invalid_output\", str(exc), evidence=section_evidence(s))",
+      "new": "record(s, \"invalid_output\", str(exc), evidence=section_evidence(s), summary=call.content)"
+    },
+    {
+      "id": "call-without-routes",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "        if not any(routes.values()):",
+      "new": "        if False:"
+    },
+    {
+      "id": "call-on-empty-evidence",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "        if not any(applicable.values()):",
+      "new": "        if False:"
+    },
+    {
+      "id": "retries-default-2",
+      "file": "src/ai_engine/config.py",
+      "old": "DEFAULT_MAX_RETRIES = 0 ",
+      "new": "DEFAULT_MAX_RETRIES = 2 "
+    },
+    {
+      "id": "retries-not-recorded",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "                \"max_retries\": max_retries, \"findings\"",
+      "new": "                \"max_retries\": None, \"findings\""
+    },
+    {
+      "id": "http-client-ignored",
+      "file": "src/ai_engine/config.py",
+      "old": "        common[\"http_client\"] = http_client",
+      "new": "        pass"
+    },
+    {
+      "id": "security-targets-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    security_targets: Annotated[dict[str, Any], write_once_security_targets]",
+      "new": "    security_targets: dict[str, Any]"
+    },
+    {
+      "id": "cost-targets-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    cost_targets: Annotated[dict[str, Any], write_once_cost_targets]",
+      "new": "    cost_targets: dict[str, Any]"
+    },
+    {
+      "id": "config-targets-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    config_targets: Annotated[dict[str, Any], write_once_config_targets]",
+      "new": "    config_targets: dict[str, Any]"
+    },
+    {
+      "id": "llm-call-not-frozen",
+      "file": "src/ai_engine/graph.py",
+      "old": "    llm_call: Annotated[dict[str, Any], write_once_llm_call]",
+      "new": "    llm_call: dict[str, Any]"
+    },
+    {
+      "id": "no-dedupe",
+      "file": "src/ai_engine/evidence.py",
+      "old": "        sections = merged.setdefault((route[\"address\"], tuple(route[\"path\"])), {})",
+      "new": "        sections = merged.setdefault((route[\"address\"], tuple(route[\"path\"]), len(merged)), {})"
+    },
+    {
+      "id": "cross-section-citation",
+      "file": "src/ai_engine/evidence.py",
+      "old": "            if section is None or section in c[\"sections\"]}",
+      "new": "            }"
+    },
+    {
+      "id": "no-cost-guard",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    return _matches(_COST_CLAIM, _COST_CLAIM_EXTRA, text)",
+      "new": "    return False"
+    },
+    {
+      "id": "monetary-impact-relaxed",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "    monetary_impact: Literal[\"not_determinable_from_evidence\"]",
+      "new": "    monetary_impact: str"
+    },
+    {
+      "id": "non-applicable-accepted",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "            if not applicable[section]:",
+      "new": "            if False:"
+    },
+    {
+      "id": "envelope-keys-unchecked",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "    if not isinstance(data, dict) or set(data) != set(OUTPUT_KEYS.values()):",
+      "new": "    if not isinstance(data, dict):"
+    },
+    {
+      "id": "one-bad-section-kills-all",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "                warnings.append(f\"AI {section} analysis returned invalid output and was discarded\")\n                continue",
+      "new": "                raise InvalidEnvelope(\"x\")"
+    },
+    {
+      "id": "summary-violation-kept",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "            violation = free_text_violation(summary)",
+      "new": "            violation = None"
+    },
+    {
+      "id": "no-per-section-caps",
+      "file": "src/ai_engine/evidence.py",
+      "old": "        fits = {s: r for s, r in sections.items() if per_section[s] < limits.section_cap(s)}",
+      "new": "        fits = dict(sections)"
+    },
+    {
+      "id": "topic-conflict-ignored",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "            \"topic_conflicts_with_evidence\": not any(",
+      "new": "            \"topic_conflicts_with_evidence\": False and not any("
+    },
+    {
+      "id": "lifecycle-routing-off",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "    if resource[\"classification\"] in LIFECYCLE_CLASSES:",
+      "new": "    if False:"
+    },
+    {
+      "id": "config-routes-noise",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "    if category == NOISE:\n        return None\n    return f\"configuration",
+      "new": "    return f\"configuration"
+    },
+    {
+      "id": "remediation-field-allowed-config",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "class ConfigurationFinding(Strict):",
+      "new": "class ConfigurationFinding(Strict, extra=\"allow\"):"
+    },
+    {
+      "id": "new-origin-facts-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    origin_facts: Annotated[dict[str, Any], write_once_origin_facts]",
+      "new": "    origin_facts: dict[str, Any]"
+    },
+    {
+      "id": "new-actor-not-constant",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    actor: Literal[\"unknown\"]  # constant",
+      "new": "    actor: str | None  # constant"
+    },
+    {
+      "id": "new-confirmed-not-constant",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    confirmed: Literal[False]  # constant",
+      "new": "    confirmed: bool  # constant"
+    },
+    {
+      "id": "new-hypothesis-check-off",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "        if not all(hypothesis_consistent(finding.hypothesis, lookup[key][1][\"origin\"]) for key in keys):",
+      "new": "        if False:"
+    },
+    {
+      "id": "new-hypothesis-check-any-not-all",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "        if not all(hypothesis_consistent(",
+      "new": "        if not any(hypothesis_consistent("
+    },
+    {
+      "id": "new-lifecycle-hypothesis-loose",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "        return bool(origin[\"lifecycle\"])",
+      "new": "        return True"
+    },
+    {
+      "id": "new-out-of-band-allows-config-side",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    \"out_of_band_change\": {\"outside_terraform\", \"outside_terraform_converged\", \"both_sides\"},",
+      "new": "    \"out_of_band_change\": {\"outside_terraform\", \"outside_terraform_converged\", \"both_sides\", \"configuration_side\"},"
+    },
+    {
+      "id": "new-risk-check-off",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "        if finding.risk_kind != \"other\" and not any(",
+      "new": "        if False and not any("
+    },
+    {
+      "id": "new-evidence-incomplete-always-ok",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "        return \"redacted_unreadable\" in factors or evidence[\"truncation\"][\"truncated\"]",
+      "new": "        return True"
+    },
+    {
+      "id": "new-other-not-flagged",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "            \"risk_kind_unverified\": finding.risk_kind == \"other\",",
+      "new": "            \"risk_kind_unverified\": False,"
+    },
+    {
+      "id": "new-risk-level-allowed",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "class RiskFinding(Strict):",
+      "new": "class RiskFinding(Strict, extra=\"allow\"):"
+    },
+    {
+      "id": "new-no-attribution-guard",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    return _matches(_ATTRIBUTION_CLAIM, _ATTRIBUTION_EXTRA, text)",
+      "new": "    return False"
+    },
+    {
+      "id": "new-no-remediation-guard",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    return _matches(_REMEDIATION_CLAIM, _REMEDIATION_EXTRA, text)",
+      "new": "    return False"
+    },
+    {
+      "id": "new-guards-skipped-in-security",
+      "file": "src/ai_engine/nodes/security_analysis.py",
+      "old": "        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation",
+      "new": "        violation = None"
+    },
+    {
+      "id": "new-guards-skipped-in-root-cause-risk",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    violation = free_text_violation(finding.explanation)",
+      "new": "    violation = None"
+    },
+    {
+      "id": "new-root-cause-citation-unscoped",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    known = cited_keys(evidence, \"root_cause\")",
+      "new": "    known = cited_keys(evidence)"
+    },
+    {
+      "id": "new-risk-citation-unscoped",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    known = cited_keys(evidence, \"risk\")",
+      "new": "    known = cited_keys(evidence)"
+    },
+    {
+      "id": "new-risk-routes-all-changes",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "            if factors:\n                routes.append",
+      "new": "            if True:\n                routes.append"
+    },
+    {
+      "id": "new-noise-analyzed",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "            if change[\"assessment\"][\"category\"] == NOISE:\n                continue",
+      "new": "            if False:\n                continue"
+    },
+    {
+      "id": "new-origin-table-wrong",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    \"config_changed\": \"configuration_side\",",
+      "new": "    \"config_changed\": \"outside_terraform\","
+    },
+    {
+      "id": "new-reverts-factor-wrong",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    if resource[\"action\"] == \"update\" and change[\"class\"] in REVERTIBLE_CLASSES:",
+      "new": "    if change[\"class\"] in REVERTIBLE_CLASSES or change[\"class\"] == \"config_changed\":"
+    },
+    {
+      "id": "new-previous-address-leaked",
+      "file": "src/ai_engine/evidence.py",
+      "old": "            item.update({\"risk_factors\": list(facts[\"risk_factors\"]), \"moved\": facts[\"moved\"],",
+      "new": "            item.update({\"previous_address\": resource[\"previous_address\"], \"risk_factors\": list(facts[\"risk_factors\"]), \"moved\": facts[\"moved\"],"
+    },
+    {
+      "id": "new-origin-not-sent",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "        evidence = build_llm_evidence(parsed, all_routes, limits, origin_facts=origin_facts)",
+      "new": "        evidence = build_llm_evidence(parsed, all_routes, limits)"
+    },
+    {
+      "id": "new-explanation-cap-relaxed",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "Explanation = Annotated[str, Field(min_length=1, max_length=600)]",
+      "new": "Explanation = Annotated[str, Field(min_length=1, max_length=6000)]"
+    },
+    {
+      "id": "new-findings-cap-relaxed",
+      "file": "src/ai_engine/nodes/root_cause.py",
+      "old": "    findings: Annotated[list[RootCauseFinding], Field(max_length=20)]",
+      "new": "    findings: Annotated[list[RootCauseFinding], Field(max_length=200)]"
+    },
+    {
+      "id": "r-remediation-plan-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    remediation_plan: Annotated[dict[str, Any], write_once_remediation_plan]",
+      "new": "    remediation_plan: dict[str, Any]"
+    },
+    {
+      "id": "r-report-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    report: Annotated[dict[str, Any], write_once_report]",
+      "new": "    report: dict[str, Any]"
+    },
+    {
+      "id": "r-execution-allowed",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    allowed: Literal[False]",
+      "new": "    allowed: bool"
+    },
+    {
+      "id": "r-auto-apply-in-catalogue",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "apply reviewed.tfplan\"",
+      "new": "apply -auto-approve reviewed.tfplan\""
+    },
+    {
+      "id": "r-destroy-command",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "state rm {address}\"",
+      "new": "destroy -target={address}\""
+    },
+    {
+      "id": "r-no-shell-quoting",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "        address=shlex.quote(address) if address is not None else \"\",",
+      "new": "        address=address if address is not None else \"\","
+    },
+    {
+      "id": "r-destructive-not-flagged",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "        destructive = plan_default and action in (\"replace\", \"delete\")",
+      "new": "        destructive = False"
+    },
+    {
+      "id": "r-destructive-confirmation-dropped",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "\"destructive_confirmation_required\": destructive},",
+      "new": "\"destructive_confirmation_required\": False},"
+    },
+    {
+      "id": "r-alternative-marked-plan-default",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "        specs.append((\"accept_remote_value\", \"accept_remote\", False,",
+      "new": "        specs.append((\"accept_remote_value\", \"accept_remote\", True,"
+    },
+    {
+      "id": "r-plan-action-on-alternatives",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "            \"terraform_plan_action\": action if plan_default else None,",
+      "new": "            \"terraform_plan_action\": action,"
+    },
+    {
+      "id": "r-ranking-added",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    ranking: Literal[\"none\"]",
+      "new": "    ranking: str"
+    },
+    {
+      "id": "r-data-not-restored-off",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "            \"data_not_restored\": kind == \"recreate_deleted_object\",",
+      "new": "            \"data_not_restored\": False,"
+    },
+    {
+      "id": "r-human-decision-off",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    human = bool(resource[\"ambiguous\"]) or cls in (\"drift_and_config_change\", \"undetermined\")",
+      "new": "    human = False"
+    },
+    {
+      "id": "r-interpolation-unescaped",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": ".replace(\"${\", \"$${\").replace(\"%{\", \"%%{\")",
+      "new": ""
+    },
+    {
+      "id": "r-quotes-unescaped",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "        elif ch == '\"':",
+      "new": "        elif ch == '\\x01':"
+    },
+    {
+      "id": "r-fragment-for-redacted",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if change[\"redacted\"] or change[\"real\"][\"status\"] == \"redacted\":",
+      "new": "    if False:"
+    },
+    {
+      "id": "r-fragment-for-unknown",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if status == \"unknown\" or change[\"class\"] == \"unknown_until_apply\":",
+      "new": "    if False:"
+    },
+    {
+      "id": "r-fragment-for-object-level",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if change[\"class\"] is None:\n        return None, \"object_level\"",
+      "new": "    if False:\n        return None, \"object_level\""
+    },
+    {
+      "id": "r-location-claimed",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "\"location\": \"not_determined\"}",
+      "new": "\"location\": \"dev.tfvars\"}"
+    },
+    {
+      "id": "r-option-for-unrelated-resource",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "            \"address\": resource[\"address\"],\n            \"kind\": kind,",
+      "new": "            \"address\": resource[\"address\"] + \".x\",\n            \"kind\": kind,"
+    },
+    {
+      "id": "r-noise-in-evidence",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    changes = [c for c in resource[\"attribute_changes\"] if c[\"assessment\"][\"category\"] != NOISE]",
+      "new": "    changes = [c for c in resource[\"attribute_changes\"]]"
+    },
+    {
+      "id": "r-options-for-failed-report",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if parsed[\"outcome\"] != \"succeeded\":\n        reason",
+      "new": "    if False:\n        reason"
+    },
+    {
+      "id": "g-md-text-no-escaping",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "        if ch in _MD_PUNCT:",
+      "new": "        if False:"
+    },
+    {
+      "id": "g-md-text-no-html-escape",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "        elif ch == \"<\":\n            out.append(\"&lt;\")",
+      "new": "        elif ch == \"\\x01\":\n            out.append(\"&lt;\")"
+    },
+    {
+      "id": "g-links-not-neutralized",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "            out.append(ch + _ZWSP)",
+      "new": "            out.append(ch)"
+    },
+    {
+      "id": "g-www-not-neutralized",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    return re.sub(r\"(?i)www\", lambda m: m.group(0) + _ZWSP, \"\".join(out))",
+      "new": "    return \"\".join(out)"
+    },
+    {
+      "id": "g-static-fence",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    fence = \"`\" * max(3, _longest_backticks(text) + 1)",
+      "new": "    fence = \"```\""
+    },
+    {
+      "id": "g-static-inline-fence",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    fence = \"`\" * (_longest_backticks(text) + 1)",
+      "new": "    fence = \"`\""
+    },
+    {
+      "id": "g-table-pipes-unescaped",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "c.replace(\"|\", \"\\\\|\")",
+      "new": "c"
+    },
+    {
+      "id": "g-markdown-not-from-json",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    markdown = render_markdown(json.loads(json_text))",
+      "new": "    markdown = render_markdown(report).replace(\"## Limitations\", \"## Limitations (draft)\")"
+    },
+    {
+      "id": "g-rejected-findings-shown",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "\"findings\": list(result[\"findings\"]),",
+      "new": "\"findings\": list(result[\"findings\"]) + list(result[\"rejected_findings\"] and [{\"address\": \"x.y\", \"cited_paths\": [[\"nope\"]], \"explanation\": \"r\", \"basis\": \"inference\"}]),"
+    },
+    {
+      "id": "g-attribution-not-constant",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "class Attribution(Strict):\n    actor: Literal[\"unknown\"]",
+      "new": "class Attribution(Strict):\n    actor: str"
+    },
+    {
+      "id": "g-cost-not-constant",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "class CostBoundary(Strict):\n    monetary_impact: Literal[\"not_determinable_from_evidence\"]",
+      "new": "class CostBoundary(Strict):\n    monetary_impact: str"
+    },
+    {
+      "id": "g-nondeterministic-output",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    return \"\\n\".join(lines) + \"\\n\"\n",
+      "new": "    import time\n    return \"\\n\".join(lines) + f\"\\n<!-- {time.time_ns()} -->\\n\"\n"
+    },
+    {
+      "id": "g-remediation-from-ai",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "        \"remediation\": state[\"remediation_plan\"],",
+      "new": "        \"remediation\": dict(state[\"remediation_plan\"], options=[o for o in state[\"remediation_plan\"][\"options\"] if not state[\"inferences\"][\"analyze_root_cause\"][\"findings\"]]),"
+    },
+    {
+      "id": "h-suspicious-check-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    if is_suspicious_text(text):  # decided on the original text, before any normalization",
+      "new": "    if False:"
+    },
+    {
+      "id": "h-format-chars-not-suspicious",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    if any(unicodedata.category(ch) == \"Cf\" for ch in text):",
+      "new": "    if False:"
+    },
+    {
+      "id": "h-mixed-script-not-suspicious",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "        if \"LATIN\" in scripts and scripts & _LOOKALIKE_SCRIPTS:",
+      "new": "        if False:"
+    },
+    {
+      "id": "h-normalized-copy-not-matched",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "for p in (pattern, extra) for t in (text, normalized))",
+      "new": "for p in (pattern, extra) for t in (text,))"
+    },
+    {
+      "id": "h-original-not-matched",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "for p in (pattern, extra) for t in (text, normalized))",
+      "new": "for p in (pattern, extra) for t in (normalized,))"
+    },
+    {
+      "id": "h-extra-patterns-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "for p in (pattern, extra) for t in (text, normalized))",
+      "new": "for p in (pattern,) for t in (text, normalized))"
+    },
+    {
+      "id": "h-html-unescape-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "        decoded = html.unescape(out)",
+      "new": "        decoded = out"
+    },
+    {
+      "id": "h-nfkc-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    out = unicodedata.normalize(\"NFKC\", out)",
+      "new": "    out = out"
+    },
+    {
+      "id": "h-combining-marks-kept",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "if unicodedata.category(ch) not in (\"Cf\", \"Mn\"))",
+      "new": "if unicodedata.category(ch) not in (\"Cf\",))"
+    },
+    {
+      "id": "h-confusables-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    out = out.translate(_CONFUSABLES)",
+      "new": "    out = out"
+    },
+    {
+      "id": "h-obfuscated-at-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    out = _OBFUSCATED_AT.sub(\"@\", out)",
+      "new": "    out = out"
+    },
+    {
+      "id": "h-spaced-letters-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    out = _SPACED_LETTERS.sub(lambda m: re.sub(r\"[ .\\-_*·]\", \"\", m.group(0)), out)",
+      "new": "    pass"
+    },
+    {
+      "id": "h-passive-fix-removed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "_FILLER = r\"(?:\\s+(?!(?:was|were|is|are|be|been|being|get|got|gets)\\b){word}){{0,{n}}}?\"",
+      "new": "_FILLER = r\"(?:\\s+{word}){{0,{n}}}?\""
+    },
+    {
+      "id": "h-count-noun-fix-removed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    rf\"\\s*\\d[\\d,.]*(?!\\s*{_COUNT_NOUNS}\\b)\"",
+      "new": "    rf\"\\s*\\d[\\d,.]*(?!\\s*rules\\b)\""
+    },
+    {
+      "id": "h-bare-terraform-commands-allowed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    r\"\\bterraform\\s+(?:destroy|import|taint|untaint|force-unlock|workspace\\s+(?:new|delete|select))\\b\"",
+      "new": "    r\"\\bterraform\\s+(?:import|taint|untaint|force-unlock|workspace\\s+(?:new|delete|select))\\b\""
+    },
+    {
+      "id": "h-az-cli-allowed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    r\"|\\baz\\s+(?:account|group|storage|",
+      "new": "    r\"|\\bazz\\s+(?:account|group|storage|"
+    },
+    {
+      "id": "h-imperatives-allowed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    rf\"|(?:^|[.!?;]\\s+|\\n\\s*)(?:then\\s+|now\\s+|first\\s+|simply\\s+|just\\s+)?{_IMPERATIVES}\\b(?!\\s+{_DESCRIPTIVE_AFTER}\\b)\"",
+      "new": "    rf\"|(?:^)(?:then\\s+)?{_IMPERATIVES}\\b(?!\\s+{_DESCRIPTIVE_AFTER}\\b)\""
+    },
+    {
+      "id": "h-activity-log-claims-allowed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    r\"|\\b(?:per|according\\s+to|based\\s+on)\\s+the\\s+(?:azure\\s+)?activity\\s+logs?\\b\"",
+      "new": "    r\"|\\bnever-matches\\b\""
+    },
+    {
+      "id": "h-multiples-allowed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    r\"\\b(?:bucks|quid)\\b\"",
+      "new": "    r\"\\b(?:quid)\\b\""
+    },
+    {
+      "id": "j-duplicate-keys-allowed",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "        if key in out:\n            raise DuplicateKeyError",
+      "new": "        if False:\n            raise DuplicateKeyError"
+    },
+    {
+      "id": "j-envelope-uses-plain-json",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "        data = strict_json_loads(body)  # duplicate keys and NaN / Infinity are rejected",
+      "new": "        data = json.loads(body)"
+    },
+    {
+      "id": "j-standalone-parser-skips-strict-json",
+      "file": "src/ai_engine/nodes/security_analysis.py",
+      "old": "        strict_json_loads(body)  # rejects duplicate keys before schema validation",
+      "new": "        pass"
+    },
+    {
+      "id": "s-llm-not-write-once",
+      "file": "src/ai_engine/graph.py",
+      "old": "    llm: Annotated[LlmStatus, write_once_llm]",
+      "new": "    llm: LlmStatus"
+    },
+    {
+      "id": "s-inferences-overwrite-allowed",
+      "file": "src/ai_engine/graph.py",
+      "old": "    if clash:\n        raise EvidenceMutationError(f\"inferences already written",
+      "new": "    if False:\n        raise EvidenceMutationError(f\"inferences already written"
+    },
+    {
+      "id": "s-inferences-not-frozen",
+      "file": "src/ai_engine/graph.py",
+      "old": "    return freeze_evidence({**left, **right})",
+      "new": "    return {**left, **right}"
+    },
+    {
+      "id": "e-evidence-sent-never-recorded",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "for r in evidence[\"resources\"] for c in r[\"changes\"]] if attempted and evidence else []",
+      "new": "for r in evidence[\"resources\"] for c in r[\"changes\"]] if False else []"
+    },
+    {
+      "id": "e-evidence-sent-dropped-from-report",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "        | {\"evidence_sent\": list(call.get(\"evidence_sent\") or [])},",
+      "new": "        | {\"evidence_sent\": []},"
+    },
+    {
+      "id": "f-security-finding-extras-allowed",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "class SecurityReportFinding(Strict):",
+      "new": "class SecurityReportFinding(Strict, extra=\"allow\"):"
+    },
+    {
+      "id": "f-root-cause-actor-relaxed",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    hypothesis: Hypothesis\n    possible_channels: Annotated[list[Channel], Field(min_length=1)]\n    actor: Literal[\"unknown\"]",
+      "new": "    hypothesis: Hypothesis\n    possible_channels: Annotated[list[Channel], Field(min_length=1)]\n    actor: str"
+    },
+    {
+      "id": "f-report-findings-untyped",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "class SecuritySection(_SectionBase):\n    findings: list[SecurityReportFinding]",
+      "new": "class SecuritySection(_SectionBase):\n    findings: list[dict]"
+    },
+    {
+      "id": "v-fingerprint-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if src[\"drift_report_sha256\"] != _fingerprint(drift):",
+      "new": "    if False:"
+    },
+    {
+      "id": "v-summary-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if got[field] != expected:\n            add(f\"summary: {field} differs",
+      "new": "        if False:\n            add(f\"summary: {field} differs"
+    },
+    {
+      "id": "v-resource-fields-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if entry[field] != expected:\n                add(f\"resource {entry['address']}: {field} differs",
+      "new": "            if False:\n                add(f\"resource {entry['address']}: {field} differs"
+    },
+    {
+      "id": "v-change-detail-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if got_change != expected:",
+      "new": "            if False:"
+    },
+    {
+      "id": "v-resource-factors-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if entry[\"risk_factors\"] != union:",
+      "new": "        if False:"
+    },
+    {
+      "id": "v-evidence-sent-existence-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if k not in changes:\n            add(f\"llm: evidence_sent cites",
+      "new": "        if False:\n            add(f\"llm: evidence_sent cites"
+    },
+    {
+      "id": "v-section-eligibility-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if not _section_eligible(section, *changes[k]):",
+      "new": "            if False:"
+    },
+    {
+      "id": "v-finding-scope-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if not all(section in sent.get(k, set()) and k in changes for k in keys):",
+      "new": "    if False:"
+    },
+    {
+      "id": "v-finding-severity-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if finding[\"deterministic_severity\"] != expected_severity:",
+      "new": "    if False:"
+    },
+    {
+      "id": "v-hypothesis-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            elif hypothesis in _HYPOTHESIS_ALLOWS and fact[\"origin\"] not in _HYPOTHESIS_ALLOWS[hypothesis]:",
+      "new": "            elif False:"
+    },
+    {
+      "id": "v-risk-kind-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        elif kind != \"other\" and kind not in union:",
+      "new": "        elif False:"
+    },
+    {
+      "id": "v-guards-not-re-run",
+      "file": "src/ai_engine/verify.py",
+      "old": "            violation = free_text_violation(text)\n            if violation:",
+      "new": "            violation = None\n            if violation:"
+    },
+    {
+      "id": "v-status-consistency-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if result[\"status\"] != \"ok\" and (result[\"findings\"] or result[\"summary\"]):",
+      "new": "        if False:"
+    },
+    {
+      "id": "v-plan-default-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if len(defaults) != 1:",
+      "new": "        if False:"
+    },
+    {
+      "id": "v-destructive-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if option[\"destructive\"] != destructive or option[\"approval\"][\"destructive_confirmation_required\"] \\",
+      "new": "            if False and option[\"approval\"][\"destructive_confirmation_required\"] \\"
+    },
+    {
+      "id": "v-commands-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "                problem = _command_problem(command, working_dir, address)",
+      "new": "                problem = None"
+    },
+    {
+      "id": "v-fragment-escaping-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "                if \"${\" in value.replace(\"$${\", \"\") or \"%{\" in value.replace(\"%%{\", \"\"):",
+      "new": "                if False:"
+    },
+    {
+      "id": "v-remediation-scope-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if list(by_address) != [r[\"address\"] for r in changed]:",
+      "new": "    if False:"
+    },
+    {
+      "id": "v-origin-table-wrong",
+      "file": "src/ai_engine/verify.py",
+      "old": "\"config_changed\": \"configuration_side\", \"drifted_and_config_changed\": \"both_sides\",\n                 \"unknown_until_apply\"",
+      "new": "\"config_changed\": \"outside_terraform\", \"drifted_and_config_changed\": \"both_sides\",\n                 \"unknown_until_apply\""
+    },
+    {
+      "id": "v-factor-rule-wrong",
+      "file": "src/ai_engine/verify.py",
+      "old": "        \"unmanaged_setting\": change[\"assessment\"][\"category\"] == \"unconfigured\",",
+      "new": "        \"unmanaged_setting\": False,"
+    },
+    {
+      "id": "v-markdown-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    return [] if markdown == expected else [\"markdown: not the rendering of the report JSON\"]",
+      "new": "    return []"
+    },
+    {
+      "id": "v-duplicate-evidence-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if k in sent:\n            add(f\"llm: evidence_sent repeats",
+      "new": "        if False:\n            add(f\"llm: evidence_sent repeats"
+    },
+    {
+      "id": "v-evidence-without-call-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if not llm[\"attempted\"] and llm[\"evidence_sent\"]:",
+      "new": "    if False:"
+    },
+    {
+      "id": "v-lifecycle-hypothesis-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if hypothesis == \"lifecycle_change\" and not fact[\"lifecycle\"]:",
+      "new": "            if False:"
+    },
+    {
+      "id": "v-evidence-incomplete-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if \"redacted_unreadable\" not in union and not truncated:",
+      "new": "            if False:"
+    },
+    {
+      "id": "v-data-not-restored-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if option[\"data_not_restored\"] != (option[\"kind\"] == \"recreate_deleted_object\"):",
+      "new": "            if False:"
+    },
+    {
+      "id": "v-recreate-scope-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "            if option[\"kind\"] == \"recreate_deleted_object\" and cls != \"external_deletion\":",
+      "new": "            if False:"
+    },
+    {
+      "id": "v-failed-report-remediation-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if plan[\"options\"] or not plan[\"reason\"]:",
+      "new": "        if False:"
+    },
+    {
+      "id": "v-unreadable-fragment-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "                if not readable:",
+      "new": "                if False:"
+    },
+    {
+      "id": "v-dangerous-command-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if \"-auto-approve\" in command[\"command\"] or re.search(r\"\\bdestroy\\b\", command[\"command\"]):",
+      "new": "    if False:"
+    },
+    {
+      "id": "v-noise-evidence-eligible",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if _is_noise(change):\n        return False\n    if section == \"security\":",
+      "new": "    if section == \"security\":"
+    }
+  ]
+}
