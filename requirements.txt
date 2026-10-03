@@ -1,7 +1,8 @@
-# Development environment for the Python drift engine and AI analysis engine.
-# Dependencies are declared once, in pyproject.toml; this file installs the
-# package in editable mode together with its dev and ai (Phase 6) extras.
+# Development environment for the Python drift engine, AI analysis engine and
+# Activity Log collector. Dependencies are declared once, in pyproject.toml; this
+# file installs the package in editable mode together with its dev, ai (Phase 6)
+# and azure (Phase 7) extras.
 #
 #   python3 -m venv .venv && source .venv/bin/activate
 #   pip install -r requirements.txt
--e .[dev,ai]
+-e .[dev,ai,azure]

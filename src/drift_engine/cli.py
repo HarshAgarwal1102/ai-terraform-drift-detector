@@ -31,6 +31,25 @@ Exit status (process outcome only - drift is a valid result, not an error):
   73  the output file could not be written
   130 interrupted (Ctrl-C)
   141 standard output was closed early (broken pipe)
+
+    drift-engine activity-logs --plan plan.json --manifest detection_run.json
+                               [--lookback-days N] [--output activity_log_evidence.json]
+                               [--log-level ...] [--log-format text|json]
+
+Collects Azure Activity Log evidence for the drifted resources of the same plan
+(activity_logs.py, Task 7.1): read-only queries with the current `az login` session,
+needing the `[azure]` extra only when there is drift to look up. It is a manual /
+local collector; the drift workflow does not run it. The evidence may hold callers
+(personal data): a new --output file is created readable by its owner only. It never
+changes the drift report or its exit status.
+
+Exit status:
+  0   evidence complete (every drifted resource was queried completely)
+  1   evidence incomplete or failed (still written; see `outcome` and `scopes`)
+  2   usage error
+  70  unexpected internal error (nothing written)
+  73  the output file could not be written
+  130 / 141 as above
 """
 
 from __future__ import annotations
@@ -41,10 +60,12 @@ import os
 import stat
 import sys
 import tempfile
+from collections import Counter
+from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
-from drift_engine import __version__, comparator, severity
+from drift_engine import __version__, activity_logs, comparator, severity
 from drift_engine.classifier import evaluate
 from drift_engine.formatters import FORMATS, render
 from drift_engine.logs import LOG_FORMATS, LOG_LEVELS, configure_logging, log_event
@@ -82,7 +103,37 @@ def _parser() -> argparse.ArgumentParser:
                          help="emit structured logs at this level and above to standard error (default: off)")
     analyze.add_argument("--log-format", choices=LOG_FORMATS, default="text",
                          help="log line format when --log-level is set (default: text)")
+
+    logs = commands.add_parser(
+        "activity-logs",
+        help="collect Azure Activity Log evidence for the drifted resources (read-only)",
+        description=(
+            "Query the Azure Activity Log (read-only, current az login session) for the resource groups "
+            "of the drifted resources in plan.json and write activity_log_evidence.json. "
+            "Needs the [azure] extra when there is drift to look up. Does not attribute changes."
+        ),
+    )
+    logs.add_argument("--plan", required=True, help="plan.json written by terraform show -json")
+    logs.add_argument("--manifest", required=True, help="run manifest (detection_run.json) of the same run")
+    logs.add_argument("--lookback-days", type=_lookback_days, default=activity_logs.DEFAULT_LOOKBACK_DAYS,
+                      help=f"query window in days, 1-{activity_logs.MAX_LOOKBACK_DAYS} "
+                           f"(default: {activity_logs.DEFAULT_LOOKBACK_DAYS})")
+    logs.add_argument("--output", help="write the evidence to this file instead of standard output")
+    logs.add_argument("--log-level", choices=LOG_LEVELS,
+                      help="emit structured logs at this level and above to standard error (default: off)")
+    logs.add_argument("--log-format", choices=LOG_FORMATS, default="text",
+                      help="log line format when --log-level is set (default: text)")
     return parser
+
+
+def _lookback_days(text: str) -> int:
+    try:
+        value = int(text, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if not 1 <= value <= activity_logs.MAX_LOOKBACK_DAYS:
+        raise argparse.ArgumentTypeError(f"must be between 1 and {activity_logs.MAX_LOOKBACK_DAYS}")
+    return value
 
 
 def _use_color(choice: str, to_terminal: bool) -> bool:
@@ -151,14 +202,60 @@ def analyze(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _target_mode(path: str) -> int:
+def _activity_log_source() -> activity_logs.ActivityLogSource:
+    """The Azure source; the SDK is imported only if a query is actually made."""
+    return activity_logs.AzureMonitorSource()
+
+
+def collect_activity_logs(args: argparse.Namespace) -> int:
+    evidence = activity_logs.collect_evidence(
+        args.plan,
+        args.manifest,
+        source=_activity_log_source(),
+        queried_at=datetime.now(timezone.utc),
+        lookback_days=args.lookback_days,
+    )
+    text = activity_logs.render_evidence(evidence)
+    if args.output is None:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    else:
+        try:
+            _write_atomic(args.output, text, private=True)
+        except OSError as exc:
+            log_event(logger, logging.ERROR, "output_write_failed", "cannot write the Activity Log evidence",
+                      output=args.output, error=str(exc))
+            print(f"ERROR: cannot write {args.output}: {exc}", file=sys.stderr)
+            return EXIT_CANT_WRITE
+        log_event(logger, logging.INFO, "evidence_written", "Activity Log evidence written",
+                  output=args.output, outcome=evidence.outcome)
+
+    statuses = ", ".join(f"{k}={v}" for k, v in sorted(Counter(t.status for t in evidence.targets).items()))
+    summary = (f"activity_log_outcome={evidence.outcome}  targets={len(evidence.targets)} [{statuses}]  "
+               f"scopes={len(evidence.scopes)}  events={len(evidence.events)}")
+    if evidence.outcome != "complete":
+        reason = evidence.failure.reason if evidence.failure is not None else "incomplete"
+        errors = sorted({s.error.code for s in evidence.scopes if s.error is not None})
+        print(
+            f"ACTIVITY LOG EVIDENCE {evidence.outcome.upper()} [{reason}]"
+            + (f": {', '.join(errors)}" if errors else "") + "\n"
+            "  Drift detection results are unaffected; this evidence cannot confirm or rule out any change.",
+            file=sys.stderr,
+        )
+    if args.output is not None:
+        print(summary)
+        print(f"Evidence: {args.output}")
+    return EXIT_OK if evidence.outcome == "complete" else EXIT_FAILED
+
+
+def _target_mode(path: str, private: bool = False) -> int:
     """Permission bits for the new report at `path`.
 
     An existing regular file keeps its own rwx bits, so a restricted report (e.g.
     0600) is never widened; setuid/setgid/sticky bits are not carried over. A file we
     may not write is refused, as an in-place write would have been. Anything else
     (no file, or a symlink, which is replaced and never written through) gets 0666
-    minus the umask.
+    minus the umask, or 0600 when `private` (files that may hold personal data).
     """
     try:
         existing = os.lstat(path)
@@ -168,12 +265,14 @@ def _target_mode(path: str) -> int:
         if not os.access(path, os.W_OK):
             raise PermissionError(f"{path} is not writable")
         return stat.S_IMODE(existing.st_mode) & 0o777
+    if private:
+        return 0o600
     umask = os.umask(0)
     os.umask(umask)
     return 0o666 & ~umask
 
 
-def _write_atomic(path: str, text: str) -> None:
+def _write_atomic(path: str, text: str, private: bool = False) -> None:
     """Write `path` via a temporary file in the same directory and an atomic rename.
 
     On any failure the temporary file is removed and an existing `path` is left as it
@@ -181,7 +280,7 @@ def _write_atomic(path: str, text: str) -> None:
     it needs a writable directory, gives `path` a new inode (other hard links keep the
     old content) and replaces a symlink at `path` rather than writing through it.
     """
-    mode = _target_mode(path)
+    mode = _target_mode(path, private)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix=".drift-engine-", suffix=".tmp", dir=directory)
     try:
@@ -213,8 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.log_level is not None:
         configure_logging(args.log_level, args.log_format)
+    command = collect_activity_logs if args.command == "activity-logs" else analyze
     try:
-        return analyze(args)
+        return command(args)
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return EXIT_INTERRUPTED
@@ -224,11 +324,12 @@ def main(argv: list[str] | None = None) -> int:
         log_event(logger, logging.ERROR, "unexpected_error", "unexpected internal error",
                   error_type=type(exc).__name__)
         logger.debug("traceback", exc_info=True)
-        print(
-            f"INTERNAL ERROR: unexpected {type(exc).__name__}: {exc}\n"
-            "  Drift status is UNKNOWN - this must not be treated as 'no drift'.",
-            file=sys.stderr,
+        consequence = (
+            "  No Activity Log evidence was written; drift detection results are unaffected."
+            if command is collect_activity_logs
+            else "  Drift status is UNKNOWN - this must not be treated as 'no drift'."
         )
+        print(f"INTERNAL ERROR: unexpected {type(exc).__name__}: {exc}\n{consequence}", file=sys.stderr)
         return EXIT_INTERNAL_ERROR
 
 
