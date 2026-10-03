@@ -230,8 +230,8 @@ def test_missing_client_library_degrades(monkeypatch):
 @requires_ai
 def test_ai_state_schema():
     assert set(AiState.__annotations__) == {"drift_report", "parsed_drift", "security_targets", "cost_targets",
-                                            "config_targets", "origin_facts", "llm_call", "llm", "inferences",
-                                            "warnings"}
+                                            "config_targets", "origin_facts", "remediation_plan", "report",
+                                            "llm_call", "llm", "inferences", "warnings"}
     assert AiState.__total__ is False
 
 

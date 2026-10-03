@@ -1,0 +1,176 @@
+{
+  "applyable": true,
+  "complete": true,
+  "configuration": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "azurerm_app_configuration.this",
+          "expressions": {
+            "allowed_ips": {
+              "constant_value": null
+            },
+            "description": {
+              "constant_value": null
+            },
+            "labels": {
+              "constant_value": null
+            },
+            "local_auth_enabled": {
+              "constant_value": null
+            },
+            "location": {
+              "constant_value": null
+            },
+            "name": {
+              "constant_value": null
+            },
+            "resource_group_name": {
+              "constant_value": null
+            },
+            "retention_days": {
+              "constant_value": null
+            },
+            "tags": {
+              "constant_value": null
+            }
+          },
+          "mode": "managed",
+          "name": "this",
+          "type": "azurerm_app_configuration"
+        }
+      ]
+    }
+  },
+  "errored": false,
+  "format_version": "1.2",
+  "output_changes": {},
+  "resource_changes": [
+    {
+      "address": "azurerm_app_configuration.this",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "allowed_ips": [
+            "10.0.0.1"
+          ],
+          "description": "old",
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.AppConfiguration/configurationStores/aitdd-dev-appcs",
+          "labels": null,
+          "local_auth_enabled": true,
+          "location": "centralindia",
+          "name": "aitdd-dev-appcs",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "retention_days": 7,
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "allowed_ips": [
+            "10.0.0.1",
+            "10.0.0.2"
+          ],
+          "description": null,
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.AppConfiguration/configurationStores/aitdd-dev-appcs",
+          "labels": {
+            "cost-center": "42",
+            "team": "platform"
+          },
+          "local_auth_enabled": false,
+          "location": "centralindia",
+          "name": "aitdd-dev-appcs",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "retention_days": 30,
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "mode": "managed",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_app_configuration"
+    }
+  ],
+  "resource_drift": [
+    {
+      "address": "azurerm_app_configuration.this",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "allowed_ips": [
+            "10.0.0.1",
+            "10.0.0.2"
+          ],
+          "description": null,
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.AppConfiguration/configurationStores/aitdd-dev-appcs",
+          "labels": {
+            "cost-center": "42",
+            "team": "platform"
+          },
+          "local_auth_enabled": false,
+          "location": "centralindia",
+          "name": "aitdd-dev-appcs",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "retention_days": 30,
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "allowed_ips": [
+            "10.0.0.1"
+          ],
+          "description": "old",
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.AppConfiguration/configurationStores/aitdd-dev-appcs",
+          "labels": null,
+          "local_auth_enabled": true,
+          "location": "centralindia",
+          "name": "aitdd-dev-appcs",
+          "resource_group_name": "aitdd-dev-main-rg",
+          "retention_days": 7,
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "mode": "managed",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_app_configuration"
+    }
+  ],
+  "terraform_version": "1.14.7",
+  "timestamp": "2026-10-03T12:00:00Z"
+}

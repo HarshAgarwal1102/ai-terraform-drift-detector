@@ -1,4 +1,4 @@
-"""LangGraph state and graph for the AI analysis engine (Tasks 6.1-6.5).
+"""LangGraph state and graph for the AI analysis engine (Tasks 6.1-6.6).
 
 `AiState` keeps deterministic evidence and model output apart:
 
@@ -19,6 +19,11 @@
 - `origin_facts` is the deterministic origin category and risk factors per
   change, written by `derive_origin_risk` (Task 6.5), with `actor = "unknown"`
   and `confirmed = false` until Phase 7. Write-once, frozen.
+- `remediation_plan` holds the deterministic remediation options of
+  `plan_remediation` (Task 6.6): never ranked, never executed. Write-once.
+- `report` is the deterministic report (JSON form) of `generate_report`
+  (Task 6.6); `ai_engine.nodes.report_generator.write_report` writes it with its
+  Markdown rendering. Write-once.
 - `llm_call` records the run's single LLM call: attempted or not, status,
   provider/model, configured `max_retries`, evidence truncation. Write-once.
 - `inferences` holds model-generated interpretation keyed by the node that
@@ -27,7 +32,8 @@
 - `warnings` collects non-fatal problems such as an unreachable endpoint.
 
 The graph runs START -> `initialize` -> `parse_drift` -> `classify_drift` ->
-`route_cost_config` -> `derive_origin_risk` -> `analyze_drift` -> END. Every deterministic node runs
+`route_cost_config` -> `derive_origin_risk` -> `plan_remediation` ->
+`analyze_drift` -> `generate_report` -> END. Every deterministic node runs
 before the LLM. `analyze_drift` is the only node that receives the LLM client
 and makes **at most one logical LLM call per run** (security, cost and
 configuration, root-cause and risk sections in one reply); it writes AI output
@@ -51,6 +57,8 @@ from ai_engine.config import AiConfig, create_chat_model, load_config
 from ai_engine.llm import AZURE_CONTENT_FILTER_MESSAGE, LLMCallResult, invoke_llm  # noqa: F401 (re-exported)
 from ai_engine.evidence import EvidenceLimits
 from ai_engine.nodes.parse_drift import ParsedDrift, parse_drift
+from ai_engine.nodes.remediation import plan_remediation
+from ai_engine.nodes.report_generator import generate_report
 from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.analyze_drift import make_analyze_drift
 from ai_engine.nodes.cost_analysis import route_cost_config
@@ -140,6 +148,8 @@ write_once_cost_targets = _write_once("cost_targets")
 write_once_config_targets = _write_once("config_targets")
 write_once_llm_call = _write_once("llm_call")
 write_once_origin_facts = _write_once("origin_facts")
+write_once_remediation_plan = _write_once("remediation_plan")
+write_once_report = _write_once("report")
 
 
 def merge_dicts(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any]:
@@ -161,6 +171,8 @@ class AiState(TypedDict, total=False):
     cost_targets: Annotated[dict[str, Any], write_once_cost_targets]
     config_targets: Annotated[dict[str, Any], write_once_config_targets]
     origin_facts: Annotated[dict[str, Any], write_once_origin_facts]
+    remediation_plan: Annotated[dict[str, Any], write_once_remediation_plan]
+    report: Annotated[dict[str, Any], write_once_report]
     llm_call: Annotated[dict[str, Any], write_once_llm_call]
     llm: LlmStatus
     inferences: Annotated[dict[str, Any], merge_dicts]
@@ -205,14 +217,18 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_node("classify_drift", classify_drift)
     graph.add_node("route_cost_config", route_cost_config)
     graph.add_node("derive_origin_risk", derive_origin_risk)
+    graph.add_node("plan_remediation", plan_remediation)
     graph.add_node("analyze_drift", make_analyze_drift(llm, limits))  # the only node holding the LLM client
+    graph.add_node("generate_report", generate_report)
     graph.add_edge(START, "initialize")
     graph.add_edge("initialize", "parse_drift")
     graph.add_edge("parse_drift", "classify_drift")
     graph.add_edge("classify_drift", "route_cost_config")
     graph.add_edge("route_cost_config", "derive_origin_risk")
-    graph.add_edge("derive_origin_risk", "analyze_drift")
-    graph.add_edge("analyze_drift", END)
+    graph.add_edge("derive_origin_risk", "plan_remediation")
+    graph.add_edge("plan_remediation", "analyze_drift")
+    graph.add_edge("analyze_drift", "generate_report")
+    graph.add_edge("generate_report", END)
     return graph.compile()
 
 

@@ -1,0 +1,15 @@
+{
+  "backend_key": "dev.tfstate",
+  "environment": "dev",
+  "failure_reason": null,
+  "failure_stage": null,
+  "finished_at": "2026-10-03T12:00:05Z",
+  "git_commit": null,
+  "outcome": "succeeded",
+  "plan_exit_code": 2,
+  "run_id": "synthetic-report-fixture",
+  "show_exit_code": 0,
+  "started_at": "2026-10-03T12:00:00Z",
+  "terraform_version": "1.14.7",
+  "working_dir": "terraform/environments/dev"
+}
