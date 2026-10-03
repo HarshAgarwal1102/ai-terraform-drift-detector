@@ -2024,62 +2024,194 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 
 Phase 9 integrates deterministic security scanners into CI/CD to validate Terraform code security and prevent secret leaks.
 
+> **Phase 9 rules (apply to Tasks 9.1–9.4; recorded 2026-10-03 per the Phase 9 design re-evaluation).** Task 9.1 already implements these rules in its locked design; Tasks 9.2–9.4 must follow them.
+> - **Separation of responsibilities**: Terraform/Azure tooling produces the deterministic drift evidence (Phases 3–5); Phase 9 scanners and linters check code and security quality only; AI only interprets (Phases 6/9A). A scanner or linter finding is never a drift result, and a valid drift result is never a scan failure.
+> - **Existing workflows unchanged**: `.github/workflows/drift-detection.yml` and `.github/workflows/terraform-auth-test.yml` are not modified by any Phase 9 task, and Phase 9 scanning is not added to the drift-detection execution path.
+> - **No Azure access**: Phase 9 workflows need no Azure credentials and no OIDC (`id-token`).
+> - **No drift semantics**: Phase 9 does not create, update, close or label drift issues, and does not publish drift-detection outputs (`drift_detected`, `drift_status`, drift report artifacts).
+> - **No suppression to get green**: findings are fixed or escalated as plan-level decisions. They are never suppressed (ignores, disabled rules, lowered thresholds, `continue-on-error`, forced success, exit-code remapping) merely to make CI pass. Any severity threshold must be an explicit, documented design decision.
+> - **Exact version pins** for every tool, plugin and image, fixed in the task's design before implementation.
+> - **Failures fail the job**: a finding at a blocking severity, the scanner/linter failing to run, and a tool/plugin/image download failure each fail the relevant job.
+> - **Design review per task**: every Phase 9 task requires its own design review, with its decisions recorded in this plan, before implementation.
+
 #### Task 9.1 — TFLint Integration
-- **Status**: ⬜ NOT STARTED
-- **Objective**: Integrate TFLint with AzureRM ruleset into local scripts and GitHub Actions workflows.
-- **Dependencies**: Task 5.1
-- **Files/Areas**: `.tflint.hcl`, `.github/workflows/security-scan.yml`
-- **Acceptance Criteria**:
-  - [ ] `.tflint.hcl` configures azurerm ruleset plugin.
-  - [ ] `tflint --recursive` executes cleanly without errors.
-  - [ ] Workflow fails if TFLint finds errors.
+- **Status**: ⬜ NOT STARTED — design locked 2026-10-03 (design review + user decisions); implementation not started
+- **Objective**: Integrate TFLint (static Terraform linting) with the AzureRM ruleset through one shared script used both locally and in a separate, credential-free GitHub Actions workflow. TFLint is **not** a drift detector: a TFLint failure is a static lint failure, never a drift result. *(Reworded 2026-10-03 per the Task 9.1 design review.)*
+- **Dependencies**: Task 1.3 (dev root + resource-group module), Task 2.2 (bootstrap state configuration), Task 5A.1 (network module)
+- **Dependency note**: changed 2026-10-03 from Task 5.1. TFLint depends only on the Terraform layout it lints, not on the drift-detection workflow.
+- **Locked versions** *(exact; no floating/`latest`; one reviewed change bumps them everywhere)*:
+  - TFLint **v0.64.0**: `.tflint.hcl` `tflint { required_version = "= 0.64.0" }`, the CI binary (`terraform-linters/setup-tflint@v6`, `tflint_version: v0.64.0`) and local runs.
+  - `tflint-ruleset-azurerm` **v0.32.0** (signed release, `source = "github.com/terraform-linters/tflint-ruleset-azurerm"`): the release selected for Task 9.1.
+  - Bundled `ruleset.terraform` 0.15.0 (ships with TFLint v0.64.0), `preset = "recommended"`.
+- **Files/Areas**:
+  - new `.tflint.hcl` (repository root)
+  - new `scripts/run_tflint.sh`
+  - new `.github/workflows/security-scan.yml` (job `tflint`; Tasks 9.2/9.3 add their own jobs later)
+  - new `tests/test_tflint_integration.py`
+  - `README.md`
+  - **Baseline Terraform fixes** (prerequisites that make the new lint gate clean and stay compatible with the locked provider `5.7.0`):
+    - new `terraform/modules/network/versions.tf` and new `terraform/modules/resource-group/versions.tf`: `required_version = ">= 1.6.0"`; `azurerm = { source = "hashicorp/azurerm", version = "~> 5.0" }` (fixes `terraform_required_version` / `terraform_required_providers`).
+    - `terraform/environments/dev/variables.tf` + `terraform/environments/dev/dev.tfvars`: remove the unused root variable `location` from both files (fixes `terraform_unused_declarations`). Confirmed unreferenced 2026-10-03: no `var.location` in the dev root, no `-var location` anywhere; `drift_engine` does not read plan `variables`. Resource locations come from `resource_groups[*].location` and do not change.
+    - `terraform/bootstrap/main.tf`: add `lifecycle { prevent_destroy = true }` to `azurerm_storage_account.tfstate` and `azurerm_storage_container.tfstate` (fixes `azurerm_resources_missing_prevent_destroy`). This is a real safety control for the Terraform remote-state infrastructure, not a lint workaround.
+  - **Unchanged**:
+    - `.github/workflows/drift-detection.yml` and `.github/workflows/terraform-auth-test.yml` (byte-identical)
+    - both `.terraform.lock.hcl` files
+    - `scripts/validate.sh`, `scripts/generate_plan_json.sh`
+    - `src/`, `schemas/`, `pyproject.toml` / `requirements.txt`
+    - all other Terraform files
+- **Acceptance Criteria** *(revised 2026-10-03 per the Task 9.1 design review)*:
+  - [ ] **`.tflint.hcl`**:
+    - `tflint { required_version = "= 0.64.0" }`
+    - `config { call_module_type = "local" }`, with no `varfile`
+    - `plugin "terraform" { enabled = true, preset = "recommended" }`
+    - `plugin "azurerm" { enabled = true, version = "0.32.0", source = "github.com/terraform-linters/tflint-ruleset-azurerm" }`
+    - Forbidden: `signature = "none"`, global rule disables, `rule` blocks with `enabled = false`, `exclude` lists and `plugin_dir`.
+  - [ ] **Failure threshold**: TFLint's default threshold applies, so warnings and errors both fail. Forbidden anywhere: `--minimum-failure-severity`, `--force`, `--fix`, `continue-on-error`, `|| true`, exit-code remapping and `tflint-ignore` annotations. Any non-zero TFLint exit fails the script and the job (unlike Phase 5, where `terraform plan` exit 2 is a valid result).
+  - [ ] **Shared execution**: `scripts/run_tflint.sh` is the only command, used both locally and in CI. It:
+    1. resolves the config to an absolute path;
+    2. fails if `TFLINT_PLUGIN_DIR` is unset or inside the repository;
+    3. runs `tflint --init --config <abs>`, the only command that receives `GITHUB_TOKEN`, then unsets `GITHUB_TOKEN` so the version check and the lint run never see it;
+    4. checks that `tflint --version --config <abs>` reports `ruleset.azurerm (0.32.0)`, otherwise it fails. If the real output format differs from this check, stop and report it; do not substitute another check;
+    5. runs `tflint --recursive --config <abs>` from `terraform/` only. The scan never depends on `.artifacts/` being hidden.
+  - [ ] **Plugin directory**: locally, `TFLINT_PLUGIN_DIR` points at the session scratchpad (never the home directory and never inside the repository); in CI it points at `${{ runner.temp }}`.
+  - [ ] **Clean baseline**: zero TFLint findings at the default threshold over `terraform/`, using TFLint v0.64.0 and ruleset v0.32.0. This includes zero applicable AzureRM findings, reached only through the baseline fixes listed above. If the first real baseline run with the downloaded plugin reports any finding not listed in the Design Review, stop and return to design review; suppression is not allowed.
+  - [ ] **Workflow `security-scan.yml`**:
+    - triggers: `push` and `pull_request` to `main`, plus `workflow_dispatch`
+    - permissions exactly `contents: read`
+    - checkout with `persist-credentials: false`
+    - `terraform-linters/setup-tflint@v6` with `tflint_version: v0.64.0`, `cache` and `tflint_wrapper` left at their default `false`
+    - token handling follows the documented `setup-tflint` behaviour (decided 2026-10-03):
+      - the action's `github_token` input stays at its documented default (the workflow token, used only to fetch TFLint release data; the action does not export it to later steps). No explicit override.
+      - the `run_tflint.sh` step passes `GITHUB_TOKEN: ${{ github.token }}` for `tflint --init` only (the documented plugin-download pattern); the script removes it before running TFLint (see Shared execution).
+      - no other step receives the token.
+    - concurrency group `security-scan-${{ github.ref }}`, cancelling in progress only for pull requests
+    - Not allowed: `azure/login`, `id-token`/OIDC, `ARM_*`/`TF_VAR_*`/Azure secrets, cache, SARIF/`security-events`, artifacts, path filters.
+  - [ ] **No drift semantics**: no `drift_detected` / `drift_status` outputs, no drift issues or labels, and no `drift-report-*` artifacts. The step summary or log states "static lint, not drift detection".
+  - [ ] **Phase 5 protected**:
+    - `drift-detection.yml` and `terraform-auth-test.yml` are byte-identical to before. This is verified once during implementation with `git diff --exit-code ca1caad -- .github/workflows/drift-detection.yml .github/workflows/terraform-auth-test.yml` and recorded in the Completion Notes. No permanent hash or fingerprint of those workflows is committed (decided 2026-10-03);
+    - both `.terraform.lock.hcl` files are unchanged;
+    - `terraform init -backend=false` and `terraform validate` pass for `terraform/bootstrap` and `terraform/environments/dev` (with `-lockfile=readonly` on dev, as the drift workflow uses it);
+    - `./scripts/validate.sh` passes.
+  - [ ] **`prevent_destroy` documented**: README states that the bootstrap Storage Account and Blob Container hold Terraform remote state and are intentionally protected from accidental destruction. Intentionally destroying them requires an explicit, reviewed change that removes `prevent_destroy` before Terraform can destroy them. No `terraform apply` is needed or performed for this change: the lifecycle argument is evaluated at plan time and is not stored in state.
+  - [ ] **README**: documents the local command (`TFLINT_PLUGIN_DIR=<scratch> ./scripts/run_tflint.sh`), the locked versions and the upgrade procedure (one reviewed change updates `.tflint.hcl`, the workflow and README together), the AzureRM v5 limitation below, and that TFLint needs no Azure access.
 - **Validation**:
-  - [ ] Run `tflint --init && tflint` locally.
+  - [ ] Static pytest (`tests/test_tflint_integration.py`, no TFLint binary needed). It checks:
+    - the exact version pins match across `.tflint.hcl`, the workflow and README;
+    - an unpinned TFLint `required_version` (not `= X.Y.Z`) or an azurerm plugin without an exact `version` is rejected;
+    - all forbidden flags and attributes are absent;
+    - triggers and `permissions: contents: read` only;
+    - no `id-token`, `azure/login`, `ARM_*`, `TF_VAR_*` or Azure secrets;
+    - no drift outputs;
+    - `security-scan.yml` contains the TFLint design above;
+    - `drift-detection.yml` and `terraform-auth-test.yml` contain no TFLint or `security-scan` integration (no fingerprints of their contents);
+    - the script scans `terraform/` with an absolute config path.
+  - [ ] Local run: `TFLINT_PLUGIN_DIR=<scratchpad> ./scripts/run_tflint.sh` → exit 0 with zero findings, and the azurerm 0.32.0 check passes. User-approved 2026-10-03: downloading the pinned `tflint-ruleset-azurerm` v0.32.0 release from GitHub for local validation and mutation testing. The approval covers that download only; no GitHub repository changes.
+  - [ ] Mutation checks on a **scratchpad copy** of `terraform/` and `.tflint.hcl` (never on tracked files). Each must fail with a non-zero exit:
+    - (a) a `terraform_deprecated_interpolation` violation in each of the 4 directories (`bootstrap`, `environments/dev`, `modules/network`, `modules/resource-group`), proving the config applies everywhere;
+    - (b) an invalid AzureRM value (e.g. `account_kind = "InvalidKind"` on the bootstrap storage account), proving the azurerm ruleset is active;
+    - (c) an HCL syntax error;
+    - (d) a missing config, a misnamed config, or a relative `--config` under `--recursive`;
+    - (e) the azurerm plugin without `version`, and a `required_version` that does not match the binary;
+    - (f) removing either `prevent_destroy`;
+    - (g) a no-op control mutation that must still pass.
+  - [ ] Offline Terraform checks (validate/init/lock-file diff, see the Phase 5 criterion). No Azure calls.
+  - [ ] CI proof, approval-gated: one green `push` run on `main`, and one pull request run with a deliberate lint finding that fails the `tflint` job, with no Azure step executed in `security-scan.yml`. *(Wording corrected 2026-10-03, Phase 9 re-evaluation.)* The approval must acknowledge that these events also trigger the existing, unmodified `terraform-auth-test.yml`:
+    - a push to `main` runs its Azure OIDC login and its read-only `terraform plan` against the dev state;
+    - on a pull request, its Azure login fails, because no `pull_request` federated credential exists (Task 2.6). This is existing behaviour, not a Task 9.1 result.
+- **Design Review (2026-10-03)**:
+  - **Findings that drove this revision**:
+    - The original acceptance criteria could not pass. An offline TFLint v0.64.0 baseline found 5 warnings: `terraform_required_providers` and `terraform_required_version` in both modules, and `terraform_unused_declarations` for dev `var.location`. Default exit is 2; `--minimum-failure-severity=error` would hide them.
+    - The original validation (`tflint --init && tflint` at repo root) passes vacuously, because there are no `.tf` files at the root.
+    - Under `--recursive`, a relative `--config` resolves per module directory and fails; an absolute path is required.
+    - `terraform-auth-test.yml` is unsuitable: it needs Azure, and the `pull_request` federated credential does not exist (Task 2.6), so PR runs fail at login.
+    - `drift-detection.yml` must not carry lint results.
+  - **AzureRM ruleset compatibility (researched 2026-10-03)**:
+    - v0.32.0 (released 2026-04-25) is the latest signed release. It requires TFLint ≥ 0.46 and uses tflint-plugin-sdk 0.24.0, so it is compatible with TFLint v0.64.0.
+    - **Limitation**: v0.32.0 was generated from the AzureRM **4.65.0** schema. It does not contain the later AzureRM v5 schema work: upstream PR #527, merged 2026-09-24, which is unreleased.
+    - That v5 work only removes 5 rules for 8 resources that v5 dropped (`azurerm_hpc_cache*`, `azurerm_network_packet_capture`, `azurerm_postgresql_*`). This repository uses none of them; its resources are resource group, virtual network, subnet, NSG, subnet–NSG association, storage account and storage container. So the repository's resources are unaffected.
+    - Task 9.1 is not blocked waiting for a v5 release. Moving to a release with explicit AzureRM v5 support is a separate, reviewed version bump.
+  - **Expected ruleset finding**: v0.32.0 enables `azurerm_resources_missing_prevent_destroy` by default. Its default list includes `azurerm_storage_account` and `azurerm_storage_container`, so the bootstrap state resources are fixed with `prevent_destroy` (user decision), not by suppressing the rule.
+- **Out of Scope**:
+  - tfsec, TruffleHog, Super-Linter and any other lint/security tool
+  - SARIF/code-scanning upload and caching
+  - changed-file scanning
+  - pinning actions by commit SHA (Phase 12)
+  - any change to the drift-detection or auth workflows
+  - any Azure access or `terraform apply`
 - **Implementation Notes**:
   - Static analysis for Terraform best practices.
+  - TFLint needs no `terraform init`, backend or provider download, because all modules are local.
+  - Output contains only values from committed public `.tf` / `dev.tfvars` files; do not enable `TFLINT_LOG` debug output.
 - **Completion Notes**:
   - None.
 
 #### Task 9.2 — tfsec Infrastructure Security Scanner
-- **Status**: ⬜ NOT STARTED
-- **Objective**: Integrate `tfsec` static analysis scanner to check for Azure security misconfigurations.
+- **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
+- **Objective**: Integrate a static Terraform security scanner to check for Azure security misconfigurations. tfsec was the original plan, but the scanner choice is **unresolved**: tfsec, or an alternative such as Trivy or Checkov, is decided in the Task 9.2 design review. The task title keeps the original name.
 - **Dependencies**: Task 9.1
-- **Files/Areas**: `.github/workflows/security-scan.yml`
-- **Acceptance Criteria**:
-  - [ ] `tfsec` scans all module directories and environments.
-  - [ ] High/Critical security findings fail the pipeline.
+- **Files/Areas**: `.github/workflows/security-scan.yml` (further files to be decided in the Task 9.2 design review)
+- **Acceptance Criteria** *(provisional; finalized by the Task 9.2 design review)*:
+  - [ ] The scanner covers every Terraform root (`terraform/bootstrap`, `terraform/environments/dev`) and the modules they call, including evaluation of the variable values used by each root. The exact scope is defined in the design review.
+  - [ ] High/Critical security findings fail the job. Handling of Medium/Low/informational findings is not yet defined and must be decided in the design review.
 - **Validation**:
-  - [ ] Run `tfsec terraform/` locally.
+  - [ ] To be defined in the Task 9.2 design review. The original `tfsec terraform/` command is not sufficient (see Design Review findings).
+- **Design Review findings (2026-10-03, Phase 9 re-evaluation; scanner choice intentionally left open)**:
+  - **tfsec is deprecated**: v1.28.14 (latest release, 2025-05-02) prints "tfsec is joining the Trivy family… engineering attention will be directed at Trivy".
+  - **False pass with the current AzureRM schema**: on a scratch copy of `terraform/bootstrap`, `https_traffic_only_enabled = false` (the AzureRM v4/v5 attribute name) produced no finding, and `azure-storage-enforce-https` reported passed. Setting `min_tls_version = "TLS1_0"` was detected.
+  - **Coverage of the planned command**: `tfsec terraform/` processed one module (`terraform/bootstrap`: 5 files, 3 checks). `terraform/environments/dev` evaluated no checks without `--tfvars-file dev.tfvars`; with it, 2 network checks ran. Current baseline: 0 findings.
+  - **Severity handling** is incomplete: only High/Critical is specified.
+  - **Version pin and installation method** are missing.
+  - The March 2026 Trivy ecosystem supply-chain compromise (`trivy-action` / `setup-trivy` tags force-pushed to a credential stealer) is an input to the pinning and installation decision if Trivy is considered.
 - **Implementation Notes**:
-  - Security scanning prior to plan/apply.
+  - Runs on code changes (push/PR) in `security-scan.yml`. It is not part of the deterministic drift-detection execution path and never gates or runs inside the scheduled drift-detection workflow. *(Reworded 2026-10-03; previously "Security scanning prior to plan/apply".)*
 - **Completion Notes**:
   - None.
 
 #### Task 9.3 — TruffleHog Secret Scanning
-- **Status**: ⬜ NOT STARTED
+- **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
 - **Objective**: Configure TruffleHog in GitHub Actions to scan commits and repository history for exposed credentials or keys.
 - **Dependencies**: Task 9.2
 - **Files/Areas**: `.github/workflows/security-scan.yml`
-- **Acceptance Criteria**:
-  - [ ] TruffleHog action runs on push and PR.
-  - [ ] Pipeline halts if unencrypted secrets/tokens are detected.
+- **Design requirements (missing from this task; each must be decided in the Task 9.3 design review)** *(recorded 2026-10-03, Phase 9 re-evaluation)*:
+  - exact TruffleHog version pin;
+  - installation method (action or binary, and how it is pinned and verified);
+  - scan scope (paths and refs);
+  - commit-range scanning (push/PR range) versus full-history scanning (including the checkout depth this requires);
+  - verification mode and its external data/egress implications: verifying a candidate secret sends it to the provider's API;
+  - explicit failure behaviour (e.g. `--fail`), so that a finding exits non-zero;
+  - false-positive handling that does not suppress findings merely to get green;
+  - policy for a real historical secret: rotation, and explicit approval before any history rewrite;
+  - baseline validation over the current repository history;
+  - protection against raw-secret exposure in public GitHub Actions logs;
+  - objective, testable acceptance criteria replacing the vague "unencrypted secrets/tokens" wording.
+- **Baseline evidence (proxy only)**: gitleaks 8.30.1 over all 38 commits found one hit: a false positive on prose in `PROJECT_PLAN.md` ("access, TLS/encryption…"). TruffleHog itself has not been run.
+- **Acceptance Criteria** *(provisional; finalized by the Task 9.3 design review)*:
+  - [ ] TruffleHog runs on push and PR.
+  - [ ] A detected secret fails the TruffleHog job. The objective criterion (which result classes block, and how the failure is triggered) is defined in the design review and replaces "Pipeline halts if unencrypted secrets/tokens are detected".
 - **Validation**:
-  - [ ] Test execution in GitHub Actions workflow.
+  - [ ] To be defined in the Task 9.3 design review (originally: "Test execution in GitHub Actions workflow").
 - **Implementation Notes**:
   - Credentials leakage prevention.
 - **Completion Notes**:
   - None.
 
 #### Task 9.4 — Super-Linter Code Quality Enforcement
-- **Status**: ⬜ NOT STARTED
+- **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
 - **Objective**: Add GitHub Super-Linter to validate Python, YAML, Shell, and Markdown standards across repository.
 - **Dependencies**: Task 9.3
-- **Files/Areas**: `.github/workflows/super-linter.yml`
-- **Acceptance Criteria**:
-  - [ ] Super-Linter validates Python (flake8/black), Bash (shellcheck), and YAML.
-  - [ ] Enforces unified coding standards.
+- **Files/Areas**: `.github/workflows/super-linter.yml`; the required linter configuration files must be listed here by the Task 9.4 design review.
+- **Design issues (to be resolved in the Task 9.4 design review)** *(recorded 2026-10-03, Phase 9 re-evaluation)*:
+  - **Markdown**: the objective includes Markdown, but the acceptance criteria below do not. The repository's Markdown includes `PROJECT_PLAN.md` (2,477 lines).
+  - **Python baseline**: 3,406 lines exceed 88 characters, in 54 of 56 tracked Python files; 5,003 exceed 79 characters. No black/flake8 configuration exists. Completed phases must not be silently reformatted; the Python formatting/linting strategy is a decision for the design review.
+  - **Overlap with Tasks 9.1–9.3**: Super-Linter bundles TFLint, Checkov, Trivy, `terraform fmt` and GitLeaks. An explicit allowlist/exclusion strategy is required. It must prevent duplicate or conflicting runs of TFLint (whose locked `.tflint.hcl` requires `= 0.64.0`) and of the scanners owned by Tasks 9.2/9.3.
+  - **Version**: the exact Super-Linter version must be pinned before implementation (latest at review time: v9.0.0, 2026-10-01).
+  - **Permissions** must be designed explicitly. The upstream example uses `pull-requests: write` (and optionally `statuses: write`); write permissions are not assumed acceptable.
+  - **Shell and YAML baselines** (6 tracked shell scripts, 2 workflow files) have not been established yet.
+- **Acceptance Criteria** *(provisional; the vague criteria are replaced with objective ones by the Task 9.4 design review)*:
+  - [ ] Super-Linter validates Python (flake8/black), Bash (shellcheck), and YAML. The Python linters and formatter are subject to the Python baseline decision above.
+  - [ ] Enforces unified coding standards. *(Vague; to be replaced.)*
 - **Validation**:
-  - [ ] Workflow completes cleanly on main branch.
+  - [ ] Workflow completes cleanly on main branch. *(Vague; to be replaced.)*
 - **Implementation Notes**:
   - Code hygiene and linting automation.
 - **Completion Notes**:
@@ -2265,7 +2397,8 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
 #### Task 12.3 — Least Privilege RBAC & Secret Hardening Audit
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Conduct security audit of Azure Service Principals, GitHub Secrets, OIDC permissions, and API key handling.
-- **Dependencies**: Task 12.2
+- **Dependencies**: Task 12.2, Task 9.3
+- **Dependency note**: Task 9.3 added 2026-10-03 (Phase 9 re-evaluation): this task's validation runs TruffleHog, which Task 9.3 integrates.
 - **Files/Areas**: `docs/security-audit.md`
 - **Acceptance Criteria**:
   - [ ] Audit confirms no hardcoded secrets exist in repository.
