@@ -1,0 +1,13 @@
+{
+  "acceptances": [
+    {
+      "id": "AZU-0012",
+      "resource": "azurerm_storage_account.tfstate",
+      "file": "terraform/bootstrap/main.tf",
+      "expires": "2027-03-31",
+      "reference": "AVD-AZU-0012 (https://avd.aquasec.com/misconfig/azu-0012); PROJECT_PLAN.md Task 9.2, decision D3",
+      "justification": "The Terraform remote-state storage account is reached over its public endpoint, authenticated with Entra ID and without account keys in CI (ARM_USE_AZUREAD), from GitHub-hosted runners with dynamic IP addresses. A default-Deny network rule would cut off drift detection and the auth workflow. Restricting network access (IP allowlist, private endpoint or self-hosted runners) is an architecture change outside Phase 9 that needs an approved Azure apply.",
+      "scope": "Only rule AZU-0012 on azurerm_storage_account.tfstate in terraform/bootstrap/main.tf. It never covers another rule, resource, file or severity. After the expiry date the gate fails until a reviewed PROJECT_PLAN.md change renews this acceptance or the risk is fixed."
+    }
+  ]
+}

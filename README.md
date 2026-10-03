@@ -179,7 +179,7 @@ each network inherits its resource group's name and location.
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
 ├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → report (Phase 5)
-└── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (Task 9.1)
+└── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
@@ -193,6 +193,7 @@ scripts/
 ├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
 ├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
 ├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
+├── run_trivy_config.sh           # Trivy config security scan + risk-acceptance gate (local and CI; Task 9.2)
 └── validate.sh                   # terraform fmt -check + validate (no Azure auth)
 
 src/drift_engine/                 # Python drift engine (Phase 4)
@@ -221,6 +222,7 @@ docs/
 
 pyproject.toml / requirements.txt # Python package and dev environment
 .tflint.hcl                       # TFLint configuration with exact version pins (Task 9.1)
+security/trivy-risk-acceptance.json # The single accepted Trivy finding (AZU-0012), expiry 2027-03-31 (Task 9.2)
 PROJECT_PLAN.md                   # Roadmap and task status (source of truth)
 ```
 
@@ -490,6 +492,72 @@ expected ruleset version), `tests/test_tflint_integration.py` and this table tog
 This repository uses AzureRM `~> 5.0` (locked at `5.7.0`). The upstream AzureRM v5 work only
 removes rules for resources that v5 dropped, and this repository uses none of them. Moving to
 a ruleset release with explicit AzureRM v5 support is a separate, reviewed version bump.
+
+### Terraform security scan (Trivy config, Task 9.2)
+
+Trivy `config` checks the Terraform code for Azure security misconfigurations. It is a
+**static security scan, not drift detection**: a finding fails the scan job and never
+changes a drift result. It needs no Azure access and no `terraform init`.
+
+```bash
+# Requires Trivy 0.75.0 and jq on PATH. Run from anywhere; the script scans from the repository root.
+./scripts/run_trivy_config.sh
+```
+
+`scripts/run_trivy_config.sh` is the same command the `trivy-config` job runs in
+[`security-scan.yml`](.github/workflows/security-scan.yml) on every push and pull request to
+`main` (permissions `contents: read`, no token). It scans two roots:
+- `terraform/environments/dev` with `dev.tfvars`, which also evaluates the
+  `resource-group` and `network` modules with the real values;
+- `terraform/bootstrap`.
+
+Every scan uses `--skip-check-update` with a fresh, empty cache outside the repository, so
+Trivy uses the checks embedded in the verified binary. Trivy logs this as
+`ERROR … Falling back to embedded checks`; that line is expected and is not a failure.
+Telemetry and version checks are off, and only Terraform misconfigurations are scanned
+(no secret or vulnerability scanning).
+
+**Failure policy:**
+- HIGH and CRITICAL findings fail, except the single accepted risk below.
+- MEDIUM and LOW findings are printed as `REPORTED (non-blocking)`.
+- Trivy failing to run, a wrong Trivy version, a missing `jq`, or unreadable JSON also fail.
+- There is no `.trivyignore`, no `trivy.yaml`, no inline `trivy:ignore` and no Trivy
+  suppression flag. The script fails if any of them appears, and clears `TRIVY_*`
+  environment variables.
+
+**Accepted risk** ([`security/trivy-risk-acceptance.json`](security/trivy-risk-acceptance.json)):
+- **What:** `AZU-0012` (CRITICAL, alias `AVD-AZU-0012`: network rules default action should
+  be Deny) on `azurerm_storage_account.tfstate` in `terraform/bootstrap/main.tf`.
+- **Why:** the remote-state account is reached from GitHub-hosted runners with dynamic IPs,
+  through Entra ID without account keys. A default-Deny network rule would cut off drift
+  detection and the auth workflow, and restricting network access is an architecture change
+  outside Phase 9.
+- **How it's enforced:** the script matches the finding exactly on Trivy's `ID`,
+  `CauseMetadata.Resource` and `ArtifactName + "/" + Target`, and prints it as
+  `ACCEPTED RISK` on every run. The run fails if the record is missing, malformed, matches
+  no finding (stale) or more than one, or is past its expiry.
+- **Expiry:** **2027-03-31**. After that date the scan fails until a reviewed
+  `PROJECT_PLAN.md` change renews the acceptance or the risk is fixed.
+
+| Component | Pinned | Where |
+|---|---|---|
+| Trivy | `0.75.0` | `scripts/run_trivy_config.sh` (required version) and `security-scan.yml` |
+| Trivy Linux binary SHA-256 | `c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f` | `security-scan.yml`, verified before unpacking |
+
+CI downloads the official release archive and checks the committed SHA-256 before using it.
+That hash was taken from Trivy's official checksums file after verifying its cosign
+signature. The workflow uses no Trivy GitHub Action and no Docker image tag: in March 2026
+`aquasecurity/trivy-action` and `setup-trivy` tags were hijacked to steal CI credentials
+([GHSA-69fq-xp46-6x23](https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23)).
+Locally, use Trivy 0.75.0 verified against the same official checksums file. To upgrade,
+make one reviewed change that updates the version and hash in `security-scan.yml`, the
+version in the script, `tests/test_trivy_config.py` and this section together.
+
+The known MEDIUM/LOW findings, all on the state storage account, are reported and don't block:
+- AZU-0057: logging;
+- AZU-0060: customer-managed key;
+- AZU-0061: infrastructure encryption, which would force replacing the account;
+- AZU-0058: geo-redundant replication.
 
 ---
 

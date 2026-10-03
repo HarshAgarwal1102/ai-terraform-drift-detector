@@ -1,20 +1,26 @@
 name: "Phase 9 - Security Scan"
 
 # Phase 9 static analysis of the repository's code. Task 9.1: TFLint.
+# Task 9.2: Trivy config.
 #
 # This is NOT drift detection: a finding here is a static lint/security failure,
 # never a drift result. Drift is owned by drift-detection.yml (Phase 5); this
 # workflow publishes no drift outputs, artifacts, issues or labels.
 #
 # Credential-free: no Azure login, no OIDC (`id-token`), no ARM_* / TF_VAR_*
-# variables. TFLint reads the committed Terraform files only (no terraform init,
-# no backend, no provider download).
+# variables. Both tools read the committed Terraform files only (no terraform
+# init, no backend, no provider download).
 #
-# Jobs:
-#   tflint  Task 9.1. Runs scripts/run_tflint.sh, the same command used locally.
-#           Versions are pinned exactly (TFLint v0.64.0 here and in .tflint.hcl,
-#           tflint-ruleset-azurerm 0.32.0 in .tflint.hcl). Any finding (warning
-#           or error) or TFLint failure fails the job.
+# Jobs (independent of each other):
+#   tflint        Task 9.1. Runs scripts/run_tflint.sh, the same command used
+#                 locally. Versions are pinned exactly (TFLint v0.64.0 here and
+#                 in .tflint.hcl, tflint-ruleset-azurerm 0.32.0 in .tflint.hcl).
+#                 Any finding (warning or error) or TFLint failure fails the job.
+#   trivy-config  Task 9.2. Installs the Trivy 0.75.0 release binary after
+#                 verifying its committed SHA-256 (no Trivy action, no image
+#                 tag), then runs scripts/run_trivy_config.sh. HIGH/CRITICAL
+#                 findings fail, except the single exact risk acceptance in
+#                 security/trivy-risk-acceptance.json; MEDIUM/LOW are reported.
 
 on:
   push:
@@ -61,3 +67,36 @@ jobs:
           TFLINT_PLUGIN_DIR: ${{ runner.temp }}
           GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/run_tflint.sh
+
+  trivy-config:
+    name: "Trivy config (static security scan, not drift detection)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Pinned release binary, verified against the SHA-256 committed here before
+      # it is unpacked (established from the cosign-verified official checksums).
+      # Never aquasecurity/trivy-action or setup-trivy, whose tags were hijacked in
+      # March 2026 (GHSA-69fq-xp46-6x23). Public download: no token.
+      - name: Install Trivy (pinned binary, SHA-256 verified)
+        env:
+          PINNED_TRIVY_VERSION: "0.75.0"
+          PINNED_TRIVY_LINUX_SHA256: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
+        run: |
+          set -euo pipefail
+          archive="trivy_${PINNED_TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${PINNED_TRIVY_VERSION}/${archive}"
+          echo "${PINNED_TRIVY_LINUX_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          echo "Verified SHA-256 ${PINNED_TRIVY_LINUX_SHA256} for ${archive}"
+          mkdir "${RUNNER_TEMP}/trivy-bin"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/trivy-bin" trivy
+          echo "${RUNNER_TEMP}/trivy-bin" >> "${GITHUB_PATH}"
+
+      - name: Run Trivy config
+        run: ./scripts/run_trivy_config.sh

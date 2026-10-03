@@ -180,6 +180,10 @@ class SecurityScanWorkflowTests(unittest.TestCase):
         cls.text = read(SECURITY_SCAN)
         cls.wf = yaml.safe_load(cls.text)
         cls.code = "\n".join(ln for ln in cls.text.splitlines() if not ln.lstrip().startswith("#"))
+        # Job-scoped (Task 9.2 adds the independent trivy-config job): the workflow-level
+        # keys plus the tflint job only.
+        cls.tflint_scope = yaml.safe_dump({k: v for k, v in cls.wf.items() if k != "jobs"}
+                                          | {"jobs": {"tflint": cls.wf["jobs"]["tflint"]}})
 
     def test_triggers_permissions_concurrency(self):
         triggers = self.wf.get("on", self.wf.get(True))
@@ -191,8 +195,9 @@ class SecurityScanWorkflowTests(unittest.TestCase):
             "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"})
 
     def test_tflint_job(self):
-        self.assertEqual(sorted(self.wf["jobs"]), ["tflint"])
+        self.assertIn("tflint", self.wf["jobs"])
         job = self.wf["jobs"]["tflint"]
+        self.assertNotIn("needs", job)
         for key in ("permissions", "environment", "outputs", "continue-on-error", "if", "env"):
             self.assertNotIn(key, job)
         self.assertIn("not drift detection", job["name"])
@@ -209,14 +214,15 @@ class SecurityScanWorkflowTests(unittest.TestCase):
                 self.assertNotIn(key, step)
             if step is not steps[2]:
                 self.assertNotIn("env", step)
-        self.assertEqual(self.code.count("GITHUB_TOKEN"), 1)
+        self.assertEqual(self.tflint_scope.count("GITHUB_TOKEN"), 1)
+        self.assertEqual(self.code.count("GITHUB_TOKEN"), 1)  # no other job receives the token
 
     def test_no_azure_no_drift_semantics_no_extras(self):
         for forbidden in ("id-token", "azure/login", "ARM_", "TF_VAR_", "AZURE_", "secrets.", "terraform init",
                           "terraform plan", "drift_detected", "drift_status", "drift-report", "issues:",
                           "upload-artifact", "sarif", "security-events", "cache", "paths:", "paths-ignore",
                           "pull_request_target", "write") + FORBIDDEN_FLAGS:
-            self.assertNotIn(forbidden, self.code, forbidden)
+            self.assertNotIn(forbidden, self.tflint_scope, forbidden)
 
 
 class ExistingWorkflowsTests(unittest.TestCase):
