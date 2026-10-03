@@ -124,9 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 8 — GitHub Issue / PR Automation
-- **Current Active Task**: Task 8.2 — Automated Remediation Branch & PR Generator (Phase 8 order 8.1 → 8.3 → 8.2; design review required before implementation)
-- **Phases Completed**: 7 of 14
+- **Current Active Phase**: Phase 9 — DevSecOps Integration
+- **Current Active Task**: Task 9.1 — TFLint Integration
+- **Phases Completed**: 8 of 14
 
 ---
 
@@ -1864,9 +1864,11 @@ Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azur
 ---
 
 ### PHASE 8 — GitHub Issue / PR Automation
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 8 automates workflow actions upon drift detection by creating structured GitHub Issues and proposing remediation PRs.
+
+> **Phase 8 completion and scope change (Task 8.2 design review, 2026-10-03, user-approved option R1):** Phase 8 is complete once Tasks 8.1 and 8.3 are complete (both 🟢 COMPLETED 2026-10-03). Task 8.2 (automated remediation branch/PR generation) is 🔴 BLOCKED — superseded by Phase 11; its remediation scope moved to Phase 11 (Tasks 11.1 and 11.3), where it is designed together with the human approval gates. No Task 8.2 implementation, workflow, permission or repository-setting change was made.
 
 > **Phase 8 restructuring (approved 2026-10-03, Task 8.1 design review and final architectural review):**
 > - **Execution order: 8.1 → 8.3 → 8.2** (tasks keep their numbers; they are listed here in execution order and the dependency fields enforce it).
@@ -1986,25 +1988,34 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
   - **Not exercised in real runs** (covered by tests): conflicting/stale/invalid markers, duplicates, `resource_not_in_report`, cap, partial resolution, API failures. The optional real recurrence cycle was not run (needs a separate Azure approval).
 
 #### Task 8.2 — Automated Remediation Branch & PR Generator
-- **Status**: ⬜ NOT STARTED
-- **Objective**: Implement workflow step to generate a Git remediation branch and PR updating Terraform HCL to match desired/remediated state. *(Executes third per the approved Phase 8 restructuring, 2026-10-03; requires its own design review before implementation.)*
+- **Status**: 🔴 BLOCKED — superseded by Phase 11, design review 2026-10-03
+- **Objective**: Implement workflow step to generate a Git remediation branch and PR updating Terraform HCL to match desired/remediated state. *(Executes third per the approved Phase 8 restructuring, 2026-10-03; requires its own design review before implementation.)* **Not implemented in Phase 8:** the 2026-10-03 design review found this objective unsafe and non-deterministic under the locked Phase 8 rules (see Design Review); the remediation scope moved to Phase 11.
 - **Dependencies**: Task 8.3, Task 6.6
-- **Files/Areas**: `scripts/create_remediation_pr.py`
-- **Acceptance Criteria**:
-  - [ ] Creates a remediation branch (proposed name `drift-remediation/<resource_name>-<date>`; not final — subject to the Task 8.2 design review).
-  - [ ] Proposes HCL patch or state sync.
-  - [ ] Opens GitHub PR referencing the original drift issue with `Refs #n`, never a closing keyword (issues are closed only by 8.3 evidence-based resolution).
-  - [ ] Owns PR lifecycle, including closing stale remediation PRs.
+- **Files/Areas**: `scripts/create_remediation_pr.py` — **not created**. No Task 8.2 implementation, workflow, job, permission (`contents: write` / `pull-requests: write`) or repository-setting change ("Allow GitHub Actions to create and approve pull requests") was made.
+- **Acceptance Criteria** *(superseded by Phase 11 — not applicable in Phase 8; none of these were implemented or completed)*:
+  - [ ] *(superseded)* Creates a remediation branch (proposed name `drift-remediation/<resource_name>-<date>`; not final — subject to the Task 8.2 design review).
+  - [ ] *(superseded)* Proposes HCL patch or state sync.
+  - [ ] *(superseded → Task 11.1 requirement)* Opens GitHub PR referencing the original drift issue with `Refs #n`, never a closing keyword (issues are closed only by 8.3 evidence-based resolution).
+  - [ ] *(superseded)* Owns PR lifecycle, including closing stale remediation PRs.
 - **Validation**:
-  - [ ] Test PR generation against the validation target decided in the Task 8.2 design review (a separate test repository is one candidate, not final).
-- **Design-review items (unresolved, must be decided before implementation)**:
+  - [ ] *(superseded)* Test PR generation against the validation target decided in the Task 8.2 design review (a separate test repository is one candidate, not final).
+- **Design-review items (unresolved, must be decided before implementation)**: *(resolved 2026-10-03 by the Task 8.2 design review: scope moved to Phase 11)*
   - Public-PR value/HCL disclosure versus the Phase 8 public-repository profile (e.g. non-security drift only, or state sync only).
   - Fragment location: Task 6.6 fragments are `location = "not_determined"`.
   - PR permission scope (`contents` / `pull-requests: write`), branch naming and validation target.
+- **Design Review (2026-10-03, user-approved option R1 — move remediation PR scope to Phase 11)**:
+  - **F1 Objective inconsistent**: the desired state already is the HCL. For the default plan direction (restore declared) there is no code change; remediation is a reviewed `terraform apply` of `main` (Phase 11). Only "accept the Azure value" changes HCL, and choosing that direction is a human decision (Task 6.6: options are never ranked or recommended; `plan_default` is not a recommendation).
+  - **F2 Disclosure**: an "accept" PR must commit the *real* value; a public commit diff is permanent and indexed and real values can be personal data — conflicts with the Phase 8 public-repository profile (decision C: no values published).
+  - **F3 Value location not determinable**: values flow through tfvars → modules → `merge(var.common_tags, each.value.extra_tags)`; a generic deterministic HCL edit needs Terraform-aware resolution and format-preserving HCL writing (no standard-library parser; no faithful round-trip parser) or a hand-maintained allowlist; `common_tags`-sourced values affect every resource.
+  - **F4 Drift laundering**: an automated PR that codifies an out-of-band (possibly malicious, e.g. an opened NSG) change into Terraform invites approval through review fatigue.
+  - **F5 Permissions/configuration**: branch + PR creation needs `contents: write` (can push to any unprotected branch) and `pull-requests: write` plus the repository setting allowing Actions to create PRs; PRs created with `GITHUB_TOKEN` trigger no workflows, so no CI evidence.
+  - **F6 Idempotency/human edits**: a scheduled generator facing repeated drift needs branch reuse, never-force-push and closed/merged-PR handling; recurrence after a merge conflicts with `main`.
+  - **F7 No implicit apply today**: `drift-detection.yml` never applies; `terraform-auth-test.yml` runs only `plan`; this boundary is locked into Task 11.1.
+  - Options considered: R1 (chosen) move to Phase 11; R2 human-authored PR contract (template + docs only); R3 human-dispatched "accept" PR generator with an allowlist and explicit disclosure consent (not chosen: new write permissions, repository-setting change, brittle tfvars editing, decision-C exception).
 - **Implementation Notes**:
   - PR must await human review before apply. The Phase 11 human approval boundary is preserved: no apply or merge automation, no LLM-generated patches.
 - **Completion Notes**:
-  - None.
+  - None — not implemented; superseded by Phase 11 (Tasks 11.1 and 11.3).
 
 ---
 
@@ -2162,11 +2173,21 @@ Phase 11 enforces strict human approval controls before applying any automated i
 #### Task 11.1 — Safe Remediation Architecture & Controls
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Architect human-in-the-loop controls prohibiting autonomous destructive apply actions.
-- **Dependencies**: Task 8.2
+- **Dependencies**: Task 8.3
+- **Dependency note**: changed 2026-10-03 from the superseded remediation-PR task (Phase 8 design review, option R1); its remediation PR scope moved into this task.
 - **Files/Areas**: `docs/remediation-safeguards.md`
 - **Acceptance Criteria**:
   - [ ] Specification mandating manual review, environment approval gates, and `terraform plan` verification prior to `apply`.
   - [ ] Direct `terraform apply` blocked in automated background detection workflows.
+  - [ ] **Locked remediation requirements (moved from Task 8.2, design review 2026-10-03)**:
+    - the remediation direction is a human choice;
+    - revert direction = reviewed Terraform apply of `main`;
+    - accept direction = human-authored PR;
+    - PRs reference drift issues using `Refs #n`;
+    - remediation PRs never use a closing keyword (drift issues are closed only by Task 8.3 evidence-based resolution);
+    - no auto-merge;
+    - no apply triggered merely by a merge;
+    - real Azure values are published only through a human-authored change.
 - **Validation**:
   - [ ] Document architecture approval.
 - **Implementation Notes**:
@@ -2195,7 +2216,7 @@ Phase 11 enforces strict human approval controls before applying any automated i
 - **Dependencies**: Task 11.2
 - **Files/Areas**: `.github/workflows/remediation-apply.yml`
 - **Acceptance Criteria**:
-  - [ ] Workflow checks out approved PR branch.
+  - [ ] Workflow checks out the approved revision: `main` for the revert direction, or the merged human-authored PR revision for the accept direction. *(Reworded 2026-10-03: no approved PR branch exists for the revert direction; Task 8.2 superseded by Phase 11.)*
   - [ ] Executes `terraform plan` and requires second confirmation if plan diff changed.
   - [ ] Executes `terraform apply` cleanly upon confirmation.
 - **Validation**:
