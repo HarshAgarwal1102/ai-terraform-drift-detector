@@ -230,7 +230,8 @@ def test_missing_client_library_degrades(monkeypatch):
 @requires_ai
 def test_ai_state_schema():
     assert set(AiState.__annotations__) == {"drift_report", "parsed_drift", "security_targets", "cost_targets",
-                                            "config_targets", "llm_call", "llm", "inferences", "warnings"}
+                                            "config_targets", "origin_facts", "llm_call", "llm", "inferences",
+                                            "warnings"}
     assert AiState.__total__ is False
 
 
@@ -243,7 +244,8 @@ def test_graph_without_llm_falls_back_to_deterministic():
     assert state["llm"] == {"available": False, "provider": "none", "model": None,
                             "reason": "AI_LLM_PROVIDER is not set (LLM analysis is opt-in)"}
     # The single AI node records why each section did not run; nothing else enters `inferences`.
-    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration"}
+    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration",
+                                        "analyze_root_cause", "assess_risk"}
     assert {r["status"] for r in state["inferences"].values()} == {"skipped"}
     assert state["llm_call"]["attempted"] is False
     assert len(state["warnings"]) == 1 and "deterministic evidence" in state["warnings"][0]

@@ -28,6 +28,7 @@ from ai_engine.evidence import (
 from ai_engine.nodes.analyze_drift import SYSTEM_PROMPT, make_analyze_drift
 from ai_engine.nodes.cost_analysis import route_cost_config
 from ai_engine.nodes.parse_drift import parse_drift
+from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.security_analysis import (
     AiSecurityOutput,
     InvalidModelOutput,
@@ -72,6 +73,7 @@ def prepared(report: dict) -> dict:
     state.update(parse_drift(state))
     state.update(classify_drift(state))
     state.update(route_cost_config(state))
+    state.update(derive_origin_risk(state))
     return state
 
 
@@ -133,10 +135,12 @@ def finding(address=NSG, paths=(["security_rule"],), impact="CRITICAL", **extra)
 
 
 def envelope(security=(), cost=(), configuration=(), summary="s") -> str:
-    """A reply of the single LLM call (Task 6.4): all three sections."""
+    """A reply of the single LLM call (Tasks 6.4-6.5): all five sections."""
     return json.dumps({"security_analysis": {"findings": list(security), "summary": summary},
                        "cost_analysis": {"findings": list(cost), "summary": ""},
-                       "configuration_analysis": {"findings": list(configuration), "summary": ""}})
+                       "configuration_analysis": {"findings": list(configuration), "summary": ""},
+                       "root_cause_analysis": {"findings": [], "summary": ""},
+                       "risk_assessment": {"findings": [], "summary": ""}})
 
 
 def reply(*findings, summary="s") -> str:
@@ -269,7 +273,8 @@ def test_limits_order_by_severity_and_record_omissions():
         "changes_omitted": [{"address": SA, "path": ["min_tls_version"], "sections": ["security"]}],
         "values_truncated": [],
         "per_section": {"security": {"routed": 2, "included": 1}, "cost": {"routed": 0, "included": 0},
-                        "configuration": {"routed": 0, "included": 0}}}
+                        "configuration": {"routed": 0, "included": 0}, "root_cause": {"routed": 0, "included": 0},
+                        "risk": {"routed": 0, "included": 0}}}
 
 
 def test_critical_changes_kept_first():
@@ -538,7 +543,8 @@ def test_graph_with_langchain_fake_model():
     # Deterministic channels are untouched and frozen; AI output lives only in `inferences`.
     assert state["drift_report"] == report
     assert isinstance(state["security_targets"], FrozenDict)
-    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration"}
+    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration",
+                                        "analyze_root_cause", "assess_risk"}
     assert state["drift_report"]["resources"][0]["severity"]["level"] == "CRITICAL"
 
 
@@ -598,7 +604,7 @@ def test_no_call_when_limits_leave_no_evidence(limits):
     assert llm.prompts == []  # no call
     assert result["evidence"]["changes"] == 0
     assert result["evidence"]["truncation"]["changes_omitted"] == [
-        {"address": NSG, "path": ["security_rule"], "sections": ["security", "configuration"]}]
+        {"address": NSG, "path": ["security_rule"], "sections": ["security", "configuration", "root_cause", "risk"]}]
     assert update["warnings"][0].startswith("AI analysis saw truncated evidence: 1 change(s) omitted")
     assert update["llm_call"]["attempted"] is False
 

@@ -1,4 +1,4 @@
-"""`analyze_drift`: the single LLM call of a run (Tasks 6.3-6.4).
+"""`analyze_drift`: the single LLM call of a run (Tasks 6.3-6.5).
 
 Phase 6 guarantee: **at most one logical LLM call per run** across all analysis
 sections. This is the only node that receives the LLM client. With the default
@@ -6,26 +6,34 @@ configuration (`AI_LLM_MAX_RETRIES=0`) the call is at most one HTTP attempt;
 further attempts of the same prompt happen only when retries are configured
 explicitly. The configured `max_retries` is recorded in `llm_call`.
 
-One prompt carries the deterministic evidence of three sections, built by the
+One prompt carries the deterministic evidence of five sections, built by the
 single gateway `ai_engine.evidence.build_llm_evidence` from the routing of
-`classify_drift` (security) and `route_cost_config` (cost, configuration). A
-change routed to several sections is sent once. The model must reply with one
-JSON object holding exactly `security_analysis`, `cost_analysis` and
-`configuration_analysis`, each `{"findings": [...], "summary": str}`.
+`classify_drift` (security), `route_cost_config` (cost, configuration) and
+`derive_origin_risk` (root cause, risk; it also supplies the deterministic
+origin facts and risk factors). A change routed to several sections is sent
+once. The model must reply with one JSON object holding exactly
+`security_analysis`, `cost_analysis`, `configuration_analysis`,
+`root_cause_analysis` and `risk_assessment`, each `{"findings": [...],
+"summary": str}`.
 
 Validation is deterministic and staged:
 
-1. Envelope: one JSON object (one ```json fence tolerated) with exactly the three
+1. Envelope: one JSON object (one ```json fence tolerated) with exactly the five
    keys. Otherwise every applicable section is `invalid_output`.
 2. Each section against its own strict schema. A section that fails is
    `invalid_output`; the others are still validated.
 3. Findings: citations must be (address, path) pairs sent **for that section**
-   (`unsupported_citation`); free text stating amounts, prices, rates or
-   savings is rejected (`unsupported_cost_claim`), and such a summary is dropped.
-   Deterministic severity/classification are attached by code.
+   (`unsupported_citation`); free text breaking a deterministic guard is
+   rejected (`unsupported_cost_claim`, `unsupported_attribution`,
+   `remediation_not_allowed`), and such a summary is dropped. Root-cause
+   hypotheses must agree with the cited changes' origin, risk kinds with their
+   risk factors. Deterministic severity/classification are attached by code.
+
+Actor is `unknown` and `confirmed` is false for every root-cause finding until
+Phase 7 Activity Log evidence; there is no AI risk level.
 
 Per-section result in `inferences["analyze_security" | "analyze_cost" |
-"analyze_configuration"]` with status `ok`, `skipped` (no relevant changes,
+"analyze_configuration" | "analyze_root_cause" | "assess_risk"]` with status `ok`, `skipped` (no relevant changes,
 failed report, LLM unavailable, no evidence left after limits; a section the
 model was told is not applicable stays `skipped` and any findings it returns are
 rejected), `failed` (`invoke_llm` failure) or `invalid_output`. The raw reply is
@@ -45,12 +53,18 @@ from pydantic import BaseModel, ValidationError
 
 from ai_engine.evidence import EVIDENCE_TAG, SECTIONS, EvidenceLimits, build_llm_evidence, render_evidence
 from ai_engine.llm import invoke_llm
-from ai_engine.nodes.common import contains_cost_claim
+from ai_engine.nodes.common import free_text_violation
 from ai_engine.nodes.cost_analysis import (
     ConfigurationSection,
     CostSection,
     validate_configuration_section,
     validate_cost_section,
+)
+from ai_engine.nodes.root_cause import (
+    RiskSection,
+    RootCauseSection,
+    validate_risk_section,
+    validate_root_cause_section,
 )
 from ai_engine.nodes.security_analysis import _FENCE, AiSecurityOutput, validate_findings
 from drift_engine.logs import log_event
@@ -58,14 +72,19 @@ from drift_engine.logs import log_event
 logger = logging.getLogger(__name__)
 
 NODE = "analyze_drift"
-OUTPUT_KEYS = {"security": "security_analysis", "cost": "cost_analysis", "configuration": "configuration_analysis"}
-RESULT_KEYS = {"security": "analyze_security", "cost": "analyze_cost", "configuration": "analyze_configuration"}
+OUTPUT_KEYS = {"security": "security_analysis", "cost": "cost_analysis", "configuration": "configuration_analysis",
+               "root_cause": "root_cause_analysis", "risk": "risk_assessment"}
+RESULT_KEYS = {"security": "analyze_security", "cost": "analyze_cost", "configuration": "analyze_configuration",
+               "root_cause": "analyze_root_cause", "risk": "assess_risk"}
 NO_ROUTES = {"security": "no security-relevant changes", "cost": "no cost-relevant changes",
-             "configuration": "no configuration changes"}
+             "configuration": "no configuration changes", "root_cause": "no changes with an origin to analyze",
+             "risk": "no deterministic risk factors"}
 SECTION_SCHEMAS: dict[str, tuple[type[BaseModel], Callable]] = {
     "security": (AiSecurityOutput, validate_findings),
     "cost": (CostSection, validate_cost_section),
     "configuration": (ConfigurationSection, validate_configuration_section),
+    "root_cause": (RootCauseSection, validate_root_cause_section),
+    "risk": (RiskSection, validate_risk_section),
 }
 
 SYSTEM_PROMPT = f"""You are a reviewer of Terraform-managed Azure infrastructure drift.
@@ -80,8 +99,10 @@ You receive deterministic drift evidence between <{EVIDENCE_TAG}> tags. Rules:
    is false must get "findings": []. Cite only changes sent for that section.
 4. Cite evidence: every finding names one resource `address` and the exact `path` arrays of
    the changes it relies on, copied from the evidence. Never cite anything else.
-5. Do not claim who or what made a change; the evidence does not contain that.
-6. Do not recommend remediation or give fix instructions; explain only.
+5. Do not claim who or what made a change: no names, emails, accounts or "changed by" statements.
+   The actor is "unknown" and nothing is "confirmed" until Activity Log evidence exists.
+6. Do not recommend remediation or give fix instructions; explain only. Describing what
+   Terraform's plan would do is fine; telling the reader what to do is not.
 7. No pricing data is provided. Never state amounts, prices, rates, savings, charges or
    currency. Monetary impact cannot be determined from this evidence; say so if relevant.
    You may only give a qualitative direction for cost.
@@ -97,6 +118,13 @@ Sections:
 - configuration_analysis: what the drift means relative to the declared Terraform values
   (the `desired` view): overridden declared values, settings Terraform does not manage,
   pending configuration changes, ambiguous changes, values unknown until apply.
+- root_cause_analysis: plausible kinds of origin for each change, consistent with its
+  deterministic `origin.category` (outside_terraform, outside_terraform_converged,
+  configuration_side, both_sides, value_unknown_until_apply, undetermined). These are
+  unconfirmed hypotheses, not facts; list possible channels only in `possible_channels`.
+- risk_assessment: the consequences of the deterministic `origin.risk_factors` (e.g. what
+  reverting or recreating would affect). No risk level: the deterministic severity is the
+  only rating.
 
 Reply with exactly one JSON object and nothing else:
 {{"security_analysis": {{"findings": [{{"address": str, "cited_paths": [[str, ...], ...],
@@ -112,7 +140,19 @@ Reply with exactly one JSON object and nothing else:
  "configuration_analysis": {{"findings": [{{"address": str, "cited_paths": [[str, ...], ...],
     "topic": "declared_value_overridden" | "unmanaged_setting" | "pending_config_change" |
              "ambiguous_change" | "value_unknown_until_apply" | "other",
-    "explanation": str, "basis": "inference"}}], "summary": str}}}}
+    "explanation": str, "basis": "inference"}}], "summary": str}},
+ "root_cause_analysis": {{"findings": [{{"address": str, "cited_paths": [[str, ...], ...],
+    "hypothesis": "out_of_band_change" | "configuration_change" | "provider_or_platform_behavior" |
+                  "azure_policy_or_automation" | "lifecycle_change" | "undetermined",
+    "possible_channels": ["portal" | "cli_or_sdk" | "other_iac_or_pipeline" | "azure_policy" |
+                          "platform_managed" | "unknown", ...],
+    "actor": "unknown", "confirmed": false,
+    "explanation": str (max 600 chars), "basis": "inference"}}], "summary": str}},
+ "risk_assessment": {{"findings": [{{"address": str, "cited_paths": [[str, ...], ...],
+    "risk_kind": "apply_reverts_external_change" | "apply_destroys_or_recreates" | "ambiguous_intent" |
+                 "unmanaged_setting" | "value_unknown_until_apply" | "evidence_incomplete" | "other",
+    "explanation": str (max 600 chars), "basis": "inference"}}], "summary": str}}}}
+At most 20 findings in root_cause_analysis and in risk_assessment.
 Use "findings": [] for a section when nothing in it is relevant."""
 
 
@@ -162,9 +202,12 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
     def analyze_drift(state: Mapping[str, Any]) -> dict[str, Any]:
         status = state.get("llm") or {}
         parsed = state["parsed_drift"]
+        origin_facts = state["origin_facts"]
         routes = {"security": list(state["security_targets"]["changes"]),
                   "cost": list(state["cost_targets"]["changes"]),
-                  "configuration": list(state["config_targets"]["changes"])}
+                  "configuration": list(state["config_targets"]["changes"]),
+                  "root_cause": [r for r in origin_facts["routes"] if r["section"] == "root_cause"],
+                  "risk": [r for r in origin_facts["routes"] if r["section"] == "risk"]}
 
         def record(section: str, outcome: str, reason: str | None = None, **fields: Any) -> dict[str, Any]:
             return {
@@ -201,8 +244,9 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
         if llm is None or not status.get("available"):
             return skip_all(f"LLM unavailable: {status.get('reason')}")
 
-        all_routes = routes["security"] + routes["cost"] + routes["configuration"]
-        evidence = build_llm_evidence(parsed, all_routes, limits)  # EvidenceIntegrityError propagates: fail closed
+        all_routes = [route for section in SECTIONS for route in routes[section]]
+        # EvidenceIntegrityError propagates: fail closed
+        evidence = build_llm_evidence(parsed, all_routes, limits, origin_facts=origin_facts)
         truncation = evidence["truncation"]
         applicable = {s: evidence["sections"][s]["applicable"] for s in SECTIONS}
 
@@ -263,9 +307,10 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
                 continue
             findings, rejected = validate(output, evidence)
             summary = output.summary
-            if contains_cost_claim(summary):
+            violation = free_text_violation(summary)
+            if violation:
                 summary = None
-                rejected = rejected + [{"index": None, "reason": "summary_unsupported_cost_claim"}]
+                rejected = rejected + [{"index": None, "reason": f"summary_{violation}"}]
             results[section] = record(section, "ok", findings=findings, rejected_findings=rejected, summary=summary,
                                       evidence=section_evidence(section))
         return finish(results, call_record(True, "ok", None, evidence), warnings)

@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 6 — LangGraph AI Analysis Engine
-- **Current Active Task**: Task 6.5 — Root Cause & Risk Assessment Nodes
+- **Current Active Task**: Task 6.6 — Remediation Recommendation & Report Generation Nodes
 - **Phases Completed**: 5 of 14
 
 ---
@@ -1685,19 +1685,34 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
   - **Limitations**: (a) no pricing: cost output is qualitative until Phase 10 (Infracost); (b) the cost pattern list is heuristic routing and can miss provider-specific cost attributes or include free ones; lifecycle routing also sends tag changes of added/deleted resources; (c) the cost-claim guard is pattern-based (conservative: it may reject a legitimate text containing e.g. `$` or "cost: 3"); (d) updates carry only changed paths, so unchanged context (current tier, region, usage) is absent; (e) analysis quality of a real model is unverified (no live call); (f) attribution/remediation wording in free text is forbidden by the prompt but checked only in Task 6.7.
 
 #### Task 6.5 — Root Cause & Risk Assessment Nodes
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-03
+- **Completed**: 2026-10-03
 - **Objective**: Implement LangGraph nodes `analyze_root_cause` and `assess_risk` to hypothesize drift origin based strictly on available evidence.
 - **Dependencies**: Task 6.4
-- **Files/Areas**: `src/ai_engine/nodes/root_cause.py`
+- **Files/Areas**: `src/ai_engine/nodes/root_cause.py`; plus (approved design) `src/ai_engine/nodes/analyze_drift.py`, `src/ai_engine/evidence.py`, `src/ai_engine/nodes/common.py`, `src/ai_engine/graph.py`, `tests/fixtures/root_cause_plans/`, tests
 - **Acceptance Criteria**:
-  - [ ] Analyzes whether drift stems from manual portal edits, missing HCL variables, or out-of-band updates.
-  - [ ] Explicitly labels speculative claims as inferences vs facts.
+  - [x] Analyzes whether drift stems from a change outside Terraform (actor and channel unknown; the portal is one possibility, never asserted), a configuration-side change (code, tfvars, module or provider default; not distinguishable), or out-of-band updates. *(Reworded 2026-10-03 per the Task 6.5 design review: the original "manual portal edits" / "missing HCL variables" asked for distinctions Terraform evidence cannot make.)*
+  - [x] Explicitly labels speculative claims as inferences vs facts.
 - **Validation**:
-  - [ ] Test prompt outputs against strict Evidence vs Inference criteria.
+  - [x] Test prompt outputs against strict Evidence vs Inference criteria.
 - **Implementation Notes**:
   - Prompt engineering enforcing zero hallucination of untracked events.
+  - **Approved design (Task 6.5 design review, 2026-10-03):**
+    - A deterministic node `derive_origin_risk` (no LLM) writes write-once `origin_facts`: per change the origin category (from resource classification + attribute class + assessment) and deterministic risk factors; per resource moved/importing/action_reason/ambiguous and the union of risk factors. It also routes the `root_cause` and `risk` sections.
+    - `analyze_root_cause` and `assess_risk` are **sections** (`root_cause_analysis`, `risk_assessment`) of the existing single `analyze_drift` call: five sections, still **at most one logical LLM call per run** (default one HTTP attempt).
+    - Root cause = deterministic change-origin category + AI-ranked hypotheses labelled inference, with constant `actor = "unknown"` and `confirmed = false` until Phase 7 Activity Log evidence (only deterministic code may ever change them). A hypothesis that contradicts the cited changes' origin is rejected (`hypothesis_contradicts_evidence`).
+    - Risk = deterministic risk factors + AI-explained consequences. **No AI risk level**: deterministic severity remains the only authoritative rating. A `risk_kind` must match a deterministic factor of the cited changes (`other` is kept and flagged).
+    - Deterministic guards on every section's free text: attribution (no actor claims: emails, UPNs, GUIDs, "changed by …", "an administrator changed …") and remediation (no fix instructions; remediation is Task 6.6), alongside the existing cost-claim guard and section-scoped citations.
+    - Evidence: the single gateway gains the allowlisted per-change `origin` and per-resource `risk_factors` (no previous-address string); run metadata and the plan timestamp stay excluded.
 - **Completion Notes**:
-  - None.
+  - **Files**: new `src/ai_engine/nodes/root_cause.py` (`derive_origin_risk`, origin table, risk factors, root-cause/risk section schemas and validators), `tests/test_ai_root_cause.py`, `tests/fixtures/root_cause_plans/` (generator + 8 synthetic scenarios); changed `analyze_drift.py` (five-section envelope, prompt rules), `evidence.py` (five sections + caps, allowlisted `origin` / `risk_factors` / `moved` / `importing` / `action_reason`), `common.py` (attribution and remediation guards, `free_text_violation`), `security_analysis.py` and `cost_analysis.py` (all three guards on every section), `graph.py`; Task 6.1–6.4 tests updated for the five-section envelope and new node. No `drift_engine`, Terraform, Azure or workflow change; README unchanged (no new user-facing command).
+  - **Graph**: … → `route_cost_config` → `derive_origin_risk` → `analyze_drift` → END. New write-once/frozen `origin_facts` (with `actor = "unknown"`, `confirmed = false`). Still **one logical LLM call per run**, now five sections; default one HTTP attempt.
+  - **Deterministic origin**: per change from the attribute class (object-level from the resource class; `undetermined` resources stay undetermined): `outside_terraform`, `outside_terraform_converged`, `configuration_side`, `both_sides`, `value_unknown_until_apply`, `undetermined`, plus `lifecycle`. **Risk factors**: `apply_reverts_external_change` (update + drifted/drifted-and-config), `apply_destroys_or_recreates` (replace/delete/external deletion), `ambiguous_intent`, `unmanaged_setting` (unconfigured), `value_unknown_until_apply`, `redacted_unreadable`, `moved_or_importing`. Noise changes have no origin. Root-cause routes: every non-noise change; risk routes: changes with ≥ 1 factor.
+  - **Contracts**: root cause `hypothesis` (6 kinds), `possible_channels` (structured only), constants `actor = "unknown"`, `confirmed = false`; code adds `confirmation_requires = "activity_log"`, `origin_facts`, `deterministic_severity`. Risk `risk_kind` (7 kinds), **no level**; code adds `risk_factors`, `risk_kind_unverified` (for `other`), `deterministic_severity`. Both: max 20 findings, 600-char explanations (reply-length mitigation for five sections).
+  - **Deterministic checks**: section-scoped citations; every cited change must agree with the hypothesis (`hypothesis_contradicts_evidence`); `risk_kind` must match a factor of a cited change (`evidence_incomplete` needs a redacted change or truncated evidence); attribution guard (emails/UPNs, GUIDs, "changed by …", actor + change verb) and remediation guard (terraform commands, "you/we should", "we recommend", "to fix this", "please/consider …") on findings and summaries of **all five sections**, beside the cost-claim guard.
+  - **Tests** (session-scratchpad venv, fake models / local `httpx.MockTransport` only, network guard active): `test_ai_root_cause.py` **123 passed** — origin table on 12 real/synthetic fixtures, risk factors on 11, previous address never a field, noise-only drift makes no call, routing, five-section envelope, **one call and one HTTP request with all five sections applicable**, origin facts identical for no/ok/failed/invalid LLM, `origin_facts` cannot be replaced, mutated or confirmed, allowlisted origin in the prompt, redaction status-only + fail-closed, a 15-case hypothesis/origin matrix, all-citations-must-agree, schema constants and caps, risk-kind support (incl. redaction/truncation), no risk rating, section-scoped citations, 9+8 attribution and 9+5 remediation phrasings, guards in every section and summary, injected actor/fix text escaped and echoes rejected, consistent output accepted end-to-end on 9 fixtures. Earlier AI suites: 76 + 47 + 82 + 92 (all AI: 420). Mutation check **58/58** caught (25 new for 6.5; three first-run survivors led to added tests). Full suite **750 passed** (667 subtests); `drift_engine` gate 99.87%; `ai_engine` 99% (`root_cause`, `analyze_drift`, `common`, `security_analysis` 100%); `unittest discover` OK; core-only: no LLM packages, 526 passed / 224 skipped.
+  - **Limitations**: (a) actor, time and channel remain unknown until Phase 7; hypotheses are unconfirmed by design; (b) the origin category restates Terraform's three-view comparison and cannot separate code, tfvars, module or provider-default changes; (c) attribution/remediation guards are pattern-based and conservative (may reject a legitimate sentence, e.g. "a user-assigned identity was added"); free-text claims they do not match are evaluated in Task 6.7; (d) engine `notes` (allowlisted since 6.3) may mention a previous address in text; (e) no live model call, so real-model quality and reply length with five sections are unverified; a cut-off reply ends as `invalid_output` for every section.
 
 #### Task 6.6 — Remediation Recommendation & Report Generation Nodes
 - **Status**: ⬜ NOT STARTED
@@ -1711,6 +1726,7 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
   - [ ] Run full LangGraph pipeline end-to-end and inspect `ai_analysis_report.md`.
 - **Implementation Notes**:
   - Final graph output node producing user-facing artifacts.
+  - **Constraint (recorded 2026-10-03, Task 6.5 design review):** Task 6.6 must not introduce an independent additional LLM call; the Phase 6 guarantee of at most one logical LLM call per run stands. The final remediation architecture is decided in Task 6.6.
 - **Completion Notes**:
   - None.
 

@@ -22,8 +22,9 @@ is validated here:
 - `AiSecurityOutput` is strict (no extra fields); `parse_model_output` also
   accepts it as a standalone reply (one ```json fence tolerated);
 - every finding must cite (address, path) pairs that were sent for the security
-  section, else it is rejected as `unsupported_citation`; free text stating
-  amounts, prices or savings is rejected as `unsupported_cost_claim`;
+  section, else it is rejected as `unsupported_citation`; free text breaking a
+  deterministic guard is rejected (`unsupported_cost_claim`,
+  `unsupported_attribution`, `remediation_not_allowed`);
 - every finding is `basis: "inference"`; the authoritative rating is the
   deterministic severity of the cited changes (`deterministic_severity`). The
   model's `ai_assessed_impact` is kept next to it, flagged when lower, and never
@@ -40,7 +41,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, ValidationError
 
 from ai_engine.evidence import cited_keys, severity_rank
-from ai_engine.nodes.common import CitedPath, Strict, contains_cost_claim
+from ai_engine.nodes.common import CitedPath, Strict, free_text_violation
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
@@ -135,8 +136,9 @@ def validate_findings(output: AiSecurityOutput, evidence: Mapping[str, Any]) -> 
         if not all(key in known for key in keys):
             rejected.append({"index": index, "reason": "unsupported_citation"})
             continue
-        if contains_cost_claim(finding.explanation):
-            rejected.append({"index": index, "reason": "unsupported_cost_claim"})
+        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation
+        if violation:
+            rejected.append({"index": index, "reason": violation})
             continue
         deterministic = max((known[key] for key in keys), key=severity_rank)
         accepted.append({

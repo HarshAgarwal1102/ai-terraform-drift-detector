@@ -33,7 +33,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field
 
 from ai_engine.evidence import cited_keys, evidence_lookup, severity_rank
-from ai_engine.nodes.common import CitedPath, Strict, contains_cost_claim
+from ai_engine.nodes.common import CitedPath, Strict, free_text_violation
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
@@ -183,8 +183,9 @@ def validate_cost_section(output: CostSection, evidence: Mapping[str, Any]) -> t
         if not all(key in known for key in keys):
             rejected.append({"index": index, "reason": "unsupported_citation"})
             continue
-        if contains_cost_claim(finding.explanation):
-            rejected.append({"index": index, "reason": "unsupported_cost_claim"})
+        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation
+        if violation:
+            rejected.append({"index": index, "reason": violation})
             continue
         resource = lookup[keys[0]][0]
         accepted.append({
@@ -230,8 +231,9 @@ def validate_configuration_section(output: ConfigurationSection,
         if not all(key in known for key in keys):
             rejected.append({"index": index, "reason": "unsupported_citation"})
             continue
-        if contains_cost_claim(finding.explanation):
-            rejected.append({"index": index, "reason": "unsupported_cost_claim"})
+        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation
+        if violation:
+            rejected.append({"index": index, "reason": violation})
             continue
         facts = [{"path": list(path), "class": lookup[key][1]["class"], "assessment": lookup[key][1]["assessment"]}
                  for path, key in zip(finding.cited_paths, keys)]

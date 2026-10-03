@@ -1,4 +1,4 @@
-"""LangGraph state and graph for the AI analysis engine (Tasks 6.1-6.4).
+"""LangGraph state and graph for the AI analysis engine (Tasks 6.1-6.5).
 
 `AiState` keeps deterministic evidence and model output apart:
 
@@ -16,6 +16,9 @@
 - `cost_targets` / `config_targets` are the deterministic cost and configuration
   routing of `route_cost_config` (Task 6.4), incl. a deterministic configuration
   summary. Write-once, frozen.
+- `origin_facts` is the deterministic origin category and risk factors per
+  change, written by `derive_origin_risk` (Task 6.5), with `actor = "unknown"`
+  and `confirmed = false` until Phase 7. Write-once, frozen.
 - `llm_call` records the run's single LLM call: attempted or not, status,
   provider/model, configured `max_retries`, evidence truncation. Write-once.
 - `inferences` holds model-generated interpretation keyed by the node that
@@ -24,11 +27,12 @@
 - `warnings` collects non-fatal problems such as an unreachable endpoint.
 
 The graph runs START -> `initialize` -> `parse_drift` -> `classify_drift` ->
-`route_cost_config` -> `analyze_drift` -> END. Every deterministic node runs
+`route_cost_config` -> `derive_origin_risk` -> `analyze_drift` -> END. Every deterministic node runs
 before the LLM. `analyze_drift` is the only node that receives the LLM client
 and makes **at most one logical LLM call per run** (security, cost and
-configuration sections in one reply); it writes AI output only to `inferences`
-(`analyze_security`, `analyze_cost`, `analyze_configuration`). Every LLM call
+configuration, root-cause and risk sections in one reply); it writes AI output
+only to `inferences` (`analyze_security`, `analyze_cost`,
+`analyze_configuration`, `analyze_root_cause`, `assess_risk`). Every LLM call
 goes through `invoke_llm`, which turns a missing, unreachable or failing LLM
 into a result object instead of an exception, so the graph always completes
 with deterministic data.
@@ -47,6 +51,7 @@ from ai_engine.config import AiConfig, create_chat_model, load_config
 from ai_engine.llm import AZURE_CONTENT_FILTER_MESSAGE, LLMCallResult, invoke_llm  # noqa: F401 (re-exported)
 from ai_engine.evidence import EvidenceLimits
 from ai_engine.nodes.parse_drift import ParsedDrift, parse_drift
+from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.analyze_drift import make_analyze_drift
 from ai_engine.nodes.cost_analysis import route_cost_config
 from ai_engine.nodes.security_analysis import classify_drift
@@ -134,6 +139,7 @@ write_once_security_targets = _write_once("security_targets")
 write_once_cost_targets = _write_once("cost_targets")
 write_once_config_targets = _write_once("config_targets")
 write_once_llm_call = _write_once("llm_call")
+write_once_origin_facts = _write_once("origin_facts")
 
 
 def merge_dicts(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any]:
@@ -154,6 +160,7 @@ class AiState(TypedDict, total=False):
     security_targets: Annotated[dict[str, Any], write_once_security_targets]
     cost_targets: Annotated[dict[str, Any], write_once_cost_targets]
     config_targets: Annotated[dict[str, Any], write_once_config_targets]
+    origin_facts: Annotated[dict[str, Any], write_once_origin_facts]
     llm_call: Annotated[dict[str, Any], write_once_llm_call]
     llm: LlmStatus
     inferences: Annotated[dict[str, Any], merge_dicts]
@@ -197,12 +204,14 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_node("parse_drift", parse_drift)
     graph.add_node("classify_drift", classify_drift)
     graph.add_node("route_cost_config", route_cost_config)
+    graph.add_node("derive_origin_risk", derive_origin_risk)
     graph.add_node("analyze_drift", make_analyze_drift(llm, limits))  # the only node holding the LLM client
     graph.add_edge(START, "initialize")
     graph.add_edge("initialize", "parse_drift")
     graph.add_edge("parse_drift", "classify_drift")
     graph.add_edge("classify_drift", "route_cost_config")
-    graph.add_edge("route_cost_config", "analyze_drift")
+    graph.add_edge("route_cost_config", "derive_origin_risk")
+    graph.add_edge("derive_origin_risk", "analyze_drift")
     graph.add_edge("analyze_drift", END)
     return graph.compile()
 

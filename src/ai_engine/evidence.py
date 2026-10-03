@@ -1,4 +1,4 @@
-"""The only path from deterministic evidence to an LLM prompt (Tasks 6.3-6.4).
+"""The only path from deterministic evidence to an LLM prompt (Tasks 6.3-6.5).
 
 `build_llm_evidence` turns `parsed_drift` plus the deterministic routing of
 `classify_drift` (security) and `route_cost_config` (cost, configuration) into
@@ -11,11 +11,17 @@ resources, output changes, or the raw plan (which the AI engine never reads).
 `notes` are drift_engine's own deterministic texts and are included as they
 are; they can mention an address, e.g. "moved from <previous address>".
 
-Sections (Task 6.4): each route names the analysis section it is for
-(`security`, `cost`, `configuration`; default `security`). A change routed to
+Sections (Tasks 6.4-6.5): each route names the analysis section it is for
+(`security`, `cost`, `configuration`, `root_cause`, `risk`; default `security`). A change routed to
 several sections is sent **once**, tagged with every section and its routing
 reason (`sections`). A section is `applicable` only if at least one of its
 changes was included; citations are later checked per section (`cited_keys`).
+
+Origin facts (Task 6.5): with `origin_facts` (from the deterministic
+`derive_origin_risk` node), each change also carries `origin` {category,
+lifecycle, risk_factors} and each resource `risk_factors`, `moved`,
+`importing` and `action_reason`. `moved` is a boolean: the previous address
+itself is never sent.
 
 Fail closed: a change whose views mix a redacted status with a plain value, or
 that is flagged `redacted` but still carries a value, raises
@@ -43,7 +49,7 @@ from typing import Any
 SEVERITY_ORDER = ("INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL")  # ascending, as in the report contract
 _RANK = {level: i for i, level in enumerate(SEVERITY_ORDER)}
 
-SECTIONS = ("security", "cost", "configuration")  # also the priority order under limits
+SECTIONS = ("security", "cost", "configuration", "root_cause", "risk")  # also the priority order under limits
 DEFAULT_SECTION = "security"
 
 RESOURCE_FIELDS = ("address", "type", "classification", "action", "drift_action", "ambiguous", "notes")
@@ -65,6 +71,8 @@ class EvidenceLimits:
     max_security_changes: int = 30
     max_cost_changes: int = 20
     max_configuration_changes: int = 30
+    max_root_cause_changes: int = 30
+    max_risk_changes: int = 30
 
     def section_cap(self, section: str) -> int:
         return getattr(self, f"max_{section}_changes")
@@ -103,6 +111,7 @@ def build_llm_evidence(
     parsed_drift: Mapping[str, Any],
     routes: Iterable[Mapping[str, Any]],
     limits: EvidenceLimits = EvidenceLimits(),
+    origin_facts: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Allowlisted, deduplicated, size-bounded evidence for the routed changes.
 
@@ -113,6 +122,8 @@ def build_llm_evidence(
     """
     resources = {r["address"]: r for r in parsed_drift["resources"]}
     check_evidence_integrity(resources.values())
+    origins = {(c["address"], tuple(c["path"])): c for c in (origin_facts or {}).get("changes", [])}
+    resource_facts = {r["address"]: r for r in (origin_facts or {}).get("resources", [])}
 
     merged: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
     routed_per_section = {section: 0 for section in SECTIONS}
@@ -152,6 +163,10 @@ def build_llm_evidence(
         entry["severity"] = {"level": change["severity"]["level"], "rules": list(change["severity"]["rules"])}
         entry["assessment"] = change["assessment"]["category"]
         entry["sections"] = {s: fits[s] for s in sorted(fits, key=SECTIONS.index)}
+        origin = origins.get((resource["address"], tuple(change["path"])))
+        if origin is not None:
+            entry["origin"] = {"category": origin["origin"], "lifecycle": origin["lifecycle"],
+                               "risk_factors": list(origin["risk_factors"])}
         for view in VIEWS:
             entry[view], cut = _view(change[view], limits)
             if cut:
@@ -162,16 +177,16 @@ def build_llm_evidence(
         if new_resource:
             addresses.append(resource["address"])
 
-    evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section)
+    evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts)
     while kept and len(render_evidence(evidence)) > limits.max_evidence_chars:
         resource, entry = kept.pop()
         omitted.append({"address": resource["address"], "path": entry["path"], "sections": list(entry["sections"])})
         values_cut = [v for v in values_cut if (v["address"], v["path"]) != (resource["address"], entry["path"])]
-        evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section)
+        evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts)
     return evidence
 
 
-def _assemble(kept, resources, omitted, values_cut, merged, routed_per_section) -> dict[str, Any]:
+def _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts) -> dict[str, Any]:
     addresses: list[str] = []
     for resource, _ in kept:
         if resource["address"] not in addresses:
@@ -182,6 +197,10 @@ def _assemble(kept, resources, omitted, values_cut, merged, routed_per_section) 
         item: dict[str, Any] = {field: resource[field] for field in RESOURCE_FIELDS}
         item["notes"] = list(resource["notes"])
         item["severity"] = {"level": resource["severity"]["level"], "reasons": list(resource["severity"]["reasons"])}
+        facts = resource_facts.get(address)
+        if facts is not None:
+            item.update({"risk_factors": list(facts["risk_factors"]), "moved": facts["moved"],
+                         "importing": facts["importing"], "action_reason": facts["action_reason"]})
         item["changes"] = [entry for r, entry in kept if r["address"] == address]
         out_resources.append(item)
     included = {section: sum(1 for _, e in kept if section in e["sections"]) for section in SECTIONS}

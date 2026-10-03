@@ -21,6 +21,7 @@ from ai_engine.nodes.analyze_drift import SYSTEM_PROMPT, InvalidEnvelope, make_a
 from ai_engine.nodes.common import contains_cost_claim
 from ai_engine.nodes.cost_analysis import route_cost_config
 from ai_engine.nodes.parse_drift import parse_drift
+from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.classifier import evaluate
 
@@ -41,7 +42,7 @@ VM = "azurerm_linux_virtual_machine.this"
 VMSS = "azurerm_linux_virtual_machine_scale_set.this"
 NSG = "azurerm_network_security_group.this"
 AVAILABLE = {"available": True, "provider": "fake", "model": "fake-model", "reason": None}
-SECTIONS = ("analyze_security", "analyze_cost", "analyze_configuration")
+SECTIONS = ("analyze_security", "analyze_cost", "analyze_configuration", "analyze_root_cause", "assess_risk")
 
 
 def report(name: str) -> dict:
@@ -55,7 +56,7 @@ def real_report(name: str) -> dict:
 
 def prepared(drift_report: dict) -> dict:
     state = {"drift_report": drift_report, "llm": AVAILABLE}
-    for node in (parse_drift, classify_drift, route_cost_config):
+    for node in (parse_drift, classify_drift, route_cost_config, derive_origin_risk):
         state.update(node(state))
     return state
 
@@ -65,10 +66,12 @@ def shown(messages) -> dict:
     return json.loads(body)
 
 
-def envelope(security=(), cost=(), configuration=(), summaries=("", "", "")) -> str:
+def envelope(security=(), cost=(), configuration=(), summaries=("", "", ""), root_cause=(), risk=()) -> str:
     return json.dumps({"security_analysis": {"findings": list(security), "summary": summaries[0]},
                        "cost_analysis": {"findings": list(cost), "summary": summaries[1]},
-                       "configuration_analysis": {"findings": list(configuration), "summary": summaries[2]}})
+                       "configuration_analysis": {"findings": list(configuration), "summary": summaries[2]},
+                       "root_cause_analysis": {"findings": list(root_cause), "summary": ""},
+                       "risk_assessment": {"findings": list(risk), "summary": ""}})
 
 
 def cost_finding(address=SA, paths=(["account_replication_type"],), **extra) -> dict:
@@ -196,10 +199,11 @@ def test_change_routed_to_several_sections_is_sent_once():
     keys = [(r["address"], tuple(c["path"])) for r in evidence["resources"] for c in r["changes"]]
     assert len(keys) == len(set(keys)) == 3  # 5 routes over 3 distinct changes
     by_key = {(r["address"], tuple(c["path"])): c["sections"] for r in evidence["resources"] for c in r["changes"]}
-    assert set(by_key[(SA, ("account_replication_type",))]) == {"security", "cost", "configuration"}
-    assert set(by_key[(NSG, ("security_rule",))]) == {"security", "configuration"}
-    assert set(by_key[(SA, ("tags", "owner"))]) == {"configuration"}
-    assert evidence["sections"] == {s: {"applicable": True} for s in ("security", "cost", "configuration")}
+    everything = {"security", "cost", "configuration", "root_cause", "risk"}
+    assert set(by_key[(SA, ("account_replication_type",))]) == everything
+    assert set(by_key[(NSG, ("security_rule",))]) == everything - {"cost"}
+    assert set(by_key[(SA, ("tags", "owner"))]) == {"configuration", "root_cause", "risk"}
+    assert evidence["sections"] == {s: {"applicable": True} for s in everything}
 
 
 def test_per_section_caps_do_not_starve_other_sections():
@@ -441,7 +445,7 @@ def test_invalid_envelope_invalidates_every_applicable_section(text):
 
 def test_fenced_envelope_accepted():
     assert set(parse_envelope("```json\n" + envelope() + "\n```")) == {
-        "security_analysis", "cost_analysis", "configuration_analysis"}
+        "security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment"}
 
 
 @requires_ai
@@ -452,7 +456,8 @@ def test_failed_call_marks_applicable_sections_and_keeps_deterministic_state():
     request = httpx.Request("POST", "https://llm.example.invalid")
     update = analyze(state, ScriptedLLM(error=openai.APIConnectionError(request=request)))
     statuses = {k: update["inferences"][k]["status"] for k in SECTIONS}
-    assert statuses == {"analyze_security": "skipped", "analyze_cost": "skipped", "analyze_configuration": "failed"}
+    assert statuses == {"analyze_security": "skipped", "analyze_cost": "skipped", "analyze_configuration": "failed",
+                        "analyze_root_cause": "failed", "assess_risk": "failed"}
     assert update["llm_call"]["status"] == "failed" and update["llm_call"]["attempted"] is True
     assert set(update) == {"inferences", "llm_call", "warnings"}  # no deterministic field touched
 

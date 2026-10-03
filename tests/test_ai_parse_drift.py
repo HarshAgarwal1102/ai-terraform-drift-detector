@@ -227,7 +227,8 @@ class _CountingLLM:
     def invoke(self, messages):
         self.calls += 1
         empty = {"findings": [], "summary": ""}
-        return json.dumps({"security_analysis": empty, "cost_analysis": empty, "configuration_analysis": empty})
+        return json.dumps({"security_analysis": empty, "cost_analysis": empty, "configuration_analysis": empty,
+                           "root_cause_analysis": empty, "risk_assessment": empty})
 
 
 @requires_ai
@@ -240,10 +241,12 @@ def test_graph_runs_parse_drift(scenario, report_file):
     assert isinstance(state["parsed_drift"], FrozenDict)
     assert state["drift_report"] == report
     # Deterministic data never lands in the AI output channel; only the AI node writes there.
-    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration"}
+    assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration",
+                                        "analyze_root_cause", "assess_risk"}
     assert state["llm"]["available"] is True
     # At most one LLM call per run (Task 6.4), and only when some section was routed.
-    routed = any(state[k]["changes"] for k in ("security_targets", "cost_targets", "config_targets"))
+    routed = any(state[k]["changes"] for k in ("security_targets", "cost_targets", "config_targets")) \
+        or bool(state["origin_facts"]["routes"])
     assert llm.calls == (1 if routed else 0) and state["llm_call"]["attempted"] is routed
 
 
@@ -295,5 +298,5 @@ def test_later_node_cannot_replace_parsed_drift():
 def test_compiled_graph_order():
     edges = {(e.source, e.target) for e in build_graph(config=load_config({})).get_graph().edges}
     assert edges == {(START, "initialize"), ("initialize", "parse_drift"), ("parse_drift", "classify_drift"),
-                     ("classify_drift", "route_cost_config"), ("route_cost_config", "analyze_drift"),
-                     ("analyze_drift", END)}
+                     ("classify_drift", "route_cost_config"), ("route_cost_config", "derive_origin_risk"),
+                     ("derive_origin_risk", "analyze_drift"), ("analyze_drift", END)}
