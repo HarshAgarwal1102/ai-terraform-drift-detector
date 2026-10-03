@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.2 — Infrastructure Security Scanner (Trivy config); design locked, implementation next
+- **Current Active Task**: Task 9.3 — TruffleHog Secret Scanning (dedicated design review required before implementation)
 - **Phases Completed**: 8 of 14
 
 ---
@@ -2174,8 +2174,9 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - Observation: the `pull_request` OIDC subject uses GitHub's ID-qualified format (`repo:<owner>@<id>/<repo>@<id>:pull_request`). Relevant only if a `pull_request` federated credential is added (Task 12.3).
 
 #### Task 9.2 — Infrastructure Security Scanner (Trivy config)
-- **Status**: 🟡 WORK IN PROGRESS — implemented and validated locally; only the approval-gated D6 CI proof is pending
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-03
+- **Completed**: 2026-10-03
 - **Objective**: Integrate static Terraform security scanning with Trivy (`trivy config`, misconfiguration scanning only) to check for Azure security misconfigurations. It runs in its own job in `security-scan.yml`, credential-free. A finding is a security-scan failure, never a drift result. *(Retitled and reworded 2026-10-03; originally "tfsec Infrastructure Security Scanner". Task ID unchanged. tfsec and Checkov were rejected; see the Design Review.)*
 - **Dependencies**: Task 9.1
 - **Locked versions and flags** *(exact; one reviewed change bumps them everywhere)*:
@@ -2275,7 +2276,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - a widened acceptance (matching a second resource);
     - `jq` missing from `PATH`;
     - a no-op control, which must pass with the accepted finding printed.
-  - [ ] CI proof (D6, approval-gated, same pattern as Task 9.1):
+  - [x] CI proof (D6, approval-gated, same pattern as Task 9.1):
     - a green `main` push run whose `trivy-config` log shows the AZU-0012 finding printed as accepted and the job passing;
     - a draft PR with one deliberate unexpected HIGH/CRITICAL finding (planned: an open inbound NSG rule in `modules/network`) whose `trivy-config` job fails on that finding while AZU-0012 is still shown as accepted;
     - no Azure/OIDC step in `security-scan.yml`; the PR closed unmerged and its branch deleted.
@@ -2310,7 +2311,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
   - **Resolved 2026-10-03 (decisions A–D)**: the first real v0.75.0 JSON exposes `ID`, `Severity`, `Status`, `CauseMetadata.Resource`, `ArtifactName` and `Target`. Matching uses `ID` (A) and `ArtifactName + "/" + Target` (B). No checks-bundle version is reported (C), and the fresh cache is required (D).
     - The first real baseline matched the expected one: dev 60 passed / 0 failed; bootstrap 46 passed plus 5 failures, all on `azurerm_storage_account.tfstate` (AZU-0012 CRITICAL; AZU-0057, AZU-0060, AZU-0061 MEDIUM; AZU-0058 LOW).
     - Verified 2026-10-03: the official checksums file's cosign signature (cosign v3.1.3, identity `https://github.com/aquasecurity/trivy/.github/workflows/…`), and the Linux SHA-256 `c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f`.
-- **Completion Notes** *(2026-10-03, local validation; Task 9.2 stays 🟡 until the D6 CI proof)*:
+- **Completion Notes** *(2026-10-03)*:
   - **Implemented**:
     - new `scripts/run_trivy_config.sh`, `security/trivy-risk-acceptance.json` (`AZU-0012`, `azurerm_storage_account.tfstate`, `terraform/bootstrap/main.tf`, expires `2027-03-31`) and `tests/test_trivy_config.py` (22 tests);
     - new `trivy-config` job in `security-scan.yml`: checkout, then install of the pinned Linux binary with `sha256sum -c` before unpacking, then the script;
@@ -2345,12 +2346,20 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - Module findings carry the module call address as their resource (e.g. `module.network["main"]`) and a `Target` relative to the root (`../../modules/network/main.tf`), so they can never match the bootstrap acceptance.
     - The work directory is under `RUNNER_TEMP` (or `TMPDIR`), checked to be outside the repository and removed on exit.
     - Job `timeout-minutes: 10`.
-  - **Pending (approval-gated D6 CI proof)**:
-    - a green `main` push whose `trivy-config` log shows AZU-0012 as `ACCEPTED RISK`;
-    - a draft PR adding an open inbound SSH rule (`azurerm_network_security_rule`, source `0.0.0.0/0`, port 22) in `terraform/modules/network/main.tf`, whose `trivy-config` job must fail on AZU-0047/AZU-0050 while AZU-0012 still shows as accepted;
-    - the PR closed unmerged and its branch deleted.
-    
-    The push and PR also trigger `terraform-auth-test.yml`. On the PR, the `tflint` job is expected to pass, because the probe rule is valid HCL with all values used.
+  - **D6 CI proof** (user-approved 2026-10-03; checkpoint commits `2754172` design and `49eea22` implementation pushed together with `402eccf`, `b34803f..49eea22`):
+    - `main` push, commit `49eea22`:
+      - `security-scan.yml` run `37133573650`: success, 0 artifacts.
+        - Job `trivy-config` (`111233391283`): the install step verified SHA-256 `c6e65abd…3f3f`; Trivy 0.75.0; AZU-0012 printed as `ACCEPTED RISK` with its justification, scope and expiry `2027-03-31`; AZU-0057/0058/0060/0061 `REPORTED (non-blocking)`; "passed: no unaccepted HIGH/CRITICAL findings".
+        - Job `tflint` (`111233391437`): success.
+        - Steps were only Checkout, Install Trivy and Run Trivy config; no Azure/OIDC step.
+      - `terraform-auth-test.yml` run `37133573651`: success, dev plan `No changes`.
+    - Draft PR #3 (branch `ci-proof/task-9.2-trivy-failure`, head `f7b195d` = `49eea22` + one `azurerm_network_security_rule.ci_proof`, inbound TCP 22 from `0.0.0.0/0`, in `terraform/modules/network/main.tf`):
+      - `security-scan.yml` run `37133731365`:
+        - Job `trivy-config` (`111233858578`) failed as intended: AZU-0012 still `ACCEPTED RISK`; `BLOCKING CRITICAL AZU-0047` and `BLOCKING CRITICAL AZU-0050` on `module.network["main"]` (`terraform/environments/dev/../../modules/network/main.tf`); "2 HIGH/CRITICAL finding(s) not covered by the risk acceptance", exit 1.
+        - Job `tflint` (`111233858732`): success (the probe is lint-clean).
+        - No other security-scan failure; 0 artifacts.
+      - `terraform-auth-test.yml` run `37133731442`: failed at Azure OIDC login (`AADSTS700213`; existing behaviour, Task 2.6).
+    - Cleanup: PR #3 closed unmerged (2026-10-03T15:35:41Z, `merged=false`); the remote and local branches were deleted; `main` = `origin/main` = `49eea22`, and the probe is absent from `main`.
 
 #### Task 9.3 — TruffleHog Secret Scanning
 - **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
