@@ -14,6 +14,13 @@ tfplan
 *.tfplan
 plan.json
 
+# Infracost output (Task 10.1): raw and sanitised cost reports are produced outside the
+# repository and must never be committed; committed test fixtures are the only exception.
+infracost*.json
+cost_run.json
+!tests/fixtures/**/infracost*.json
+!tests/fixtures/**/cost_run.json
+
 # Crash log files
 crash.log
 crash.*.log

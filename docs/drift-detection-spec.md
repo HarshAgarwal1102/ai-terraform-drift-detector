@@ -515,6 +515,35 @@ identity is included (`ai_engine` never reads Phase 7 output). The step summary 
 counts only, and no AI content is written to issues. The drift report, `drift_detected` and
 the detection run's status are never changed by this workflow.
 
+**Cost publication (Task 10.1):** for a valid classification only (`drift_detected` literally
+`"true"` or `"false"`, drift report uploaded), the last steps of `plan-and-analyze` price the
+**same** run's `plan.json` with Infracost v0.10.46 (`infracost breakdown --path <plan.json>
+--format json`, list prices in USD, no usage file). The cost step re-executes its shell without
+the OIDC request variables, logs out of the Azure CLI, and installs the pinned Linux binary only
+after `sha256sum -c` against the committed SHA-256. `scripts/infracost_analysis.sh` then runs
+Infracost with an allowlisted environment and fails closed on a remaining OIDC variable, an Azure
+CLI session, a wrong version, or Terraform Checkpoint egress. The **raw Infracost output stays on
+the ephemeral runner**, like `plan.json`, and is never uploaded. `scripts/sanitize_infracost.py`
+publishes only an **allowlist** projection as the `infracost-report-<run_id>` artifact (30 days),
+exactly two files:
+- `infracost.json`: totals, past and diff totals, usage totals, the resource-count summary and,
+  per resource, the Terraform address, type, costs and cost components. VCS metadata, paths,
+  project names, tags and resource metadata are dropped. Money, price and quantity values are
+  decimal strings, never floats. Any `priceNotFound: true` fails the cost step (`price_not_found`).
+- `cost_run.json`: binds the estimate to this run. `run_id` must equal the drift report's
+  `run.run_id` (`github-<run_id>-<run_attempt>`), `environment` its `run.environment`, and
+  `drift_report_sha256` the canonical hash of `drift_report.json` (sorted keys, compact separators,
+  UTF-8, as for the AI report). It also records the Infracost version, mode, pricing and the
+  sign rule: `diffTotalMonthlyCost` = desired cost (`planned_values`) − actual cost (refreshed
+  `prior_state`), so drift cost = −`diffTotalMonthlyCost`.
+
+A final re-check rejects any email-like string, URL, GUID or absolute path in the output. Before
+publishing, the separate `cost` job (`contents: read`; no `id-token`, Azure or secrets)
+re-verifies both files with `sanitize_infracost.py --check` against this run's drift report and
+writes a totals-only summary. A cost failure fails the `cost` job and the run, but never changes
+`drift_detected`, the drift report or artifact, issues or the `report` verdict. Infracost's
+pricing queries and its usage telemetry are the only accepted egress.
+
 ## 9. Future Extensibility
 
 The contract stays valid as resources are added:

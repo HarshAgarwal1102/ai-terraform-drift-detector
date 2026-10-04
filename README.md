@@ -33,8 +33,11 @@ Remediation is planned, not built (Phase 11). See
   implementation; Terraform linting stays with TFLint (9.1).
 - **Phase 9A — AI Analysis Integration** is complete: Task 9A.1 (the `ai-analysis` CLI and
   the no-LLM `ai-analysis.yml` workflow) was validated in a real CI run.
-- **Current active task: Task 10.1 — Infracost CLI Integration** (Phase 10), which starts
-  with its design review.
+- **Phase 10 — FinOps / Cost Analysis** is in progress: Task 10.1 (Infracost cost estimate in
+  the drift workflow) is complete and was validated in a real CI run. See
+  [Cost Estimate](#-cost-estimate-task-101).
+- **Current active task: Task 10.2 — Terraform Plan Cost Delta Calculation** (Phase 10), which
+  starts with its design review.
 
 | Phase | Status |
 |---|---|
@@ -49,6 +52,7 @@ Remediation is planned, not built (Phase 11). See
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
+| 10 — FinOps / cost analysis | 🟡 In progress (10.1 Infracost integration complete) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -107,12 +111,17 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   `security-scan.yml`, without Azure access. See
   [Static Terraform linting](#static-terraform-linting-tflint-task-91) and
   [Terraform security scan](#terraform-security-scan-trivy-config-task-92).
+- **Cost estimate** (Task 10.1): after every valid detection run, Infracost v0.10.46 prices the
+  same run's plan (list prices, USD) and publishes a sanitised, run-bound
+  `infracost-report-<run_id>` artifact. Cost is informational: a cost failure turns the run red
+  but never changes the drift result. See [Cost Estimate](#-cost-estimate-task-101).
 
 ### 🔜 Planned (not yet implemented)
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- FinOps cost analysis with Infracost (Phase 10).
+- Per-resource cost deltas correlated with drift (Task 10.2) and AI cost explanations based on
+  Infracost numbers (Task 10.3).
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
   and no apply triggered by a merge.
@@ -238,7 +247,7 @@ each network inherits its resource group's name and location.
 ```
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
-├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → issues / report (Phases 5, 8)
+├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze (+ Infracost cost step) → issues / cost / report (Phases 5, 8, 10.1)
 ├── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2), TruffleHog (9.3)
 └── ai-analysis.yml               # After each drift-detection run on main: no-LLM AI report artifact (9A.1)
 
@@ -257,6 +266,8 @@ scripts/
 ├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
 ├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
 ├── github_automation.py          # Drift issue create/update/close (Tasks 8.1, 8.3)
+├── infracost_analysis.sh         # Pinned Infracost breakdown of the run's plan.json, fail-closed checks (Task 10.1)
+├── sanitize_infracost.py         # Allowlist sanitiser + run binding for the cost artifact; --check mode (Task 10.1)
 ├── run_mutation_checks.py        # AI-engine safeguard mutation harness (Task 6.7)
 ├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
 ├── run_trivy_config.sh           # Trivy config security scan + risk-acceptance gate (local and CI; Task 9.2)
@@ -288,12 +299,13 @@ schemas/
 tests/
 ├── fixtures/plan_evidence/       # Sanitized real plan evidence (11 scenarios)
 ├── fixtures/*_plans/             # Synthetic plans for the AI-engine tests (Phase 6)
+├── fixtures/infracost/           # Synthetic priced plan + raw Infracost v0.10.46 samples (Task 10.1)
 ├── corpora/, mutation/           # Guard/injection corpora and safeguard mutants (Task 6.7)
 ├── scenarios/                    # Azure CLI tag-drift inject / revert / runner (Task 3.6)
 └── test_*.py                     # Unit tests (see Testing)
 
 docs/
-├── drift-detection-spec.md       # Detection contract (Phases 3–4; publication rules of Phases 5 and 8)
+├── drift-detection-spec.md       # Detection contract (Phases 3–4; publication rules of Phases 5, 8, 9A and 10.1)
 ├── MASTER_PROJECT_GUIDE.md       # Project walkthrough
 └── architecture.md               # Infrastructure, security and CI access design
 
@@ -433,6 +445,109 @@ same public-exposure profile as `drift-report-<run_id>`: it can contain real non
 attribute values, HCL value fragments, remediation command templates with resource addresses,
 and the deterministic summary. Sensitive values stay redacted, as in the source report. It
 never contains Activity Log data or caller identity.
+
+---
+
+## 💰 Cost Estimate (Task 10.1)
+
+After every **valid** detection run (`drift_detected` is `"true"` or `"false"`), the drift
+workflow prices the **same refreshed `plan.json`** that `drift-engine analyze` classified, with
+[Infracost](https://www.infracost.io/) **v0.10.46** (the classic CLI), and publishes a sanitised
+cost report. Cost is informational: it never creates, changes or invalidates a drift result.
+
+```
+plan-and-analyze:  … → Analyze Drift → Upload Drift Report → Infracost Cost Estimate → Upload Infracost Report
+cost job:          Require Cost Success → download both reports → sanitize_infracost.py --check → totals-only summary
+```
+
+**Cost step** (end of `plan-and-analyze`, in [`drift-detection.yml`](.github/workflows/drift-detection.yml)):
+1. Re-executes its own shell without `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`. The runner
+   injects these OIDC request variables into every `run:` step of a job with `id-token: write`,
+   and blanking them in `env:` doesn't work (seen in CI run #20).
+2. Logs out of the Azure CLI (`az logout`, `az account clear`).
+3. Downloads the pinned `infracost-linux-amd64.tar.gz` (v0.10.46) and verifies it with
+   `sha256sum -c` against the committed SHA-256
+   `d0d081cd39b07b2ca5c315830bfc4bcdfb0183b04c19cb18835c154482a2c97b` **before** unpacking.
+   No Infracost action, image or install script.
+4. Runs [`scripts/infracost_analysis.sh`](scripts/infracost_analysis.sh), which runs exactly
+   `infracost breakdown --path <plan.json> --format json --out-file <raw> --no-color` and then
+   [`scripts/sanitize_infracost.py`](scripts/sanitize_infracost.py).
+
+The step **always exits 0** and records `cost_status` (`succeeded`/`failed`) and a
+`cost_failure` reason. The separate **`cost` job** (`contents: read` only; no `id-token`, no
+Azure, no secrets) fails unless the cost step succeeded and its artifact uploaded, then
+re-verifies the artifact with the sanitiser's `--check` and writes a totals-only summary. So a
+cost failure turns the run **red**, while `drift_detected`, the drift report and artifact, the
+`issues` job and the `report` verdict stay exactly as they would without the cost step.
+
+| `cost_failure` | Meaning |
+|---|---|
+| `none` | succeeded |
+| `install_failed` | download, checksum, unpacking or placement of the pinned binary failed |
+| `missing_api_key` | `INFRACOST_API_KEY` is missing or empty |
+| `oidc_token_present` / `azure_session_present` | an OIDC request variable or an Azure CLI session was still present (fail closed) |
+| `version_mismatch` | the binary isn't exactly `Infracost v0.10.46` |
+| `infracost_failed` / `raw_output_invalid` | Infracost failed, or its raw output is missing or not JSON |
+| `unexpected_egress` | `$HOME/.terraform.d` appeared (Terraform Checkpoint ran) |
+| `price_not_found` | a cost component has `priceNotFound: true` |
+| `sanitize_failed` | the output failed the allowlist, binding or value checks |
+| `usage` | missing/invalid input or an unusable directory (exit 64) |
+
+Cost thresholds don't exist: no cost value ever fails anything.
+
+**Secret.** The repository secret **`INFRACOST_API_KEY`** (an Infracost account and
+organisation are required) is referenced only in the cost step. It's never passed as an
+argument, printed or written. Infracost runs with an allowlisted environment: `PATH`, an
+isolated `HOME`, the key and five fixed controls (`INFRACOST_SKIP_UPDATE_CHECK=true`,
+`INFRACOST_ENABLE_CLOUD=false`, `INFRACOST_DISABLE_ENVFILE=true`, `INFRACOST_NO_COLOR=true`,
+`CHECKPOINT_DISABLE=1`). `infracost upload`, `comment`, `auth`, `configure` and `generate` are
+never run.
+
+**Data leaving the runner** (accepted): pricing queries to the Infracost Cloud Pricing API
+(cost-relevant attributes only; no plan file, credentials or resource names) and Infracost's
+usage telemetry (counts, command, flags, an ephemeral install ID, CI platform), which v0.10.46
+cannot switch off. v0.10.46 also runs `terraform -version` at start-up (through its bundled
+Terragrunt code) when `terraform` is on `PATH`. `CHECKPOINT_DISABLE=1` stops that Terraform
+process from contacting HashiCorp Checkpoint, and a `$HOME/.terraform.d` after the run fails
+closed (`unexpected_egress`).
+
+**Drift-cost sign.** Infracost prices the refreshed real infrastructure (`prior_state`) as the
+"past" cost and the desired configuration (`planned_values`) as the current cost:
+
+```
+diffTotalMonthlyCost = totalMonthlyCost (desired) - pastTotalMonthlyCost (actual)
+drift cost           = -diffTotalMonthlyCost
+```
+
+Example (the synthetic fixture, verified live): an App Service plan scaled up outside Terraform
+from `B1` to `P1v3` gives past `119.72`, desired `13.14`, diff `-106.58` USD/month, so the drift
+costs **+106.58 USD/month**.
+
+**Artifact.** `infracost-report-<run_id>` (30 days) holds exactly two files:
+- `infracost.json`: an **allowlist** projection of the raw output with Infracost's own key
+  names: totals, past/diff totals, usage totals, resource-count summary and, per resource, only
+  the Terraform address, type, costs and cost components (name, unit, quantities, price,
+  `priceNotFound`). All VCS metadata, paths, project names, tags and resource metadata are
+  dropped. Every money, price and quantity value is a **decimal string** (for example
+  `"119.72"`), copied unchanged and never parsed as a float.
+- `cost_run.json`: the binding manifest: `run_id` (`github-<run_id>-<run_attempt>`, equal to the
+  drift report's `run.run_id`), environment, `drift_report_sha256` (the same canonical hash as the
+  AI report), Infracost version, mode, pricing and the sign rule.
+
+Its exposure profile is narrower than the drift report's: resource addresses and types, public
+list prices and quantities, totals and counts. The raw Infracost output stays on the ephemeral
+runner, like `plan.json`.
+
+**Current dev cost: $0.** All five dev resource types (resource group, VNet, subnet, NSG,
+subnet–NSG association) are free in Infracost, so the dev estimate is `0` with five no-price
+resources (verified in CI run #21). Non-zero pricing is shown only with the synthetic fixture.
+
+**Local check** of a downloaded artifact (stdlib only; exit 0 passed, 1 failed, 2 price not
+found, 64 usage):
+
+```bash
+python3 scripts/sanitize_infracost.py --check "$PWD/.artifacts/infracost-report" --run-id github-<run_id>-<attempt> --drift-report "$PWD/.artifacts/drift-report/drift_report.json"
+```
 
 ---
 
@@ -879,6 +994,7 @@ registration holds zero credentials.
 | Secret Scanning | TruffleHog scans the full Git history on every push and PR. Every result fails the job; secret values are never printed or uploaded; candidates are never sent to provider APIs (Task 9.3). |
 | State Destroy Protection | `prevent_destroy` on the remote-state storage account and container (Task 9.1). |
 | Public Issue Profile | Drift issues carry structure only: no values, HCL, AI output, Activity Log data or caller identity (Task 8.1). |
+| Cost Estimate Isolation | Infracost v0.10.46 is SHA-256 verified before use, runs without OIDC request variables or an Azure CLI session, with an allowlisted environment, and fails closed on any of them (or on Checkpoint egress). Its artifact is an allowlisted, run-bound projection; a cost failure never changes the drift result (Task 10.1). |
 
 ---
 
@@ -897,7 +1013,7 @@ registration holds zero credentials.
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
-| 10 | FinOps / Infracost | ⬜ Planned |
+| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration complete (10.2 cost deltas, 10.3 AI cost explanation planned) |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
 | 13 | Professional dashboard | ⬜ Planned |
@@ -939,6 +1055,17 @@ registration holds zero credentials.
   architecture or apply decisions outside Phase 9.
 - `tflint-ruleset-azurerm` 0.32.0 was generated from the AzureRM 4.65.0 schema, although
   the repository uses AzureRM 5.x (see the TFLint section).
+- Cost estimates (Task 10.1) are public list prices in USD without a usage file: no discounts,
+  reservations or actual billing, and prices change over time (each result is tied to its
+  `timeGenerated`). The dev environment costs $0, so non-zero CI pricing hasn't been observed;
+  the sign rule was verified with a live run on a synthetic plan. A usage-based resource without
+  usage data (null quantities) would fail sanitisation (`sanitize_failed`).
+- Infracost's usage telemetry can't be disabled in v0.10.46. The `plan-and-analyze` job keeps
+  `id-token: write` (needed for the Azure login), so the runner still holds the OIDC request
+  credential for that job; the cost step only removes it from its own process environment.
+- TruffleHog 3.97.9 has no Infracost detector, so the secret scan wouldn't catch a leaked
+  Infracost key; protection relies on the cost step never printing or writing it (Phase 12
+  hardening candidate).
 
 ---
 
