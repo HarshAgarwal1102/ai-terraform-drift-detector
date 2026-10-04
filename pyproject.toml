@@ -30,6 +30,8 @@ dependencies = [
 
 [project.scripts]
 drift-engine = "drift_engine.cli:main"
+# Task 9A.1: separate entry point, so drift-engine never needs the LLM stack (needs the ai extra).
+ai-analysis = "ai_engine.cli:main"
 
 [project.optional-dependencies]
 dev = [

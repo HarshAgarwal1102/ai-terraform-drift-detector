@@ -6,13 +6,13 @@ Working today:
 - the **deterministic** core: Terraform plan evidence, drift classification and a typed
   Python drift engine;
 - **scheduled drift detection** in GitHub Actions, with one GitHub Issue per drifted resource;
-- an **AI analysis engine** (LangGraph, LLM opt-in) as a Python library;
+- an **AI analysis engine** (LangGraph, LLM opt-in) with an `ai-analysis` CLI;
 - Activity Log attribution tooling;
 - **static Terraform security scanning** (TFLint and Trivy) in CI.
 
-The AI engine is not yet wired into a CLI or CI (Phase 9A). Remediation is planned, not
-built (Phase 11). See [What works today](#-what-works-today) and
-[Planned](#-planned-not-yet-implemented).
+The AI engine has a CLI and a no-LLM CI workflow (Task 9A.1, implemented; its real CI proof
+is pending). Remediation is planned, not built (Phase 11). See
+[What works today](#-what-works-today) and [Planned](#-planned-not-yet-implemented).
 
 ---
 
@@ -23,7 +23,7 @@ built (Phase 11). See [What works today](#-what-works-today) and
 `PROJECT_PLAN.md` reports **"Phases Completed: 9 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
   (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "9 of 14".
-- **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **next**: Task 9A.1 starts with its design review.
+- **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **in progress**: Task 9A.1 is implemented and validated locally; its real CI proof is pending approval.
 
 - **Phase 8:** Task 8.2 (automated remediation PRs) is blocked: it was superseded by
   Phase 11 in the 2026-10-03 design review.
@@ -31,8 +31,9 @@ built (Phase 11). See [What works today](#-what-works-today) and
   config security scan) and Task 9.3 (TruffleHog secret scan), all validated in real CI
   runs. Task 9.4 (Super-Linter code-quality enforcement) was **deferred to Phase 12** before
   implementation; Terraform linting stays with TFLint (9.1).
-- **Current active task: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration**, which
-  starts with its dedicated design review.
+- **Current active task: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration**: the
+  `ai-analysis` CLI and the `ai-analysis.yml` workflow are implemented and pass the local
+  tests; the real CI proof (a manual drift-detection run on `main`) is still to do.
 
 | Phase | Status |
 |---|---|
@@ -42,10 +43,11 @@ built (Phase 11). See [What works today](#-what-works-today) and
 | 4 — Python drift engine | ✅ Complete |
 | 5 — Automated drift detection workflow (scheduled + manual) | ✅ Complete |
 | 5A — Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
-| 6 — LangGraph AI analysis engine (library; no CLI/CI integration yet) | ✅ Complete |
+| 6 — LangGraph AI analysis engine (library; CLI/CI added in 9A) | ✅ Complete |
 | 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
+| 9A — AI analysis CLI & no-LLM CI integration | 🟡 In progress (9A.1 implemented locally; CI proof pending) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -92,7 +94,8 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   - The LLM is opt-in (`AI_LLM_PROVIDER`, default `none`).
   - AI output is validated against the evidence. The deterministic drift result and
     severity are never changed.
-  - No CLI or CI integration yet (Phase 9A).
+  - The `ai-analysis` command and the no-LLM `ai-analysis.yml` workflow (Task 9A.1) run it
+    after every valid detection run. See [AI Analysis](#-ai-analysis-task-9a1).
 - **Activity Log attribution** (Phase 7): `drift-engine activity-logs` collects Azure Activity
   Log evidence (opt-in `[azure]` extra), and `drift-engine attribute` correlates it with
   drifted resources, falling back to "unknown" when logs are missing.
@@ -108,7 +111,6 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- An AI analysis CLI and no-LLM CI integration (Phase 9A, next).
 - FinOps cost analysis with Infracost (Phase 10).
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
@@ -236,7 +238,11 @@ each network inherits its resource group's name and location.
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
 ├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → issues / report (Phases 5, 8)
-└── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2), TruffleHog (9.3)
+├── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2), TruffleHog (9.3)
+└── ai-analysis.yml               # After each drift-detection run on main: no-LLM AI report artifact (9A.1)
+
+ci/
+└── ai-constraints.txt            # Exact pins for the AI stack installed in CI (9A.1)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
@@ -268,7 +274,8 @@ src/drift_engine/                 # Python drift engine (Phase 4)
 ├── activity_logs.py              # Azure Activity Log collector, opt-in [azure] extra (7.1)
 └── attribution.py                # Drift ↔ Activity Log correlation and fallback (7.2, 7.3)
 
-src/ai_engine/                    # LangGraph AI analysis engine (Phase 6; library only)
+src/ai_engine/                    # LangGraph AI analysis engine (Phase 6; ai-analysis CLI in 9A.1)
+├── cli.py                        # ai-analysis command (9A.1)
 ├── config.py, llm.py, graph.py   # Opt-in LLM configuration and the analysis graph
 ├── evidence.py, verify.py        # Evidence views and evidence-vs-inference checks (6.7)
 └── nodes/                        # parse, security, cost/config, root cause, remediation, report nodes
@@ -371,6 +378,60 @@ python3 scripts/github_automation.py --report .artifacts/drift-report/drift_repo
 ```
 
 The preview directory receives `requests.json` and one Markdown file per issue.
+
+---
+
+## 🤖 AI Analysis (Task 9A.1)
+
+The `ai-analysis` command runs the Phase 6 AI engine over a drift report and writes
+`ai_analysis_report.json` and `ai_analysis_report.md`. It's a separate entry point:
+`drift-engine` never imports the AI engine, and a core `pip install .` pulls in no LLM stack.
+
+```bash
+pip install -e ".[ai]"
+ai-analysis --report .artifacts/drift-report/drift_report.json --output-dir .artifacts/ai-analysis
+```
+
+The drift report is read-only input. The drift result, severity and `drift_detected` are
+never changed; the AI report is a separate document.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | report written |
+| `1` | input rejected (unreadable or invalid report, or a failed detection run whose drift status is unknown); nothing written |
+| `2` | usage error, refused environment, invalid AI configuration, or the `ai` extra isn't installed |
+| `70` | internal error |
+| `73` | the output couldn't be written |
+
+**No LLM in CI.** The LLM is opt-in (`AI_LLM_PROVIDER`, default `none`). Inside GitHub
+Actions the command refuses to run unless `AI_LLM_PROVIDER` is **explicitly** `none`. With
+`none` the report holds only deterministic content (summary, resources, remediation options);
+the AI sections are recorded as skipped and the LLM as not attempted. Enabling a real LLM in
+CI is a separate decision that needs approval (secrets, data leaving the runner, cost).
+
+**Workflow.** [`ai-analysis.yml`](.github/workflows/ai-analysis.yml) runs after each
+completed "Phase 5 - Drift Detection" run on `main` (`workflow_run`). It's separate, so an AI
+failure can never change the detection run's result. It:
+- has permissions `contents: read` and `actions: read` only, and uses no secret except
+  `github.token`, to download the source run's artifact. No Azure access;
+- checks that the source run is on `main` and was triggered by `schedule` or
+  `workflow_dispatch`;
+- analyses only a **valid** detection result: the `drift-report-<run_id>` artifact must exist
+  and hold a report with `outcome: succeeded` and a boolean `has_drift` (drift and no drift
+  are both analysed). A failed or unknown run has no valid report, so the job writes
+  "detection result unknown: no AI analysis" to the summary and ends without an AI artifact;
+- requires the report's `run.run_id` to be `github-<source run id>-<source run attempt>`;
+  a report from another run or attempt fails the job;
+- installs the AI stack only through [`ci/ai-constraints.txt`](ci/ai-constraints.txt),
+  which pins every resolved package exactly, and fails if anything installed is unpinned;
+- writes a step summary with counts only (resources, remediation options, AI sections, LLM
+  status) and publishes nothing to issues.
+
+**Artifact.** `ai-analysis-report-<source run id>` (the two report files, 30 days). It has the
+same public-exposure profile as `drift-report-<run_id>`: it can contain real non-sensitive
+attribute values, HCL value fragments, remediation command templates with resource addresses,
+and the deterministic summary. Sensitive values stay redacted, as in the source report. It
+never contains Activity Log data or caller identity.
 
 ---
 
@@ -830,11 +891,11 @@ registration holds zero credentials.
 | 4 | Python drift engine | ✅ Complete |
 | 5 | Scheduled GitHub Actions drift detection | ✅ Complete |
 | 5A | Dev infrastructure expansion (VNet, Subnet, NSG) | ✅ Complete |
-| 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI in 9A) |
+| 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI added in 9A) |
 | 7 | Azure Activity Log investigation | ✅ Complete |
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
-| **9A** | **AI analysis CLI & no-LLM CI integration** | ⬜ **Next**: Task 9A.1 design review |
+| **9A** | **AI analysis CLI & no-LLM CI integration** | 🟡 **In progress**: Task 9A.1 implemented locally; real CI proof pending |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
@@ -865,8 +926,9 @@ registration holds zero credentials.
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.
   Both refer to the same document.
-- The AI engine is a library only: no CLI, and it doesn't run in any workflow (Phase 9A). A
-  real model's analysis quality hasn't been verified; tests use fake chat models.
+- The AI workflow (Task 9A.1) runs without an LLM, so its report holds only deterministic
+  content; it hasn't yet run in real CI. A real model's analysis quality hasn't been
+  verified; tests use fake chat models.
 - Activity Log collection and attribution have been tested with fake log sources. The
   collector itself hasn't been run against real Azure. A read-only Azure check during the
   Task 7.2 design showed that Activity Log events carry no property diffs, so attributes

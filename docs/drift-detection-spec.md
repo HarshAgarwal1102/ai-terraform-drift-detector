@@ -495,6 +495,26 @@ never creates or updates issues. Closing is exactly `{"state": "closed", "state_
 fingerprint matches no report address (removed or moved resources) stay open; a recurrence opens
 a new issue.
 
+**AI analysis publication (Task 9A.1):** a separate workflow, `ai-analysis.yml`
+(`workflow_run` on completed `Phase 5 - Drift Detection` runs on `main`; permissions
+`contents: read`, `actions: read`; no `id-token`, no Azure, no secret except `github.token`
+for the cross-run download), runs the `ai-analysis` CLI **without an LLM** (`AI_LLM_PROVIDER`
+explicitly `none`; the CLI refuses to run in GitHub Actions otherwise). It analyses only a
+valid detection result: the source run's `drift-report-<run_id>` artifact must exist and its
+report must validate with `outcome == "succeeded"` and a boolean `has_drift` (`true` and
+`false` are both analysed). A missing artifact or an invalid report means the result is
+`unknown`: the job records that in the step summary and publishes nothing. The same exact
+binding as for issues applies (`run.run_id == github-<run_id>-<run_attempt>`, branch `main`,
+event `schedule` or `workflow_dispatch`); otherwise the job fails without an artifact. The
+output is the `ai-analysis-report-<source run id>` artifact (`ai_analysis_report.json` and
+`ai_analysis_report.md` only, 30-day retention), with the **same exposure profile as the drift
+report artifact** (accepted 2026-10-04): real non-sensitive attribute values, HCL value
+fragments, remediation command templates with addresses and the deterministic summary can
+appear; values Terraform flags sensitive stay redacted, and no Activity Log data or caller
+identity is included (`ai_engine` never reads Phase 7 output). The step summary contains
+counts only, and no AI content is written to issues. The drift report, `drift_detected` and
+the detection run's status are never changed by this workflow.
+
 ## 9. Future Extensibility
 
 The contract stays valid as resources are added:

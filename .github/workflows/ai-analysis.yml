@@ -1,0 +1,211 @@
+name: "Phase 9A - AI Analysis (no LLM)"
+
+# Task 9A.1: AI analysis report for every valid drift-detection run, without an LLM.
+#
+# A separate workflow on purpose (decision D3): it runs after "Phase 5 - Drift
+# Detection" completes, so an AI failure can never change the detection run's
+# result, its drift_detected output or its drift report. drift-detection.yml is
+# not modified.
+#
+# Valid runs only (D4): the source run's drift-report-<run id> artifact must exist
+# and hold a report with outcome "succeeded" and a boolean has_drift (drift or no
+# drift). A failed or unknown detection run uploads no report, so no AI analysis
+# runs for it; that is reported, not treated as an AI failure. Validity comes from
+# the evidence, not from the source run's conclusion (a valid run whose issues job
+# failed is still analysed).
+#
+# Exact binding: the report's run.run_id must be github-<source run id>-<source run
+# attempt>, the source run must be on main and triggered by schedule or
+# workflow_dispatch; anything else fails without an AI artifact.
+#
+# No LLM (Task 9A.1): AI_LLM_PROVIDER is explicitly "none" and no LLM secret is
+# referenced; the ai-analysis CLI refuses to run in GitHub Actions otherwise.
+# workflow_run workflows can reach secrets and write tokens, so permissions are
+# explicit and the only token used is github.token, in the download step.
+#
+# Output (D5/D6): artifact ai-analysis-report-<source run id> (the two report
+# files, 30 days) and a step summary with counts only. Nothing is written to
+# issues. The artifact has the same public-exposure profile as the drift report.
+
+on:
+  workflow_run:
+    workflows: ["Phase 5 - Drift Detection"]
+    types: [completed]
+    branches: [main]
+
+# contents: read for checkout; actions: read to download the source run's artifact.
+permissions:
+  contents: read
+  actions: read
+
+# One AI analysis per source run.
+concurrency:
+  group: ai-analysis-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  ai-analysis:
+    name: "AI Analysis (no LLM, not drift detection)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AI_LLM_PROVIDER: "none"
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+
+    steps:
+      - name: Verify source run
+        run: |
+          set -euo pipefail
+          if [ "${SOURCE_BRANCH}" != "main" ]; then
+            echo "::error::Source run ${SOURCE_RUN_ID} is on '${SOURCE_BRANCH}', not main."
+            exit 1
+          fi
+          case "${SOURCE_EVENT}" in
+            schedule|workflow_dispatch) ;;
+            *) echo "::error::Source run ${SOURCE_RUN_ID} was triggered by '${SOURCE_EVENT}', not schedule or workflow_dispatch."
+               exit 1 ;;
+          esac
+          echo "Source run ${SOURCE_RUN_ID} attempt ${SOURCE_RUN_ATTEMPT} (${SOURCE_EVENT} on main)."
+
+      # pattern (not name): a missing artifact downloads nothing instead of failing,
+      # so the next step can report "unknown". The token is used only here.
+      - name: Download source drift report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: drift-report-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/source
+
+      - name: Check for a valid detection result
+        id: present
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/source/drift-report-${SOURCE_RUN_ID}/drift_report.json"
+          if [ -f "${report}" ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+            echo "report=${report}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            echo "Source run ${SOURCE_RUN_ID}: no drift report artifact. Detection result unknown: no AI analysis." | tee -a "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Checkout Code
+        if: ${{ steps.present.outputs.present == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        if: ${{ steps.present.outputs.present == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Exact pins for the whole resolved set (decision D2); the check fails if any
+      # installed distribution is missing from the constraints or differs from its pin.
+      - name: Install AI analysis (pinned)
+        if: ${{ steps.present.outputs.present == 'true' }}
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input -c ci/ai-constraints.txt ".[ai]"
+          python - <<'EOF'
+          import re, sys
+          from importlib.metadata import distributions
+          norm = lambda name: re.sub(r"[-_.]+", "-", name).lower()
+          pins = {}
+          for line in open("ci/ai-constraints.txt", encoding="utf-8"):
+              line = line.strip()
+              if line and not line.startswith("#"):
+                  name, version = line.split("==")
+                  pins[norm(name)] = version
+          bad = []
+          for dist in distributions():
+              name = norm(dist.metadata["Name"])
+              if name in ("drift-engine", "pip", "setuptools", "wheel"):
+                  continue
+              if pins.get(name) != dist.version:
+                  bad.append(f"{name}=={dist.version} (pinned: {pins.get(name)})")
+          if bad:
+              print("::error::Installed packages not matching ci/ai-constraints.txt: " + ", ".join(sorted(bad)))
+              sys.exit(1)
+          print(f"All {len(pins)} pinned AI dependencies installed exactly.")
+          EOF
+          ai-analysis --help > /dev/null
+
+      # Valid = DriftReport with outcome "succeeded" and a boolean has_drift; anything
+      # else is unknown (no analysis). A valid report from another run or attempt fails.
+      - name: Validate and bind the drift report
+        id: gate
+        if: ${{ steps.present.outputs.present == 'true' }}
+        env:
+          REPORT: ${{ steps.present.outputs.report }}
+        run: |
+          set -euo pipefail
+          python - <<'EOF'
+          import json, os, sys
+          from drift_engine.models import DriftReport
+          out = open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8")
+          summary = open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8")
+          run_id, attempt = os.environ["SOURCE_RUN_ID"], os.environ["SOURCE_RUN_ATTEMPT"]
+          try:
+              report = DriftReport.model_validate(json.load(open(os.environ["REPORT"], encoding="utf-8")))
+              valid = report.outcome == "succeeded" and isinstance(report.has_drift, bool)
+          except Exception as exc:
+              print(f"Drift report rejected: {type(exc).__name__}")
+              report, valid = None, False
+          if not valid:
+              out.write("valid=false\n")
+              line = f"Source run {run_id}: drift report not valid. Detection result unknown: no AI analysis."
+              print(line)
+              summary.write(line + "\n")
+              sys.exit(0)
+          expected = f"github-{run_id}-{attempt}"
+          actual = report.run.run_id if report.run else None
+          if actual != expected:
+              print(f"::error::Drift report run_id {actual!r} does not match {expected!r}; not analysed.")
+              sys.exit(1)
+          out.write("valid=true\n")
+          print(f"Valid drift report bound to {expected} (has_drift={str(report.has_drift).lower()}).")
+          EOF
+
+      - name: Run AI analysis (no LLM)
+        if: ${{ steps.gate.outputs.valid == 'true' }}
+        env:
+          REPORT: ${{ steps.present.outputs.report }}
+        run: |
+          set -euo pipefail
+          ai-analysis --report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis"
+
+      # Counts only: no AI text in the summary (decision D6).
+      - name: Summary (counts only)
+        if: ${{ steps.gate.outputs.valid == 'true' }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ai-analysis/ai_analysis_report.json"
+          {
+            echo "### AI analysis (no LLM)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Source run | \`${SOURCE_RUN_ID}\` (attempt ${SOURCE_RUN_ATTEMPT}) |"
+            jq -r '"| Resources | \(.resources | length) |",
+                   "| Remediation options | \(.remediation.options | length) |",
+                   "| AI sections analysed | \([.analysis[] | select(.status == "ok")] | length) of \(.analysis | length) |",
+                   "| LLM | `\(.llm.provider // "none")` / `\(.llm.status)` |"' "${report}"
+            echo "| Artifact | \`ai-analysis-report-${SOURCE_RUN_ID}\` (30 days) |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload AI analysis report
+        if: ${{ steps.gate.outputs.valid == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-analysis-report-${{ github.event.workflow_run.id }}
+          path: |
+            ${{ runner.temp }}/ai-analysis/ai_analysis_report.json
+            ${{ runner.temp }}/ai-analysis/ai_analysis_report.md
+          retention-days: 30
+          if-no-files-found: error

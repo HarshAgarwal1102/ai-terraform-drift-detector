@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9A — AI Analysis Integration (pre-Phase 10)
-- **Current Active Task**: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration (dedicated design review required before implementation)
+- **Current Active Task**: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration (implemented and validated locally 2026-10-04; approval-gated real CI proof next)
 - **Phases Completed**: 9 of 14
 
 ---
@@ -2681,28 +2681,146 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 ---
 
 ### PHASE 9A — AI Analysis Integration (pre-Phase 10)
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS
 
 Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consumers. It owns the deferred Task 6.6 AI CLI/workflow integration (Task 6.6 limitation (d): "no CLI or workflow integration yet"). Phase 6 stays COMPLETED and is not reopened. *(Recorded 2026-10-03 per the approved Phase 8 restructuring.)*
 
 #### Task 9A.1 — AI Analysis CLI & No-LLM CI Integration
-- **Status**: ⬜ NOT STARTED
-- **Objective**: Provide an AI analysis CLI over `run_analysis` / `write_report` and integrate it into CI without an LLM first, publishing the AI report as its own artifact for downstream consumers.
-- **Dependencies**: Task 6.6, Task 5.4
+- **Status**: 🟡 WORK IN PROGRESS — implemented and validated locally 2026-10-04; the approval-gated real CI proof is pending (design locked 2026-10-04, decisions D1–D6)
+- **Started**: 2026-10-04
+- **Objective**: Provide an `ai-analysis` CLI over `run_analysis` / `write_report`, and run it without an LLM in a separate CI workflow after every valid drift-detection run. It publishes the AI report as its own artifact for downstream consumers. The deterministic drift result is never changed.
+- **Dependencies**: Task 6.6, Task 5.4 (Phase 6's evidence-vs-inference checks are also complete)
 - **Downstream consumers**: Task 10.3 (AI cost explanation), Task 13.1 (consumes real AI report artifacts).
-- **Files/Areas**: to be decided in the Task 9A.1 design review.
+- **Locked decisions (2026-10-04)**:
+  - **D1 — CLI**: a separate console entry point, `ai-analysis = "ai_engine.cli:main"`.
+    - Nothing is added to `drift-engine`; `drift_engine` never imports `ai_engine`, and `pip install .` still pulls no LLM stack.
+    - Usage: `ai-analysis --report <drift_report.json> --output-dir <dir>`. It validates the report as `DriftReport`, runs `run_analysis` and writes `ai_analysis_report.json` / `.md` with `write_report`.
+    - Exit codes, mirroring `drift-engine`:
+      - `0` report written;
+      - `1` input rejected (invalid report, or `outcome` not `succeeded`): nothing written;
+      - `2` usage, or the `ai` extra not installed (clear message);
+      - `70` internal error;
+      - `73` write error.
+  - **D2 — Pinned AI dependencies in CI**: a CI-only constraints file pins the **complete resolved dependency set** of `.[ai]` with exact `==` versions (including transitive packages). The versions are resolved at implementation and recorded in the Completion Notes, and must satisfy the `pyproject.toml` ranges. Local development keeps the ranges; only CI is pinned.
+  - **D3 — Separate workflow, isolated status**:
+    - New `.github/workflows/ai-analysis.yml` triggered by `workflow_run` (`types: [completed]`, `workflows: ["Phase 5 - Drift Detection"]`, `branches: [main]`). An AI failure can never change the drift-detection run's result.
+    - `drift-detection.yml` stays unchanged, so the existing workflow-structure tests stay valid.
+    - Because a `workflow_run` workflow can access secrets and write tokens, its permissions are set explicitly and it references **no secrets other than `github.token`**, used only for the cross-run artifact download.
+  - **D4 — When it runs: every valid detection result, never `unknown`.**
+    - Validity is decided from evidence, **not** from the source run's conclusion. A valid run whose `issues` job failed still counts as valid.
+    - The job checks the source run (`github.event.workflow_run.id`). If its `drift-report-<source run id>` artifact doesn't exist (a failed or `unknown` run uploads none), it writes a summary line ("detection result unknown: no AI analysis") and ends without an AI artifact. That's not an AI failure.
+    - If the artifact exists, the report must validate as `DriftReport` with `outcome == "succeeded"` and a boolean `has_drift` (`true` or `false`). Otherwise it's treated as `unknown` and no AI analysis runs.
+  - **Exact source-run binding (preserved from Phase 8)**:
+    - The downloaded report's `run.run_id` must equal `github-<workflow_run.id>-<workflow_run.run_attempt>`.
+    - `workflow_run.head_branch` must be `main`.
+    - `workflow_run.event` must be `schedule` or `workflow_dispatch`.
+
+    Otherwise the job fails without writing an AI artifact (stale or foreign evidence is never analysed).
+  - **No LLM in CI**:
+    - the job sets `AI_LLM_PROVIDER: none` explicitly and passes no LLM secrets (`OPENAI_*`, `AZURE_OPENAI_*`, `AI_LLM_*` keys);
+    - when `GITHUB_ACTIONS == "true"`, the CLI refuses to run unless `AI_LLM_PROVIDER` is **explicitly** `none` (an unset or default value isn't enough);
+    - enabling a real LLM in CI remains a separate gated decision (secrets, data leaving the runner, cost) needing explicit approval.
+  - **D5 — Artifact**:
+    - `ai-analysis-report-<source run id>` (the drift-detection run it analysed), holding `ai_analysis_report.json` and `ai_analysis_report.md` only, retained 30 days;
+    - `if-no-files-found: error` once analysis has run;
+    - **public-exposure profile explicitly accepted (2026-10-04):** the same profile as the existing `drift-report-<run_id>` artifact (Task 5.4). That includes real non-sensitive attribute values, HCL value fragments from the real view, remediation command templates with working directory and resource addresses, and the deterministic summary. Sensitive values stay redacted, as in the source report. No Activity Log data or caller identity: `ai_engine` never reads Phase 7 output.
+  - **D6 — Publication**: the step summary contains **counts only** (resources, options, sections; LLM status "none"), no AI text. **No AI content in GitHub issues:** `scripts/github_automation.py` and the issues job are unchanged.
+- **Files/Areas**:
+  - new `src/ai_engine/cli.py`
+  - `pyproject.toml`: the `[project.scripts]` entry only
+  - new CI-only constraints file `ci/ai-constraints.txt`
+  - new `.github/workflows/ai-analysis.yml`
+  - new `tests/test_ai_cli.py` (CLI, environment enforcement and workflow-structure tests)
+  - `README.md`
+  - `docs/drift-detection-spec.md` §8.3: publication of the AI artifact
+  - **Unchanged**:
+    - `drift-detection.yml`, `security-scan.yml`, `terraform-auth-test.yml`
+    - `src/drift_engine/`, `scripts/github_automation.py`, and the existing `ai_engine` modules (graph, nodes, config, verify)
+    - Terraform, `schemas/`
 - **Acceptance Criteria**:
-  - [ ] AI analysis CLI producing `ai_analysis_report.json` / `.md` from a drift report.
-  - [ ] No-LLM CI integration first (`AI_LLM_PROVIDER` stays `none` in CI).
-  - [ ] Separate AI artifact and isolated status: an AI failure is reported separately and does not change the detection run's result.
-  - [ ] Must not modify the drift detection result, the drift report or `drift_detected`.
-  - [ ] No Azure or `id-token` permissions for the AI step.
+  - [x] **CLI (D1)**: `ai-analysis` behaves exactly as specified (usage, outputs, exit codes 0/1/2/70/73). A failed or invalid report writes nothing. Output is byte-identical for identical input. `drift-engine` is unchanged, with no import of `ai_engine` and no new dependency in a core `pip install .`.
+  - [x] **No LLM**: in CI the CLI runs only with `AI_LLM_PROVIDER` explicitly `none`; the workflow passes no LLM secrets; with provider `none`, no network connection is attempted (verified under the test network guard); the report records the LLM as unavailable/none.
+  - [x] **Pinned dependencies (D2)**: CI installs `.[ai]` only through `ci/ai-constraints.txt`, which pins every resolved package with `==`. A missing or unpinned entry fails a test.
+  - [x] **Workflow (D3)**:
+    - `workflow_run` on completed `Phase 5 - Drift Detection` runs on `main` only;
+    - permissions exactly `contents: read`, `actions: read`;
+    - no `id-token`, `azure/login`, `ARM_*`/`TF_VAR_*`, or secrets other than `github.token` (download step only);
+    - checkout with `persist-credentials: false`;
+    - concurrency per source run;
+    - no `continue-on-error` hiding an AI failure (the AI workflow's own status reflects AI success; detection is unaffected).
+  - [x] **Validity and binding (D4)**: never runs analysis for `unknown`; runs for both `has_drift` `true` and `false`; enforces the exact `run.run_id`, branch and event binding; never analyses evidence from another run or attempt.
+  - [x] **Detection unchanged**: `drift_detected`, the drift report, its artifact and the drift-detection run status are unchanged (the drift workflow is byte-identical; AI output is a separate artifact).
+  - [x] **Artifact (D5)**: `ai-analysis-report-<source run id>`, the two files only, 30 days. The content matches the accepted exposure profile (no caller identity, no Activity Log data, sensitive values redacted).
+  - [x] **Publication (D6)**: the step summary holds counts only; no AI content appears in issues (the issues job and `github_automation.py` are unchanged).
+  - [x] **Documentation**: README (CLI usage, workflow, artifact, exposure profile, no-LLM rule) and spec §8.3 updated.
 - **Validation**:
-  - [ ] To be defined in the Task 9A.1 design review.
+  - [x] CLI tests over the existing report fixtures, with the network guard active. They cover:
+    - exit codes and failed/invalid reports;
+    - determinism;
+    - environment enforcement: the CLI refuses in CI unless the provider is explicitly `none`;
+    - core install without the `ai` extra: clear exit 2;
+    - an unchanged `drift-engine` CLI.
+  - [x] Workflow-structure tests:
+    - triggers, filters, permissions, no secrets or Azure elements;
+    - the binding and validity checks present;
+    - artifact name and retention;
+    - counts-only summary;
+    - the constraints file used, and all its entries pinned exactly;
+    - the constraints equal the complete `drift-engine[ai]` dependency closure (indirect dependencies included);
+    - `drift-detection.yml` and `github_automation.py` unchanged.
+  - [x] Synthetic gate tests:
+    - missing source artifact → skipped with "unknown" and no AI artifact;
+    - `outcome: failed` → no analysis;
+    - wrong `run_id` or attempt, wrong branch or event → failure without an artifact;
+    - `has_drift` `true` and `false` both analysed.
+
+    These replace a real `unknown` run, which cannot be produced safely.
+  - [ ] **Real CI proof (approval-gated)**:
+    - push to `main`, then a manual `drift-detection` dispatch (an Azure read-only plan, needing approval);
+    - the triggered `ai-analysis` run succeeds;
+    - download `ai-analysis-report-<source run id>` to `.artifacts/` and check `generated_from.drift_report_sha256` (the SHA-256 of the canonical JSON of the report, not of the file bytes) against the source run's `drift-report-<run id>` artifact, LLM status none, counts matching the summary;
+    - the drift-detection run's status and `drift_detected` unchanged.
 - **Implementation Notes**:
+  - With provider `none`, the "AI" report contains only deterministic content: summary, resources, remediation options. AI sections are recorded as unavailable.
   - Real LLM in CI remains a separate gated decision (secrets, data egress, cost) requiring explicit approval.
 - **Completion Notes**:
-  - None.
+  - **Local implementation and validation (2026-10-04; not committed, CI proof pending)**:
+    - Files as locked: new `src/ai_engine/cli.py`, `ci/ai-constraints.txt`, `.github/workflows/ai-analysis.yml`, `tests/test_ai_cli.py`; `pyproject.toml` (the `ai-analysis` entry in `[project.scripts]` only); README (new "AI Analysis (Task 9A.1)" section, status, structure, roadmap, limitations); spec §8.3 ("AI analysis publication").
+    - The protected files are byte-identical to `HEAD` (`git diff --exit-code`): `drift-detection.yml`, `security-scan.yml`, `terraform-auth-test.yml`, `scripts/`, `src/drift_engine/`, `schemas/`, `terraform/`; the existing `ai_engine` modules are unchanged (only `cli.py` is new).
+    - **Resolved pins (D2)**: 43 packages, resolved 2026-10-04 for CPython 3.12 / manylinux x86_64 (the CI runner), every one within the `pyproject.toml` ranges. They are listed with `==` in `ci/ai-constraints.txt`. Key versions: langgraph 1.2.12, langchain-core 1.6.6, langchain-openai 1.6.7, openai 3.24.0, pydantic 2.13.5 (pydantic_core 2.46.5), PyYAML 6.0.3, httpx 0.28.1. The workflow installs `.[ai]` only with `-c ci/ai-constraints.txt` and fails if any installed distribution (other than drift-engine, pip, setuptools and wheel) is missing from the file or differs from its pin. The same pins also install on Python 3.13 / macOS arm64 (the local test environment).
+    - **Tests**: `tests/test_ai_cli.py` has 44 tests, all passing:
+      - CLI: exit codes 0/1/2/70/73 and usage errors; nothing written for failed or invalid reports; byte-identical output across two runs; `has_drift` true and false; LLM `none`/`not_attempted` with no evidence sent; actor `unknown`; the drift report is unchanged;
+      - environment: a refusal in GitHub Actions when the provider is unset, empty, `openai` or `azure_openai`;
+      - a missing `ai` extra exits 2 with a clear message (a subprocess blocks the langgraph/langchain imports);
+      - `drift_engine` and `scripts/github_automation.py` never import `ai_engine`, and the core dependencies are still PyYAML and pydantic;
+      - dependency pins (D2): `test_constraints_equal_the_complete_ai_closure` replaces the earlier check of five direct packages. It builds the complete `drift-engine[ai]` dependency closure from `pyproject.toml` (core dependencies plus the `ai` extra) and the installed package metadata, evaluating markers for the test interpreter and following requested extras. That closure is 43 packages, including indirect dependencies such as `jiter`. The test requires `ci/ai-constraints.txt` to equal it exactly, every entry as `name==version`. It fails on a missing, duplicate, extra (not required), non-exact or version-mismatched pin, and on a pin outside a declared requirement range. It is skipped when the `ai` extra is not installed. It checks the test environment's platform (here Python 3.13 / macOS arm64), and assumes that environment was installed with the constraints;
+      - workflow structure, plus the gate steps actually run with synthetic inputs: a missing artifact gives `present=false` with the "unknown" summary and exit 0; failed, malformed or contract-invalid reports give `valid=false` and exit 0; a wrong attempt, wrong run, local run id or `run: null` exits 1; a wrong branch or event (push, pull_request) exits 1;
+      - the summary step's output holds counts only.
+    - **Full suite**: 1855 passed, 22 skipped (the opt-in `azure` extra), drift_engine coverage 96.05% (gate 85%).
+    - **Sensitivity check**: 11 mutations on a scratch copy; 10 were caught, each failing a test:
+      - binding without the attempt;
+      - every report treated as valid;
+      - `has_drift: false` not analysed;
+      - the branch check broken;
+      - the CLI accepting `openai` in CI;
+      - `name` instead of `pattern` for the download;
+      - an `OPENAI_API_KEY` secret added;
+      - 90-day retention;
+      - an unpinned `langgraph` entry;
+      - an `issues: write` permission.
+
+      The surviving mutant (dropping the CLI's `outcome != "succeeded"` check) is equivalent: the `DriftReport` contract already rejects a failed report with a boolean `has_drift`, so that check is defence in depth.
+    - **Pin-test sensitivity check**: 7 tampered constraints files on a scratch copy; the closure test failed for each:
+      - `jiter` removed (indirect): "required but not pinned";
+      - `langgraph` removed (direct): "required but not pinned";
+      - `tenacity>=9` instead of `==9.1.4`: the non-exact entry is reported;
+      - `six==1.17.0` added, which nothing requires: "pinned but not required";
+      - `jiter==0.16.0`, while 0.17.0 is installed: "installed versions differ from the pins";
+      - `langgraph==2.0.0`: "pins outside the declared ranges";
+      - `jiter` listed twice: "duplicate pin".
+    - **End-to-end (local)**: `drift-engine analyze` on the `external_drift` fixture, then `ai-analysis` with `GITHUB_ACTIONS=true AI_LLM_PROVIDER=none`, exits 0: 1 resource, 2 remediation options, all 5 AI sections `skipped`, LLM `none/not_attempted`. With the provider unset under `GITHUB_ACTIONS=true` it exits 2.
+    - `git diff --check` is clean. Like the other pytest-based test modules, `test_ai_cli.py` is not collected by the stdlib-only `python3 -m unittest discover` run.
+    - Not done here: the actual install of a core-only (no `ai` extra) environment, which would need a package download; the missing extra is simulated instead. The approval-gated real CI proof below is also outstanding.
 
 ---
 
