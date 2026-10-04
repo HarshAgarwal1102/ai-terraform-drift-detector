@@ -10,20 +10,20 @@ Working today:
 - Activity Log attribution tooling;
 - **static Terraform security scanning** (TFLint and Trivy) in CI.
 
-The AI engine has a CLI and a no-LLM CI workflow (Task 9A.1, implemented; its real CI proof
-is pending). Remediation is planned, not built (Phase 11). See
+The AI engine has a CLI and a no-LLM CI workflow (Task 9A.1, validated in a real CI run).
+Remediation is planned, not built (Phase 11). See
 [What works today](#-what-works-today) and [Planned](#-planned-not-yet-implemented).
 
 ---
 
 ## 📌 Current Status
 
-**Phases 1–9 are complete**, and so is the lettered expansion Phase 5A.
+**Phases 1–9 are complete**, and so are the lettered phases 5A and 9A.
 
 `PROJECT_PLAN.md` reports **"Phases Completed: 9 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
   (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "9 of 14".
-- **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **in progress**: Task 9A.1 is implemented and validated locally; its real CI proof is pending approval.
+- **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **complete**: Task 9A.1 was validated locally and in a real CI run.
 
 - **Phase 8:** Task 8.2 (automated remediation PRs) is blocked: it was superseded by
   Phase 11 in the 2026-10-03 design review.
@@ -31,9 +31,10 @@ is pending). Remediation is planned, not built (Phase 11). See
   config security scan) and Task 9.3 (TruffleHog secret scan), all validated in real CI
   runs. Task 9.4 (Super-Linter code-quality enforcement) was **deferred to Phase 12** before
   implementation; Terraform linting stays with TFLint (9.1).
-- **Current active task: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration**: the
-  `ai-analysis` CLI and the `ai-analysis.yml` workflow are implemented and pass the local
-  tests; the real CI proof (a manual drift-detection run on `main`) is still to do.
+- **Phase 9A — AI Analysis Integration** is complete: Task 9A.1 (the `ai-analysis` CLI and
+  the no-LLM `ai-analysis.yml` workflow) was validated in a real CI run.
+- **Current active task: Task 10.1 — Infracost CLI Integration** (Phase 10), which starts
+  with its design review.
 
 | Phase | Status |
 |---|---|
@@ -47,7 +48,7 @@ is pending). Remediation is planned, not built (Phase 11). See
 | 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
-| 9A — AI analysis CLI & no-LLM CI integration | 🟡 In progress (9A.1 implemented locally; CI proof pending) |
+| 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -895,7 +896,7 @@ registration holds zero credentials.
 | 7 | Azure Activity Log investigation | ✅ Complete |
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
-| **9A** | **AI analysis CLI & no-LLM CI integration** | 🟡 **In progress**: Task 9A.1 implemented locally; real CI proof pending |
+| 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
@@ -927,8 +928,8 @@ registration holds zero credentials.
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.
   Both refer to the same document.
 - The AI workflow (Task 9A.1) runs without an LLM, so its report holds only deterministic
-  content; it hasn't yet run in real CI. A real model's analysis quality hasn't been
-  verified; tests use fake chat models.
+  content (validated in a real CI run on a no-drift result). A real model's analysis quality
+  hasn't been verified; tests use fake chat models.
 - Activity Log collection and attribution have been tested with fake log sources. The
   collector itself hasn't been run against real Azure. A read-only Azure check during the
   Task 7.2 design showed that Activity Log events carry no property diffs, so attributes

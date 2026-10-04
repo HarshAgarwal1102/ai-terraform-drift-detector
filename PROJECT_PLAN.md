@@ -124,8 +124,8 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 9A — AI Analysis Integration (pre-Phase 10)
-- **Current Active Task**: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration (implemented and validated locally 2026-10-04; approval-gated real CI proof next)
+- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis
+- **Current Active Task**: Task 10.1 — Infracost CLI Integration (not started; begins with its design review)
 - **Phases Completed**: 9 of 14
 
 ---
@@ -2681,13 +2681,14 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 ---
 
 ### PHASE 9A — AI Analysis Integration (pre-Phase 10)
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consumers. It owns the deferred Task 6.6 AI CLI/workflow integration (Task 6.6 limitation (d): "no CLI or workflow integration yet"). Phase 6 stays COMPLETED and is not reopened. *(Recorded 2026-10-03 per the approved Phase 8 restructuring.)*
 
 #### Task 9A.1 — AI Analysis CLI & No-LLM CI Integration
-- **Status**: 🟡 WORK IN PROGRESS — implemented and validated locally 2026-10-04; the approval-gated real CI proof is pending (design locked 2026-10-04, decisions D1–D6)
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-04
+- **Completed**: 2026-10-04
 - **Objective**: Provide an `ai-analysis` CLI over `run_analysis` / `write_report`, and run it without an LLM in a separate CI workflow after every valid drift-detection run. It publishes the AI report as its own artifact for downstream consumers. The deterministic drift result is never changed.
 - **Dependencies**: Task 6.6, Task 5.4 (Phase 6's evidence-vs-inference checks are also complete)
 - **Downstream consumers**: Task 10.3 (AI cost explanation), Task 13.1 (consumes real AI report artifacts).
@@ -2775,7 +2776,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
     - `has_drift` `true` and `false` both analysed.
 
     These replace a real `unknown` run, which cannot be produced safely.
-  - [ ] **Real CI proof (approval-gated)**:
+  - [x] **Real CI proof (approval-gated)**:
     - push to `main`, then a manual `drift-detection` dispatch (an Azure read-only plan, needing approval);
     - the triggered `ai-analysis` run succeeds;
     - download `ai-analysis-report-<source run id>` to `.artifacts/` and check `generated_from.drift_report_sha256` (the SHA-256 of the canonical JSON of the report, not of the file bytes) against the source run's `drift-report-<run id>` artifact, LLM status none, counts matching the summary;
@@ -2784,7 +2785,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
   - With provider `none`, the "AI" report contains only deterministic content: summary, resources, remediation options. AI sections are recorded as unavailable.
   - Real LLM in CI remains a separate gated decision (secrets, data egress, cost) requiring explicit approval.
 - **Completion Notes**:
-  - **Local implementation and validation (2026-10-04; not committed, CI proof pending)**:
+  - **Local implementation and validation (2026-10-04; checkpoint commit `de22b01`)**:
     - Files as locked: new `src/ai_engine/cli.py`, `ci/ai-constraints.txt`, `.github/workflows/ai-analysis.yml`, `tests/test_ai_cli.py`; `pyproject.toml` (the `ai-analysis` entry in `[project.scripts]` only); README (new "AI Analysis (Task 9A.1)" section, status, structure, roadmap, limitations); spec §8.3 ("AI analysis publication").
     - The protected files are byte-identical to `HEAD` (`git diff --exit-code`): `drift-detection.yml`, `security-scan.yml`, `terraform-auth-test.yml`, `scripts/`, `src/drift_engine/`, `schemas/`, `terraform/`; the existing `ai_engine` modules are unchanged (only `cli.py` is new).
     - **Resolved pins (D2)**: 43 packages, resolved 2026-10-04 for CPython 3.12 / manylinux x86_64 (the CI runner), every one within the `pyproject.toml` ranges. They are listed with `==` in `ci/ai-constraints.txt`. Key versions: langgraph 1.2.12, langchain-core 1.6.6, langchain-openai 1.6.7, openai 3.24.0, pydantic 2.13.5 (pydantic_core 2.46.5), PyYAML 6.0.3, httpx 0.28.1. The workflow installs `.[ai]` only with `-c ci/ai-constraints.txt` and fails if any installed distribution (other than drift-engine, pip, setuptools and wheel) is missing from the file or differs from its pin. The same pins also install on Python 3.13 / macOS arm64 (the local test environment).
@@ -2820,7 +2821,30 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
       - `jiter` listed twice: "duplicate pin".
     - **End-to-end (local)**: `drift-engine analyze` on the `external_drift` fixture, then `ai-analysis` with `GITHUB_ACTIONS=true AI_LLM_PROVIDER=none`, exits 0: 1 resource, 2 remediation options, all 5 AI sections `skipped`, LLM `none/not_attempted`. With the provider unset under `GITHUB_ACTIONS=true` it exits 2.
     - `git diff --check` is clean. Like the other pytest-based test modules, `test_ai_cli.py` is not collected by the stdlib-only `python3 -m unittest discover` run.
-    - Not done here: the actual install of a core-only (no `ai` extra) environment, which would need a package download; the missing extra is simulated instead. The approval-gated real CI proof below is also outstanding.
+    - Not done here: the actual install of a core-only (no `ai` extra) environment, which would need a package download; the missing extra is simulated instead.
+    - **Clean-environment pin verification (2026-10-04)**: in fresh Python 3.13 venvs (only `pip` pre-installed; `pip --isolated --no-cache-dir`), `pip install -c ci/ai-constraints.txt ".[ai]"` installed exactly the 43 pins plus drift-engine, with no "already satisfied" requirement. Two independent installs gave identical `pip freeze` output. A resolver-only run for CPython 3.12 / manylinux x86_64 gave the same 43 pins. The workflow's pin check, extracted verbatim, passed on the clean install and failed (exit 1) for a removed indirect pin (`jiter`), a removed direct pin (`langgraph`), a range entry (`tenacity>=9`), an extra unpinned package (`six`) and a pinned package changed after install (`sniffio` 1.3.0).
+  - **Real CI proof (user-approved, 2026-10-04)**: the user dispatched the drift workflow manually; I monitored it through the public Actions API, and the user downloaded the artifacts into `.artifacts/` (gitignored; extracted copies in `.artifacts/task-9A.1-ci-proof/`).
+    - **Source run** `37178020110` (Phase 5 - Drift Detection #18, `workflow_dispatch`, `main`, commit `de22b01`, attempt 1, 04:47:39–04:49:01Z): Preflight, Terraform Plan & Drift Analysis, Drift Issues and Report & Summary all **success**.
+      - Plan job steps: Azure OIDC login and verify, Setup Terraform, `init` (remote backend), `validate`, Generate Plan Evidence, Analyze Drift, Upload Drift Report. No apply or state-changing step; the manifest records plan exit 0 and show exit 0 (Terraform 1.14.7).
+      - Result: valid no-drift. `outcome: succeeded`, `has_drift: false`, `{"in_sync": 5}`, `run_id` `github-37178020110-1`. No issue was created, updated or closed.
+      - Artifact `drift-report-37178020110` (`drift_report.json`, `detection_run.json`; 30 days).
+    - **AI run** `37178086052` (Phase 9A - AI Analysis (no LLM), `workflow_run`, `main`, `de22b01`, attempt 1, 04:49:03–04:49:29Z, started 2 s after the source run completed): **success**, all 10 steps successful.
+      - Verify source run: `main` / `workflow_dispatch`. The download and presence check found the artifact.
+      - Install (pinned): the exact-pin check passed on the Linux runner.
+      - Validate and bind: valid report bound to `github-37178020110-1`.
+      - The analysis, the counts-only summary and the upload all ran. No `::error::` annotations; the only annotations are GitHub's Node.js 20 deprecation and `ubuntu-latest` migration notices, which every workflow shows (Phase 12 hardening).
+    - **Artifacts** (downloaded unchanged):
+      - `drift-report-37178020110.zip`: SHA-256 `fc5bba15797ae9fd2d52ce95664fb4cbb4d92a92973113c2a2dfea4040b1e29a`, equal to the GitHub artifact digest;
+      - `ai-analysis-report-37178020110.zip`: SHA-256 `8a05e87cfef409174fc27c567fd8be3ce72ca1074e2b41f126b37018bbf80e2e`, equal to the GitHub artifact digest. Name bound to the source run id; it contains exactly `ai_analysis_report.json` and `ai_analysis_report.md`; 30 days (expires 2026-11-03).
+    - **Report checks**: the AI report validates as `AiAnalysisReport`.
+      - `generated_from.drift_report_sha256` = `744d4284…cf86e7` equals `drift_report_sha256()` (canonical JSON: sorted keys, compact separators, UTF-8) of the downloaded `drift_report.json`. The raw-file hash is different by design.
+      - `generated_from.run_id` = `github-37178020110-1`; environment `dev`.
+      - `llm`: `attempted: false`, provider `none`, status `not_attempted`, `evidence_sent: []`, model `null`.
+      - All 5 AI sections `skipped`; attribution actor `unknown`, `confirmed: false`.
+      - Counts match the drift report: `has_drift: false`, `resources_total: 5`, `{"in_sync": 5}`, 0 drifted resources, 0 remediation options.
+      - Regenerating locally from the downloaded drift report with `ai-analysis` (`AI_LLM_PROVIDER=none`) gives **byte-identical** JSON and Markdown to the CI artifact.
+    - **Exposure checks** on both AI files: no GUIDs or subscription IDs, no ARM resource IDs, no emails or UPNs, no caller, claim or principal fields, no Activity Log fields, no secret-like strings. "Activity Log" appears only as the constant `pending: phase_7_activity_log` marker and the standard limitation sentence.
+    - **Coverage of D4**: the real run exercised the valid `has_drift: false` path. The `true` path, the `unknown`/missing-artifact path and the binding failures are covered by the synthetic gate tests and the local end-to-end run (a real `unknown` run cannot be produced safely). The step-summary text itself is not available through the public API, so the summary counts were not compared against the rendered summary; that step succeeded, and it renders these counts from this same artifact JSON.
 
 ---
 
