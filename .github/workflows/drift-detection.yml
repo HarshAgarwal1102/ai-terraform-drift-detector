@@ -427,18 +427,21 @@ jobs:
       # D1: the pinned v0.10.46 Linux binary is downloaded and SHA-256 verified
       # inside this step (never a separate step), so an install failure is the cost
       # failure `install_failed`. No Infracost action, image or install script.
-      # D6: the only secret is INFRACOST_API_KEY; both OIDC token-request variables
-      # are blanked; no ARM_*, AZURE_* or GITHUB_TOKEN. The Azure CLI session is
-      # removed first (errors ignored; scripts/infracost_analysis.sh fails closed if
-      # a session or an OIDC variable remains). The script also enforces the D7
-      # controls (incl. CHECKPOINT_DISABLE=1) and the unexpected_egress check.
+      # D6: the only secret is INFRACOST_API_KEY; no ARM_*, AZURE_* or GITHUB_TOKEN.
+      # The runner re-injects ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN into every run:
+      # step of a job with id-token: write, after the step env: is applied (so
+      # blanking them in env: is ineffective, run #20). The first command therefore
+      # re-executes this step's shell without them (exec env -u: a clean re-exec
+      # boundary); a failed exec continues and the script then fails closed with
+      # oidc_token_present. The Azure CLI session is removed next (errors ignored;
+      # scripts/infracost_analysis.sh fails closed if a session or an OIDC variable
+      # remains). The script also enforces the D7 controls (incl.
+      # CHECKPOINT_DISABLE=1) and the unexpected_egress check.
       - name: Infracost Cost Estimate
         id: cost
         if: ${{ steps.upload.outcome == 'success' && (steps.analyze.outputs.drift_detected == 'true' || steps.analyze.outputs.drift_detected == 'false') }}
         env:
           INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
-          ACTIONS_ID_TOKEN_REQUEST_URL: ""
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           PINNED_INFRACOST_VERSION: "0.10.46"
           PINNED_INFRACOST_LINUX_SHA256: "d0d081cd39b07b2ca5c315830bfc4bcdfb0183b04c19cb18835c154482a2c97b"
           PLAN_JSON: ${{ runner.temp }}/drift/plan.json
@@ -446,6 +449,10 @@ jobs:
           RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
           DRIFT_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
         run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            shopt -s execfail
+            exec env -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_ID_TOKEN_REQUEST_TOKEN bash --noprofile --norc -eo pipefail "$0" || true
+          fi
           set -uo pipefail
           az logout >/dev/null 2>&1 || true
           az account clear >/dev/null 2>&1 || true

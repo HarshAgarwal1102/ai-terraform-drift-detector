@@ -46,6 +46,16 @@ KEY = "ico-SENTINELKEY-0123456789abcdef"  # never a real key; must never appear 
 BASH = shutil.which("bash") or "/bin/bash"
 PINNED_SHA256 = "d0d081cd39b07b2ca5c315830bfc4bcdfb0183b04c19cb18835c154482a2c97b"
 PINNED_URL = "https://github.com/infracost/infracost/releases/download/v0.10.46/infracost-linux-amd64.tar.gz"
+# D6 amendment (CI run #20): the runner re-injects the OIDC request variables into every run: step after the
+# step env: is applied, so the cost step re-executes its own shell without them as its first command.
+REEXEC = [
+    'if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then',
+    "  shopt -s execfail",
+    '  exec env -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_ID_TOKEN_REQUEST_TOKEN bash --noprofile --norc -eo pipefail '
+    '"$0" || true',
+    "fi",
+]
+OIDC_SENTINEL = "runner-oidc-request-token-SENTINEL"
 D7_CONTROLS = {"INFRACOST_SKIP_UPDATE_CHECK": "true", "INFRACOST_ENABLE_CLOUD": "false",
                "INFRACOST_DISABLE_ENVFILE": "true", "INFRACOST_NO_COLOR": "true", "CHECKPOINT_DISABLE": "1"}
 REASON_CODES = {"none", "usage", "install_failed", "missing_api_key", "oidc_token_present", "azure_session_present",
@@ -522,7 +532,9 @@ def test_cost_step_install_pin_and_environment(wf):
     env, run = cost["env"], cost["run"]
     assert env["PINNED_INFRACOST_VERSION"] == "0.10.46" and env["PINNED_INFRACOST_LINUX_SHA256"] == PINNED_SHA256
     assert env["INFRACOST_API_KEY"] == "${{ secrets.INFRACOST_API_KEY }}"
-    assert env["ACTIONS_ID_TOKEN_REQUEST_URL"] == "" and env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] == ""
+    # D6 amendment: no (ineffective) step-level blanking; the re-exec is the very first command.
+    assert "ACTIONS_ID_TOKEN_REQUEST_URL" not in env and "ACTIONS_ID_TOKEN_REQUEST_TOKEN" not in env
+    assert run.splitlines()[:len(REEXEC) + 1] == [*REEXEC, "set -uo pipefail"]
     assert env["RUN_ID"] == "github-${{ github.run_id }}-${{ github.run_attempt }}"
     assert env["PLAN_JSON"] == "${{ runner.temp }}/drift/plan.json"
     assert env["DRIFT_REPORT"] == "${{ runner.temp }}/drift/drift_report.json"
@@ -587,13 +599,26 @@ def _run_block(run: str, env: dict, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run([BASH, "-c", run], env=env, cwd=str(cwd), capture_output=True, text=True)
 
 
+def _run_step_file(run: str, env: dict, cwd: Path, script: Path, inject_oidc: bool) -> subprocess.CompletedProcess:
+    """Runs a run: block the way the GitHub runner does: written to a file and executed as `bash -e <file>`
+    (the default for steps without `shell:`), with the OIDC request variables set non-empty AFTER the
+    step env: is applied when the job has id-token: write (actions/runner ScriptHandler.cs)."""
+    script.write_text(run, encoding="utf-8")
+    env = dict(env)
+    if inject_oidc:
+        env["ACTIONS_ID_TOKEN_REQUEST_URL"] = "https://pipelines.invalid/idtoken?api-version=2.0"
+        env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] = OIDC_SENTINEL
+    return subprocess.run([BASH, "-e", str(script)], env=env, cwd=str(cwd), capture_output=True, text=True)
+
+
 @pytest.fixture
 def step_sim(tmp_path, drift_report_path, wf):
     """The cost step's run: block with a fake curl serving a crafted tarball that holds a fake
     Infracost, a logged-out az, and the real scripts and sanitiser."""
     shim = tmp_path / "shim"
     shim.mkdir()
-    fake = (f'#!/bin/sh\ncase "$1" in --version) echo "Infracost v0.10.46"; exit 0;; esac\n'
+    seen = f'env | grep "^ACTIONS_ID_TOKEN_REQUEST" >> "{tmp_path}/oidc_seen" || true\n'
+    fake = (f'#!/bin/sh\n{seen}case "$1" in --version) echo "Infracost v0.10.46"; exit 0;; esac\n'
             f'out=""; prev=""; for a in "$@"; do [ "$prev" = --out-file ] && out="$a"; prev="$a"; done\n'
             f'cp "{RAW_SKU}" "$out"\n').encode()
     tgz = tmp_path / "infracost-linux-amd64.tar.gz"
@@ -601,16 +626,19 @@ def step_sim(tmp_path, drift_report_path, wf):
         info = tarfile.TarInfo("infracost-linux-amd64")
         info.size, info.mode = len(fake), 0o755
         tar.addfile(info, io.BytesIO(fake))
-    _exe(shim / "curl", f'#!/bin/sh\n[ -f "{tmp_path}/curl_fail" ] && exit 22\nout=""; prev=""; for a in "$@"; do '
-                        f'[ "$prev" = -o ] && out="$a"; prev="$a"; done\necho "$@" > "{tmp_path}/curl_args"\n'
+    _exe(shim / "curl", f'#!/bin/sh\n{seen}[ -f "{tmp_path}/curl_fail" ] && exit 22\nout=""; prev=""; '
+                        f'for a in "$@"; do [ "$prev" = -o ] && out="$a"; prev="$a"; done\n'
+                        f'echo "$@" > "{tmp_path}/curl_args"\n'
                         f'cp "{tgz}" "$out"\n')
-    _exe(shim / "az", f'#!/bin/sh\necho "$@" >> "{tmp_path}/az_calls"\nexit 1\n')
+    _exe(shim / "az", f'#!/bin/sh\n{seen}echo "$@" >> "{tmp_path}/az_calls"\nexit 1\n')
     _exe(shim / "python3", f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     if shutil.which("sha256sum", path="/usr/bin:/bin") is None:  # the step PATH, not the caller's
         _exe(shim / "sha256sum", '#!/bin/sh\nexec shasum -a 256 "$@"\n')
     step = steps_by_name(wf["jobs"]["plan-and-analyze"])["Infracost Cost Estimate"]
 
-    def run(sha: str = hashlib.sha256(tgz.read_bytes()).hexdigest(), key: str = KEY, curl_fail: bool = False):
+    def run(sha: str = hashlib.sha256(tgz.read_bytes()).hexdigest(), key: str = KEY, curl_fail: bool = False,
+            inject_oidc: bool = True, run_text: str | None = None, step_env: dict | None = None):
+        (tmp_path / "oidc_seen").unlink(missing_ok=True)
         runner = tmp_path / f"runner{len(list(tmp_path.glob('runner*')))}"
         (runner / "drift").mkdir(parents=True)
         (tmp_path / "curl_fail").unlink(missing_ok=True)
@@ -618,12 +646,13 @@ def step_sim(tmp_path, drift_report_path, wf):
             (tmp_path / "curl_fail").write_text("")
         gh = runner / "gh_output"
         gh.write_text("")
-        env = dict(step["env"])
+        env = dict(step["env"] if step_env is None else step_env)
         env.update({"INFRACOST_API_KEY": key, "PINNED_INFRACOST_LINUX_SHA256": sha, "PLAN_JSON": str(PLAN),
                     "DRIFT_REPORT": str(drift_report_path), "RUN_ID": RUN_ID, "DRIFT_ENVIRONMENT": "dev",
                     "RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(gh), "HOME": str(tmp_path / "home"),
                     "PATH": f"{shim}:/usr/bin:/bin"})
-        proc = _run_block(step["run"], env, ROOT)
+        text = step["run"] if run_text is None else run_text
+        proc = _run_step_file(text, env, ROOT, runner / "step.sh", inject_oidc)
         outputs = dict(line.split("=", 1) for line in gh.read_text().splitlines() if "=" in line)
         return proc, outputs, runner
 
@@ -638,6 +667,43 @@ def test_cost_step_executes_successfully(step_sim):
     assert (tmp / "curl_args").read_text().split()[-1] == PINNED_URL
     assert (tmp / "az_calls").read_text().splitlines()[:2] == ["logout", "account clear"]
     assert KEY not in proc.stdout + proc.stderr
+    # D6 amendment: with the runner injecting both OIDC variables, no child process (az, curl, Infracost via
+    # the script) sees them, and they are never printed.
+    assert oidc_seen(tmp) == ""
+    assert OIDC_SENTINEL not in proc.stdout + proc.stderr + json.dumps(outputs)
+
+
+def oidc_seen(tmp: Path) -> str:
+    """OIDC request variables observed by the fake az, curl or Infracost (empty = never seen)."""
+    path = tmp / "oidc_seen"
+    return path.read_text() if path.exists() else ""
+
+
+def test_cost_step_without_injected_oidc_does_not_reexec(step_sim):
+    run, tmp = step_sim
+    proc, outputs, _ = run(inject_oidc=False)  # guard: no re-exec needed, no loop
+    assert proc.returncode == 0 and outputs == {"cost_status": "succeeded", "cost_failure": "none"}
+    assert oidc_seen(tmp) == ""
+
+
+def test_run20_mechanism_is_caught_by_the_runner_realistic_harness(step_sim, wf):
+    """Regression for CI run #20: step-level blanking without the re-exec. Under the runner-realistic harness
+    the script fails closed with oidc_token_present (step still exits 0); under the old harness, which took the
+    step env from the YAML and did not inject the variables, the same mechanism wrongly looked fine."""
+    run, tmp = step_sim
+    step = steps_by_name(wf["jobs"]["plan-and-analyze"])["Infracost Cost Estimate"]
+    lines = step["run"].splitlines()
+    assert lines[:len(REEXEC)] == REEXEC
+    run20_text = "\n".join(lines[len(REEXEC):]) + "\n"
+    run20_env = {**step["env"], "ACTIONS_ID_TOKEN_REQUEST_URL": "", "ACTIONS_ID_TOKEN_REQUEST_TOKEN": ""}
+    proc, outputs, runner = run(run_text=run20_text, step_env=run20_env)
+    assert proc.returncode == 0
+    assert outputs == {"cost_status": "failed", "cost_failure": "oidc_token_present"}
+    assert not (runner / "cost" / "report").exists() or list((runner / "cost" / "report").iterdir()) == []
+    assert OIDC_SENTINEL not in proc.stdout + proc.stderr  # the check never prints the value
+    assert "ACTIONS_ID_TOKEN_REQUEST_TOKEN=" in oidc_seen(tmp)  # probe sensitivity: az saw it without the re-exec
+    proc, outputs, _ = run(run_text=run20_text, step_env=run20_env, inject_oidc=False)
+    assert outputs == {"cost_status": "succeeded", "cost_failure": "none"}
 
 
 @pytest.mark.parametrize("variant", ["checksum_mismatch", "pinned_hash_vs_crafted_tarball", "download_failure"])
