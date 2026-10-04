@@ -124,9 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.4 — Super-Linter Code Quality Enforcement (design locked 2026-10-04; implementation next)
-- **Phases Completed**: 8 of 14
+- **Current Active Phase**: Phase 9A — AI Analysis Integration (pre-Phase 10)
+- **Current Active Task**: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration (dedicated design review required before implementation)
+- **Phases Completed**: 9 of 14
 
 ---
 
@@ -2020,9 +2020,14 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 ---
 
 ### PHASE 9 — DevSecOps Integration
-**Status**: 🟡 WORK IN PROGRESS
+**Status**: 🟢 COMPLETED
 
 Phase 9 integrates deterministic security scanners into CI/CD to validate Terraform code security and prevent secret leaks.
+
+> **Phase 9 completion and scope change (2026-10-04, user decision):** Phase 9 is complete once Tasks 9.1, 9.2 and 9.3 are complete (all 🟢 COMPLETED). This follows the Phase 8 precedent, where Task 8.2 was moved to Phase 11.
+> - Task 9.4 (Super-Linter / Docker-based code-quality enforcement) is 🔴 BLOCKED — **deferred to Phase 12**. Its locked design (D1–D10) is preserved in Task 9.4 for that later work.
+> - Nothing from Task 9.4 was implemented: no files, workflow, image download or Docker run, and no baseline measured.
+> - **Terraform linting stays solely Task 9.1 (TFLint).** Any future Super-Linter work keeps its bundled TFLint, `terraform fmt`, Trivy, Checkov and GitLeaks disabled (Task 9.4, D2), so nothing duplicates Tasks 9.1–9.3.
 
 > **Phase 9 rules (apply to Tasks 9.1–9.4; recorded 2026-10-03 per the Phase 9 design re-evaluation).** Task 9.1 already implements these rules in its locked design; Tasks 9.2–9.4 must follow them.
 > - **Separation of responsibilities**: Terraform/Azure tooling produces the deterministic drift evidence (Phases 3–5); Phase 9 scanners and linters check code and security quality only; AI only interprets (Phases 6/9A). A scanner or linter finding is never a drift result, and a valid drift result is never a scan failure.
@@ -2522,8 +2527,14 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
       - `terraform-auth-test.yml` run `37170658799`: failed at Azure OIDC login (existing behaviour on PRs).
     - **Cleanup:** PR #4 closed unmerged (2026-10-04T02:21:05Z, `merged=false`; closed by GitHub when the head branch was deleted). The remote and local branches were deleted, and no branch contains `28ea13f`. `main` = `origin/main` = `3e86419`, carrying the correct SHA-256.
     - The browser session was signed out of GitHub, so the user opened PR #4 and confirmed the failing step in the log. The step results above come from the public Actions API.
+
 #### Task 9.4 — Super-Linter Code Quality Enforcement
-- **Status**: ⬜ NOT STARTED — design locked 2026-10-04 (Task 9.4 design review + user decisions D1–D10)
+- **Status**: 🔴 BLOCKED — deferred to Phase 12 (user decision 2026-10-04); not implemented
+- **Deferral record (2026-10-04)**:
+  - Task 9.4 was paused before its baseline. The Docker daemon was not running on the host, and the user decided not to download or run the Super-Linter image in Phase 9.
+  - Nothing was implemented: no `super-linter.yml`, no `scripts/run_super_linter.sh`, no `.github/linters/` configs, no tests, no image pulled, no baseline measured.
+  - The design below (D1–D10) stays recorded for Phase 12. Before reuse it must be re-validated in a Phase 12 design review: the image digest and version, the variable names, and the repository baselines (Python, shell, YAML and Markdown counts, and the 19-comment `# noqa` inventory) may have changed.
+  - TFLint remains owned by Task 9.1 and is not duplicated.
 - **Objective**: Run Super-Linter, from a digest-pinned image, as a code-quality gate in its own workflow. The scope is Python (Ruff, lint only), shell (ShellCheck), non-workflow YAML (yamllint) and Markdown (markdownlint, including `PROJECT_PLAN.md`). A finding is a code-quality failure: never a security result, never a drift result. *(Reworded 2026-10-04 per the Task 9.4 design review.)*
 - **Dependencies**: Task 9.3
 - **Locked version and execution (D1)**:
@@ -2595,7 +2606,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - `drift-detection.yml`, `terraform-auth-test.yml`, `security-scan.yml` (its three jobs)
     - Terraform, `.tflint.hcl`, the 9.1–9.3 scripts and tests, `security/trivy-risk-acceptance.json`
     - no mass formatting of Python (D3)
-- **Acceptance Criteria** *(objective; the baseline is **not** assumed clean)*:
+- **Acceptance Criteria** *(deferred with the task: not applicable in Phase 9 and none implemented; objective; the baseline is **not** assumed clean)*:
   - [ ] **Pinned image**: the workflow and script reference only the v9.0.0 index digest above; no tag, no `latest`, no Super-Linter action. A pull or run failure fails the job.
   - [ ] **Allowlist**: exactly the four `VALIDATE_*=true` variables of D2; no other `VALIDATE_*`; the environment exactly as locked above.
   - [ ] **Configuration**: the four `.github/linters/` files byte-identical to Super-Linter v9.0.0 `TEMPLATES/`, unless a later plan decision changes them.
@@ -2614,7 +2625,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - `.github/workflows/**` never modified or linted;
     - the 9.1–9.3 jobs and tests still pass.
   - [ ] **README**: documents the local command (Docker; on arm64 hosts amd64 emulation via `--platform linux/amd64`), the pinned digest and upgrade procedure, the allowlist and scope, the suppression policy, and D10 (19 retained legacy `# noqa` comments; no new ones).
-- **Validation**:
+- **Validation** *(deferred with the task)*:
   - [ ] Static pytest (`tests/test_super_linter.py`):
     - digest pin;
     - exact allowlist and environment;
@@ -2665,7 +2676,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 - **Implementation Notes**:
   - Code-quality linting only. It never runs inside or gates the drift-detection workflow.
 - **Completion Notes**:
-  - None.
+  - None — not implemented; deferred to Phase 12 (2026-10-04).
 
 ---
 
@@ -2814,6 +2825,12 @@ Phase 11 enforces strict human approval controls before applying any automated i
 **Status**: ⬜ NOT STARTED
 
 Phase 12 builds a comprehensive end-to-end test suite and performs security hardening across all platform components.
+
+> **Scope deferred into Phase 12 (recorded 2026-10-04):**
+> - **Super-Linter / Docker-based code-quality enforcement** from Task 9.4 (🔴 BLOCKED — deferred). Its locked design (D1–D10) is in Task 9.4 and must be re-validated before use.
+> - **GitHub Actions workflow linting (actionlint, zizmor) and pinning actions by commit SHA**, already deferred to Phase 12 by Tasks 9.1–9.4.
+>
+> How these are scheduled within Phase 12 (for example as their own task) is decided in a Phase 12 design review. No task is added here.
 
 #### Task 12.1 — Comprehensive Unit & Integration Test Suite
 - **Status**: ⬜ NOT STARTED

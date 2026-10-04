@@ -18,19 +18,21 @@ built (Phase 11). See [What works today](#-what-works-today) and
 
 ## 📌 Current Status
 
-**Phases 1–8 are complete**, and so is the lettered expansion Phase 5A.
+**Phases 1–9 are complete**, and so is the lettered expansion Phase 5A.
 
-`PROJECT_PLAN.md` reports **"Phases Completed: 8 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
+`PROJECT_PLAN.md` reports **"Phases Completed: 9 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
-  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "8 of 14".
-- **Phase 9A** (AI Analysis Integration) is planned and not started, placed before Phase 10.
+  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "9 of 14".
+- **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **next**: Task 9A.1 starts with its design review.
 
 - **Phase 8:** Task 8.2 (automated remediation PRs) is blocked: it was superseded by
   Phase 11 in the 2026-10-03 design review.
-- **Phase 9 — DevSecOps Integration** is in progress. Done: Task 9.1 (TFLint) and
-  Task 9.2 (Trivy config security scan) and Task 9.3 (TruffleHog secret scan), all
-  validated in real CI runs. **Current active task: Task 9.4 — Super-Linter Code Quality
-  Enforcement**, which starts with its dedicated design review.
+- **Phase 9 — DevSecOps Integration** is complete: Task 9.1 (TFLint), Task 9.2 (Trivy
+  config security scan) and Task 9.3 (TruffleHog secret scan), all validated in real CI
+  runs. Task 9.4 (Super-Linter code-quality enforcement) was **deferred to Phase 12** before
+  implementation; Terraform linting stays with TFLint (9.1).
+- **Current active task: Task 9A.1 — AI Analysis CLI & No-LLM CI Integration**, which
+  starts with its dedicated design review.
 
 | Phase | Status |
 |---|---|
@@ -43,7 +45,7 @@ built (Phase 11). See [What works today](#-what-works-today) and
 | 6 — LangGraph AI analysis engine (library; no CLI/CI integration yet) | ✅ Complete |
 | 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
-| 9 — DevSecOps integration | 🟡 In progress (9.1 ✅, 9.2 ✅, 9.3 ✅, 9.4 next) |
+| 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -106,14 +108,14 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Super-Linter code-quality checks (Task 9.4), after its own design review.
-- An AI analysis CLI and no-LLM CI integration (Phase 9A).
+- An AI analysis CLI and no-LLM CI integration (Phase 9A, next).
 - FinOps cost analysis with Infracost (Phase 10).
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
   and no apply triggered by a merge.
-- Testing and security hardening (Phase 12), dashboard (Phase 13), final documentation and
-  demo (Phase 14).
+- Testing and security hardening (Phase 12), which now also holds the deferred Super-Linter
+  code-quality enforcement (Task 9.4), GitHub Actions linting and action SHA pinning;
+  dashboard (Phase 13); final documentation and demo (Phase 14).
 
 ### Core principles
 
@@ -831,8 +833,8 @@ registration holds zero credentials.
 | 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI in 9A) |
 | 7 | Azure Activity Log investigation | ✅ Complete |
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
-| **9** | **DevSecOps scanning** | 🟡 In progress: 9.1 TFLint ✅, 9.2 Trivy config ✅, 9.3 TruffleHog ✅, **9.4 Super-Linter next** (design review) |
-| 9A | AI analysis CLI & no-LLM CI integration | ⬜ Planned |
+| 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
+| **9A** | **AI analysis CLI & no-LLM CI integration** | ⬜ **Next**: Task 9A.1 design review |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |

@@ -4,7 +4,7 @@
 
 This platform detects, analyzes, and remediates **infrastructure drift** — the gap between what Terraform expects and what actually exists in Azure. The final product will combine Terraform, Python, LangGraph/LLM analysis, GitHub automation, and a professional dashboard.
 
-**Current Status (2026-10-04):** Phases 1–8 are complete, and so is the lettered expansion Phase 5A (placed after Phase 5 and before Phase 6). `PROJECT_PLAN.md`'s "Phases Completed: 8 of 14" counts only the numbered phases. Phase 9A (AI analysis integration, before Phase 10) is planned and not started. Phase 9 (DevSecOps) is in progress: Task 9.1 TFLint, Task 9.2 Trivy config and Task 9.3 TruffleHog are complete; Task 9.4 Super-Linter (design review) is next. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
+**Current Status (2026-10-04):** Phases 1–9 are complete, and so is the lettered expansion Phase 5A (placed after Phase 5 and before Phase 6). `PROJECT_PLAN.md`'s "Phases Completed: 9 of 14" counts only the numbered phases. Phase 9 (DevSecOps) completed with Task 9.1 TFLint, Task 9.2 Trivy config and Task 9.3 TruffleHog; Task 9.4 Super-Linter was deferred to Phase 12. Phase 9A (AI analysis integration, before Phase 10) is next, starting with the Task 9A.1 design review. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
 
 ---
 
@@ -21,7 +21,7 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 | **6** | **LangGraph AI Analysis** | `src/ai_engine` library; LLM opt-in; no CLI/CI integration yet (Phase 9A) | ✅ Complete |
 | **7** | **Azure Activity Log Investigation** | Activity Log collector and deterministic attribution (opt-in, not in any workflow) | ✅ Complete |
 | **8** | **GitHub Issue / PR Automation** | Drift issues create/update/close (8.1, 8.3); remediation PRs (8.2) superseded by Phase 11 | ✅ Complete |
-| 9 | DevSecOps Integration | `security-scan.yml`: TFLint (9.1 ✅), Trivy config (9.2 ✅), TruffleHog secret scan (9.3 ✅); Super-Linter (9.4) pending | 🟡 In progress |
+| **9** | **DevSecOps Integration** | `security-scan.yml`: TFLint (9.1), Trivy config (9.2), TruffleHog secret scan (9.3); Super-Linter (9.4) deferred to Phase 12 | ✅ Complete |
 | 9A–14 | AI CI integration, FinOps, human-approved remediation, hardening, dashboard, final docs | See `PROJECT_PLAN.md` | ⬜ Planned |
 
 ---
