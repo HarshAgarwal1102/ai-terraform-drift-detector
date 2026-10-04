@@ -7,10 +7,11 @@ name: "Phase 5 - Drift Detection"
 # evidence via scripts/generate_plan_json.sh and classification via
 # `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), failure
 # reporting with the `drift_detected` output (Task 5.5), one GitHub Issue per
-# drifted resource (Task 8.1), and evidence-based closing of those issues once the
-# resource is no longer drifted (Task 8.3).
+# drifted resource (Task 8.1), evidence-based closing of those issues once the
+# resource is no longer drifted (Task 8.3), and an Infracost cost estimate of the
+# same plan (Task 10.1).
 #
-# Jobs: preflight -> plan-and-analyze -> issues / report.
+# Jobs: preflight -> plan-and-analyze -> issues / cost / report.
 #   preflight         main-branch guard and environment/path validation.
 #   plan-and-analyze  OIDC, Terraform init/validate, plan evidence, drift-engine
 #                     analyze, and upload of the two-file report artifact. Plan
@@ -26,6 +27,13 @@ name: "Phase 5 - Drift Detection"
 #                     only this run's drift report artifact (no raw plan evidence).
 #                     Issue publication relies on the workflow-level concurrency
 #                     group below (runs are serialized per environment).
+#   cost              Task 10.1: fails unless the cost steps at the end of
+#                     plan-and-analyze succeeded and their sanitised
+#                     infracost-report artifact passes the sanitiser's check mode;
+#                     writes a totals-only summary. Least privilege (contents: read;
+#                     no id-token, no Azure, no secrets). Cost is informational: a
+#                     cost failure turns the run red but never changes
+#                     drift_detected, the drift report, issues or the report job.
 #   report            run summary, also after failures (reporting only).
 #
 # Job status reflects process validity only: detected drift is a valid result and
@@ -170,6 +178,11 @@ jobs:
       evidence_outcome: ${{ steps.evidence.outcome }}
       analyze_outcome: ${{ steps.analyze.outcome }}
       upload_outcome: ${{ steps.upload.outcome }}
+      # Task 10.1 cost status, consumed only by the cost job (never by issues/report).
+      # Empty when the cost steps did not run; the cost job then fails.
+      cost_status: ${{ steps.cost.outputs.cost_status }}
+      cost_failure: ${{ steps.cost.outputs.cost_failure }}
+      cost_upload_outcome: ${{ steps.cost_upload.outcome }}
 
     steps:
       # Same commit as preflight (checkout defaults to github.sha); this runner
@@ -405,6 +418,88 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+      # Task 10.1 (D5): Infracost cost estimate of the same plan.json, only after a
+      # valid classification whose drift report was uploaded. Cost is informational:
+      # the step records cost_status/cost_failure and ALWAYS exits 0 (the single
+      # documented exit-code exception, D5), so a cost failure can never change this
+      # job's result, drift_detected, the issues job or the report job. The cost job
+      # fails visibly instead.
+      # D1: the pinned v0.10.46 Linux binary is downloaded and SHA-256 verified
+      # inside this step (never a separate step), so an install failure is the cost
+      # failure `install_failed`. No Infracost action, image or install script.
+      # D6: the only secret is INFRACOST_API_KEY; both OIDC token-request variables
+      # are blanked; no ARM_*, AZURE_* or GITHUB_TOKEN. The Azure CLI session is
+      # removed first (errors ignored; scripts/infracost_analysis.sh fails closed if
+      # a session or an OIDC variable remains). The script also enforces the D7
+      # controls (incl. CHECKPOINT_DISABLE=1) and the unexpected_egress check.
+      - name: Infracost Cost Estimate
+        id: cost
+        if: ${{ steps.upload.outcome == 'success' && (steps.analyze.outputs.drift_detected == 'true' || steps.analyze.outputs.drift_detected == 'false') }}
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          PINNED_INFRACOST_VERSION: "0.10.46"
+          PINNED_INFRACOST_LINUX_SHA256: "d0d081cd39b07b2ca5c315830bfc4bcdfb0183b04c19cb18835c154482a2c97b"
+          PLAN_JSON: ${{ runner.temp }}/drift/plan.json
+          DRIFT_REPORT: ${{ runner.temp }}/drift/drift_report.json
+          RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+          DRIFT_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        run: |
+          set -uo pipefail
+          az logout >/dev/null 2>&1 || true
+          az account clear >/dev/null 2>&1 || true
+
+          archive="infracost-linux-amd64.tar.gz"
+          bin_dir="${RUNNER_TEMP}/infracost-bin"
+          installed=false
+          if curl -fsSL --retry 3 -o "${RUNNER_TEMP}/${archive}" \
+               "https://github.com/infracost/infracost/releases/download/v${PINNED_INFRACOST_VERSION}/${archive}" \
+             && echo "${PINNED_INFRACOST_LINUX_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c - \
+             && mkdir "${bin_dir}" \
+             && tar -xzf "${RUNNER_TEMP}/${archive}" -C "${bin_dir}" infracost-linux-amd64 \
+             && mv "${bin_dir}/infracost-linux-amd64" "${bin_dir}/infracost" \
+             && chmod 0755 "${bin_dir}/infracost"; then
+            installed=true
+          fi
+          if [ "${installed}" != true ]; then
+            {
+              echo "cost_status=failed"
+              echo "cost_failure=install_failed"
+            } >> "${GITHUB_OUTPUT}"
+            echo "::error::Infracost installation failed (cost failure, not a drift failure); the cost job reports it."
+            echo "cost_status=failed cost_failure=install_failed"
+            exit 0
+          fi
+          export PATH="${bin_dir}:${PATH}"
+
+          # The script appends cost_status/cost_failure to GITHUB_OUTPUT itself (I2).
+          script_rc=0
+          ./scripts/infracost_analysis.sh || script_rc=$?
+          if [ "${script_rc}" -ne 0 ]; then
+            echo "::error::Cost estimate failed (script exit ${script_rc}); drift result unaffected; the cost job reports it."
+          fi
+          exit 0
+
+      # Second documented exception (D5): continue-on-error on this single upload
+      # only, so an upload failure cannot change this job's result or the drift
+      # semantics. Its outcome is exported as cost_upload_outcome and the cost job
+      # fails unless it is success, so the failure is never hidden. Exactly the two
+      # sanitised files (D8); raw Infracost output stays on this runner.
+      - name: Upload Infracost Report
+        id: cost_upload
+        if: ${{ steps.cost.outputs.cost_status == 'succeeded' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: infracost-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cost/report/infracost.json
+            ${{ runner.temp }}/cost/report/cost_run.json
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
+
   # Tasks 8.1/8.3: deterministic drift issues (scripts/github_automation.py). Runs
   # only for a valid classification (literal "true" or "false"; never "unknown"; the
   # implicit success() also requires preflight and plan-and-analyze to have
@@ -464,6 +559,103 @@ jobs:
             --environment "${DRIFT_ENVIRONMENT}" \
             --drift-detected "${DRIFT_DETECTED}" \
             --publish
+
+  # Task 10.1 (D5): makes a cost failure visible. Runs for every valid
+  # classification (literal "true" or "false") and fails unless the cost steps in
+  # plan-and-analyze succeeded, their artifact upload succeeded, and both sanitised
+  # files pass scripts/sanitize_infracost.py --check (allowlist schema, binding to
+  # this run attempt and its drift report, Infracost version). A cost failure turns
+  # the run red; drift_detected, the drift report and artifact, issues and the
+  # report job are unaffected (report keeps needs: [preflight, plan-and-analyze]).
+  # Least privilege: contents: read only; no id-token, no Azure, no secrets (the
+  # same-run artifact downloads need no token). Summary: totals only.
+  cost:
+    name: "Cost Estimate (${{ github.event.inputs.environment || 'dev' }})"
+    needs: [preflight, plan-and-analyze]
+    if: ${{ !cancelled() && (needs.plan-and-analyze.outputs.drift_detected == 'true' || needs.plan-and-analyze.outputs.drift_detected == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Require Cost Success
+        env:
+          COST_STATUS: ${{ needs.plan-and-analyze.outputs.cost_status }}
+          COST_FAILURE: ${{ needs.plan-and-analyze.outputs.cost_failure }}
+          COST_UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.cost_upload_outcome }}
+        run: |
+          set -euo pipefail
+          if [ "${COST_STATUS}" != "succeeded" ]; then
+            echo "::error::Cost estimate failed or did not run (cost_status='${COST_STATUS:-not run}', cost_failure='${COST_FAILURE:-n/a}'). Drift result unaffected."
+            exit 1
+          fi
+          if [ "${COST_UPLOAD_OUTCOME}" != "success" ]; then
+            echo "::error::Infracost report upload did not succeed (outcome '${COST_UPLOAD_OUTCOME:-n/a}'). Drift result unaffected."
+            exit 1
+          fi
+          echo "cost_status=succeeded, upload=success"
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Same-run artifacts: the sanitised cost report and the drift report it is
+      # bound to (drift_report_sha256, run.run_id, run.environment).
+      - name: Download Infracost Report
+        uses: actions/download-artifact@v4
+        with:
+          name: infracost-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/infracost-report
+
+      - name: Download Drift Report
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/drift-report
+
+      # Check mode (I1): exit 0 passed, 1 sanitisation failure, 2 price_not_found,
+      # 64 usage. Any non-zero exit fails this job.
+      - name: Verify Infracost Report
+        env:
+          REPORT_DIR: ${{ runner.temp }}/infracost-report
+          DRIFT_REPORT: ${{ runner.temp }}/drift-report/drift_report.json
+          RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/sanitize_infracost.py --check "${REPORT_DIR}" --run-id "${RUN_ID}" --drift-report "${DRIFT_REPORT}"
+          echo "Infracost report verified for ${RUN_ID}."
+
+      # Totals only (D5): no resource names, prices or components. Values are
+      # decimal strings (D8); drift cost is computed with Decimal, never floats.
+      - name: Cost Summary
+        env:
+          REPORT_DIR: ${{ runner.temp }}/infracost-report
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json, os
+          from decimal import Decimal
+          d = json.load(open(os.path.join(os.environ["REPORT_DIR"], "infracost.json"), encoding="utf-8"))
+          run = json.load(open(os.path.join(os.environ["REPORT_DIR"], "cost_run.json"), encoding="utf-8"))
+          drift_cost = Decimal(0) - Decimal(d["diffTotalMonthlyCost"])
+          print("### Cost estimate (Infracost, list prices)")
+          print("")
+          print("| Field | Value |")
+          print("| --- | --- |")
+          print(f"| Actual monthly cost (prior state) | {d['pastTotalMonthlyCost']} {d['currency']} |")
+          print(f"| Desired monthly cost (planned) | {d['totalMonthlyCost']} {d['currency']} |")
+          print(f"| Diff (desired - actual) | {d['diffTotalMonthlyCost']} {d['currency']} |")
+          print(f"| Drift cost (-diff) | {drift_cost} {d['currency']} |")
+          print(f"| Infracost | `{run['infracost_version']}` ({run['pricing']}) |")
+          print(f"| Run | `{run['run_id']}` |")
+          PY
 
   # Runs after failures too (not after cancellation) so every completed run
   # reports its result. It only reports: the run's red/green status comes from the
