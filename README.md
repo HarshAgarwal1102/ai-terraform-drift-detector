@@ -28,9 +28,9 @@ built (Phase 11). See [What works today](#-what-works-today) and
 - **Phase 8:** Task 8.2 (automated remediation PRs) is blocked: it was superseded by
   Phase 11 in the 2026-10-03 design review.
 - **Phase 9 — DevSecOps Integration** is in progress. Done: Task 9.1 (TFLint) and
-  Task 9.2 (Trivy config security scan), both validated in real CI runs. **Current active
-  task: Task 9.3 — TruffleHog Secret Scanning**: implemented and validated locally, CI
-  proof pending. Task 9.4 (Super-Linter) needs a design review.
+  Task 9.2 (Trivy config security scan) and Task 9.3 (TruffleHog secret scan), all
+  validated in real CI runs. **Current active task: Task 9.4 — Super-Linter Code Quality
+  Enforcement**, which starts with its dedicated design review.
 
 | Phase | Status |
 |---|---|
@@ -43,7 +43,7 @@ built (Phase 11). See [What works today](#-what-works-today) and
 | 6 — LangGraph AI analysis engine (library; no CLI/CI integration yet) | ✅ Complete |
 | 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
-| 9 — DevSecOps integration | 🟡 In progress (9.1 ✅, 9.2 ✅, 9.3 in progress, 9.4 pending) |
+| 9 — DevSecOps integration | 🟡 In progress (9.1 ✅, 9.2 ✅, 9.3 ✅, 9.4 next) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -96,8 +96,9 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   drifted resources, falling back to "unknown" when logs are missing.
   - Tested with fake log sources; the collector hasn't been run against real Azure.
   - Not used by any workflow.
-- **Static security scanning** (Tasks 9.1–9.2): TFLint and Trivy config check `terraform/` on
-  every push and pull request in `security-scan.yml`, without Azure access. See
+- **Static security scanning** (Tasks 9.1–9.3): TFLint and Trivy config check `terraform/`,
+  and TruffleHog scans the full Git history for secrets, on every push and pull request in
+  `security-scan.yml`, without Azure access. See
   [Static Terraform linting](#static-terraform-linting-tflint-task-91) and
   [Terraform security scan](#terraform-security-scan-trivy-config-task-92).
 
@@ -830,7 +831,7 @@ registration holds zero credentials.
 | 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI in 9A) |
 | 7 | Azure Activity Log investigation | ✅ Complete |
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
-| **9** | **DevSecOps scanning** | 🟡 In progress: 9.1 TFLint ✅, 9.2 Trivy config ✅, **9.3 TruffleHog in progress** (CI proof pending), 9.4 Super-Linter |
+| **9** | **DevSecOps scanning** | 🟡 In progress: 9.1 TFLint ✅, 9.2 Trivy config ✅, 9.3 TruffleHog ✅, **9.4 Super-Linter next** (design review) |
 | 9A | AI analysis CLI & no-LLM CI integration | ⬜ Planned |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |

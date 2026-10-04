@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.3 — TruffleHog Secret Scanning (implemented and validated locally; CI proof pending)
+- **Current Active Task**: Task 9.4 — Super-Linter Code Quality Enforcement (dedicated design review required before implementation)
 - **Phases Completed**: 8 of 14
 
 ---
@@ -2362,8 +2362,9 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - Cleanup: PR #3 closed unmerged (2026-10-03T15:35:41Z, `merged=false`); the remote and local branches were deleted; `main` = `origin/main` = `49eea22`, and the probe is absent from `main`.
 
 #### Task 9.3 — TruffleHog Secret Scanning
-- **Status**: 🟡 WORK IN PROGRESS — implemented and validated locally; only the approval-gated CI proof is pending
+- **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-04
+- **Completed**: 2026-10-04
 - **Objective**: Configure TruffleHog in GitHub Actions to scan the repository's Git history for exposed credentials or keys, failing on every detected result. It **detects** committed secrets; it does not prevent a commit. *(Reworded 2026-10-04; previously "Credentials leakage prevention".)*
 - **Dependencies**: Task 9.2
 - **Locked version and flags (D1, D2)**:
@@ -2445,7 +2446,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - a clean scratch repository exits 0;
     - a no-op control passes.
   - [x] Real local baseline over this repository's history: 0 results.
-  - [ ] **CI proof** (approval-gated):
+  - [x] **CI proof** (approval-gated):
     - a green `main` push whose `trufflehog` job scans the full history with 0 results (`tflint` and `trivy-config` stay green);
     - **D7(a), decided 2026-10-04:** a temporary draft PR that **only** changes the committed TruffleHog SHA-256 in `security-scan.yml`. The `trufflehog` job must fail at the integrity check (`sha256sum -c`), before unpacking or scanning. The PR is closed unmerged, its branch deleted, and `main` confirmed unchanged. The approval acknowledges that the PR also triggers `terraform-auth-test.yml` (its Azure login fails on a PR, existing behaviour).
     - **No secret or synthetic credential is ever committed to the repository, a branch or a PR (D6).** PR head refs stay publicly reachable permanently, and GitHub secret scanning or push protection may react.
@@ -2481,7 +2482,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 - **Implementation Notes**:
   - Secret **detection** in committed history.
   - Runs on code changes in `security-scan.yml`; it never runs inside or gates the drift-detection workflow.
-- **Completion Notes** *(2026-10-04, local validation; Task 9.3 stays 🟡 until the CI proof)*:
+- **Completion Notes** *(2026-10-04)*:
   - **Implemented**:
     - new `scripts/run_trufflehog.sh` (executable) and `tests/test_trufflehog.py` (17 tests);
     - new `trufflehog` job in `security-scan.yml`: checkout (`fetch-depth: 0`, `persist-credentials: false`), install of the pinned Linux binary with `sha256sum -c` before unpacking, then the script;
@@ -2510,12 +2511,17 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - full suite: 1154 passed, 679 skipped (optional `ai`/`azure` extras absent); coverage 96.05%; `./scripts/validate.sh` passes.
 
     No Azure call.
-  - **Pending (approval-gated CI proof)**:
-    - a green `main` push (`trufflehog` full history, 0 results);
-    - the D7(a) draft PR that only changes the committed SHA-256 and must fail at `sha256sum -c` before any scan.
-
-    Both also trigger `terraform-auth-test.yml`.
-
+  - **CI proof** (user-approved 2026-10-04; commits `6e9f35e` design and `3e86419` implementation pushed, `0cd0f4e..3e86419`):
+    - `main` push, commit `3e86419`:
+      - `security-scan.yml` run `37170270400`: success, 0 artifacts.
+        - Job `trufflehog` (`111341658999`): every step succeeded, including "Install TruffleHog (pinned binary, SHA-256 verified)" and "Run TruffleHog" over the full history.
+        - Jobs `tflint` (`111341658984`) and `trivy-config` (`111341659012`): success.
+      - `terraform-auth-test.yml` run `37170270430`: success.
+    - **D7(a)**, draft PR #4 (branch `ci-proof/task-9.3-trufflehog-hash`, head `28ea13f` = `3e86419` with **only** the committed SHA-256 changed, `…2866` → `…2867`; no secret or credential published):
+      - `security-scan.yml` run `37170658769`: the `trufflehog` job (`111342777719`) failed at "Install TruffleHog (pinned binary, SHA-256 verified)" (`sha256sum -c`), and "Run TruffleHog" was **skipped**, so nothing was unpacked or scanned. `trivy-config` (`111342777858`) and `tflint` (`111342777870`) succeeded. 0 artifacts.
+      - `terraform-auth-test.yml` run `37170658799`: failed at Azure OIDC login (existing behaviour on PRs).
+    - **Cleanup:** PR #4 closed unmerged (2026-10-04T02:21:05Z, `merged=false`; closed by GitHub when the head branch was deleted). The remote and local branches were deleted, and no branch contains `28ea13f`. `main` = `origin/main` = `3e86419`, carrying the correct SHA-256.
+    - The browser session was signed out of GitHub, so the user opened PR #4 and confirmed the failing step in the log. The step results above come from the public Actions API.
 #### Task 9.4 — Super-Linter Code Quality Enforcement
 - **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
 - **Objective**: Add GitHub Super-Linter to validate Python, YAML, Shell, and Markdown standards across repository.
