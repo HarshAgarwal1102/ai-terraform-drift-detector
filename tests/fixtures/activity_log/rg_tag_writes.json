@@ -1,0 +1,425 @@
+[
+  {
+    "authorization": {
+      "action": "Microsoft.Resources/tags/write",
+      "scope": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default"
+    },
+    "caller": "user@example.invalid",
+    "category": {
+      "localizedValue": "Administrative",
+      "value": "Administrative"
+    },
+    "claims": {
+      "appid": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+      "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-4000-8000-0000000000bb",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "user@example.invalid",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "user@example.invalid",
+      "idtyp": "user",
+      "ipaddr": "2001:db8::10",
+      "name": "Example User",
+      "ver": "1.0"
+    },
+    "correlationId": "00000000-0000-4000-a000-000000000001",
+    "description": "",
+    "eventDataId": "00000000-0000-4000-9000-000000000001",
+    "eventName": {
+      "localizedValue": "Begin request",
+      "value": "BeginRequest"
+    },
+    "eventTimestamp": "2026-10-03T11:19:50.2253098Z",
+    "httpRequest": {
+      "clientIpAddress": "2001:db8::10",
+      "clientRequestId": "00000000-0000-4000-c000-000000000001",
+      "method": "PATCH",
+      "uri": "https://management.azure.com/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default?api-version=2019-10-01"
+    },
+    "id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default/events/00000000-0000-4000-9000-000000000001/ticks/1",
+    "level": "Informational",
+    "operationId": "00000000-0000-4000-b000-000000000001",
+    "operationName": {
+      "localizedValue": "Write tags",
+      "value": "Microsoft.Resources/tags/write"
+    },
+    "properties": {
+      "entity": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default",
+      "eventCategory": "Administrative",
+      "hierarchy": "00000000-0000-4000-8000-0000000000aa/00000000-0000-4000-8000-000000000001",
+      "message": "Microsoft.Resources/tags/write"
+    },
+    "resourceGroup": "aitdd-dev-main-rg",
+    "resourceGroupName": "aitdd-dev-main-rg",
+    "resourceId": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default",
+    "resourceProviderName": {
+      "localizedValue": "Microsoft Resources",
+      "value": "Microsoft.Resources"
+    },
+    "resourceType": {
+      "localizedValue": "Microsoft.Resources/tags",
+      "value": "Microsoft.Resources/tags"
+    },
+    "status": {
+      "localizedValue": "Started",
+      "value": "Started"
+    },
+    "subStatus": {
+      "localizedValue": "",
+      "value": ""
+    },
+    "submissionTimestamp": "2026-10-03T11:21:42Z",
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "tenantId": "00000000-0000-4000-8000-0000000000aa"
+  },
+  {
+    "authorization": {
+      "action": "Microsoft.Resources/tags/write",
+      "scope": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default"
+    },
+    "caller": "user@example.invalid",
+    "category": {
+      "localizedValue": "Administrative",
+      "value": "Administrative"
+    },
+    "claims": {
+      "appid": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+      "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-4000-8000-0000000000bb",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "user@example.invalid",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "user@example.invalid",
+      "idtyp": "user",
+      "ipaddr": "2001:db8::10",
+      "name": "Example User",
+      "ver": "1.0"
+    },
+    "correlationId": "00000000-0000-4000-a000-000000000001",
+    "description": "",
+    "eventDataId": "00000000-0000-4000-9000-000000000002",
+    "eventName": {
+      "localizedValue": "End request",
+      "value": "EndRequest"
+    },
+    "eventTimestamp": "2026-10-03T11:19:52.7878201Z",
+    "httpRequest": {
+      "clientIpAddress": "2001:db8::10",
+      "clientRequestId": "00000000-0000-4000-c000-000000000001",
+      "method": "PATCH",
+      "uri": "https://management.azure.com/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default?api-version=2019-10-01"
+    },
+    "id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/events/00000000-0000-4000-9000-000000000002/ticks/2",
+    "level": "Informational",
+    "operationId": "00000000-0000-4000-b000-000000000001",
+    "operationName": {
+      "localizedValue": "Write tags",
+      "value": "Microsoft.Resources/tags/write"
+    },
+    "properties": {
+      "entity": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg",
+      "eventCategory": "Administrative",
+      "hierarchy": "00000000-0000-4000-8000-0000000000aa/00000000-0000-4000-8000-000000000001",
+      "message": "Microsoft.Resources/tags/write",
+      "statusCode": "OK"
+    },
+    "resourceGroup": "aitdd-dev-main-rg",
+    "resourceGroupName": "aitdd-dev-main-rg",
+    "resourceId": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg",
+    "resourceProviderName": {
+      "localizedValue": "Microsoft Resources",
+      "value": "Microsoft.Resources"
+    },
+    "resourceType": {
+      "localizedValue": "Microsoft.Resources/tags",
+      "value": "Microsoft.Resources/tags"
+    },
+    "status": {
+      "localizedValue": "Succeeded",
+      "value": "Succeeded"
+    },
+    "subStatus": {
+      "localizedValue": "OK (HTTP Status Code: 200)",
+      "value": "OK"
+    },
+    "submissionTimestamp": "2026-10-03T11:21:42Z",
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "tenantId": "00000000-0000-4000-8000-0000000000aa"
+  },
+  {
+    "authorization": {
+      "action": "Microsoft.Resources/tags/write",
+      "scope": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default"
+    },
+    "caller": "user@example.invalid",
+    "category": {
+      "localizedValue": "Administrative",
+      "value": "Administrative"
+    },
+    "claims": {
+      "appid": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+      "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-4000-8000-0000000000bb",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "user@example.invalid",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "user@example.invalid",
+      "idtyp": "user",
+      "ipaddr": "198.51.100.10",
+      "name": "Example User",
+      "ver": "1.0"
+    },
+    "correlationId": "00000000-0000-4000-a000-000000000002",
+    "description": "",
+    "eventDataId": "00000000-0000-4000-9000-000000000003",
+    "eventName": {
+      "localizedValue": "Begin request",
+      "value": "BeginRequest"
+    },
+    "eventTimestamp": "2026-10-03T11:46:52.3643221Z",
+    "httpRequest": {
+      "clientIpAddress": "198.51.100.10",
+      "clientRequestId": "00000000-0000-4000-c000-000000000002",
+      "method": "PATCH",
+      "uri": "https://management.azure.com/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default?api-version=2019-10-01"
+    },
+    "id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default/events/00000000-0000-4000-9000-000000000003/ticks/3",
+    "level": "Informational",
+    "operationId": "00000000-0000-4000-b000-000000000002",
+    "operationName": {
+      "localizedValue": "Write tags",
+      "value": "Microsoft.Resources/tags/write"
+    },
+    "properties": {
+      "entity": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default",
+      "eventCategory": "Administrative",
+      "hierarchy": "00000000-0000-4000-8000-0000000000aa/00000000-0000-4000-8000-000000000001",
+      "message": "Microsoft.Resources/tags/write"
+    },
+    "resourceGroup": "aitdd-dev-main-rg",
+    "resourceGroupName": "aitdd-dev-main-rg",
+    "resourceId": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default",
+    "resourceProviderName": {
+      "localizedValue": "Microsoft Resources",
+      "value": "Microsoft.Resources"
+    },
+    "resourceType": {
+      "localizedValue": "Microsoft.Resources/tags",
+      "value": "Microsoft.Resources/tags"
+    },
+    "status": {
+      "localizedValue": "Started",
+      "value": "Started"
+    },
+    "subStatus": {
+      "localizedValue": "",
+      "value": ""
+    },
+    "submissionTimestamp": "2026-10-03T11:47:43Z",
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "tenantId": "00000000-0000-4000-8000-0000000000aa"
+  },
+  {
+    "authorization": {
+      "action": "Microsoft.Resources/tags/write",
+      "scope": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default"
+    },
+    "caller": "user@example.invalid",
+    "category": {
+      "localizedValue": "Administrative",
+      "value": "Administrative"
+    },
+    "claims": {
+      "appid": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+      "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-4000-8000-0000000000bb",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "user@example.invalid",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "user@example.invalid",
+      "idtyp": "user",
+      "ipaddr": "198.51.100.10",
+      "name": "Example User",
+      "ver": "1.0"
+    },
+    "correlationId": "00000000-0000-4000-a000-000000000002",
+    "description": "",
+    "eventDataId": "00000000-0000-4000-9000-000000000004",
+    "eventName": {
+      "localizedValue": "End request",
+      "value": "EndRequest"
+    },
+    "eventTimestamp": "2026-10-03T11:46:54.4738201Z",
+    "httpRequest": {
+      "clientIpAddress": "198.51.100.10",
+      "clientRequestId": "00000000-0000-4000-c000-000000000002",
+      "method": "PATCH",
+      "uri": "https://management.azure.com/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default?api-version=2019-10-01"
+    },
+    "id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/events/00000000-0000-4000-9000-000000000004/ticks/4",
+    "level": "Informational",
+    "operationId": "00000000-0000-4000-b000-000000000002",
+    "operationName": {
+      "localizedValue": "Write tags",
+      "value": "Microsoft.Resources/tags/write"
+    },
+    "properties": {
+      "entity": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg",
+      "eventCategory": "Administrative",
+      "hierarchy": "00000000-0000-4000-8000-0000000000aa/00000000-0000-4000-8000-000000000001",
+      "message": "Microsoft.Resources/tags/write",
+      "statusCode": "OK"
+    },
+    "resourceGroup": "aitdd-dev-main-rg",
+    "resourceGroupName": "aitdd-dev-main-rg",
+    "resourceId": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg",
+    "resourceProviderName": {
+      "localizedValue": "Microsoft Resources",
+      "value": "Microsoft.Resources"
+    },
+    "resourceType": {
+      "localizedValue": "Microsoft.Resources/tags",
+      "value": "Microsoft.Resources/tags"
+    },
+    "status": {
+      "localizedValue": "Succeeded",
+      "value": "Succeeded"
+    },
+    "subStatus": {
+      "localizedValue": "OK (HTTP Status Code: 200)",
+      "value": "OK"
+    },
+    "submissionTimestamp": "2026-10-03T11:47:43Z",
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "tenantId": "00000000-0000-4000-8000-0000000000aa"
+  },
+  {
+    "authorization": {
+      "action": "Microsoft.Resources/tags/write",
+      "scope": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default"
+    },
+    "caller": "user@example.invalid",
+    "category": {
+      "localizedValue": "Administrative",
+      "value": "Administrative"
+    },
+    "claims": {
+      "appid": "c44b4083-3bb0-49c1-b47d-974e53cbdf3c",
+      "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-4000-8000-0000000000bb",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "user@example.invalid",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "user@example.invalid",
+      "idtyp": "user",
+      "ipaddr": "203.0.113.10",
+      "name": "Example User",
+      "ver": "1.0"
+    },
+    "correlationId": "00000000-0000-4000-a000-000000000003",
+    "description": "",
+    "eventDataId": "00000000-0000-4000-9000-000000000005",
+    "eventName": {
+      "localizedValue": "Begin request",
+      "value": "BeginRequest"
+    },
+    "eventTimestamp": "2026-10-04T11:04:56.0935972Z",
+    "httpRequest": {
+      "clientIpAddress": "203.0.113.10",
+      "clientRequestId": "00000000-0000-4000-c000-000000000003",
+      "method": "PATCH",
+      "uri": "https://management.azure.com/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default?api-version=2019-10-01"
+    },
+    "id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default/events/00000000-0000-4000-9000-000000000005/ticks/5",
+    "level": "Informational",
+    "operationId": "00000000-0000-4000-b000-000000000003",
+    "operationName": {
+      "localizedValue": "Write tags",
+      "value": "Microsoft.Resources/tags/write"
+    },
+    "properties": {
+      "entity": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default",
+      "eventCategory": "Administrative",
+      "hierarchy": "00000000-0000-4000-8000-0000000000aa/00000000-0000-4000-8000-000000000001",
+      "message": "Microsoft.Resources/tags/write"
+    },
+    "resourceGroup": "aitdd-dev-main-rg",
+    "resourceGroupName": "aitdd-dev-main-rg",
+    "resourceId": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default",
+    "resourceProviderName": {
+      "localizedValue": "Microsoft Resources",
+      "value": "Microsoft.Resources"
+    },
+    "resourceType": {
+      "localizedValue": "Microsoft.Resources/tags",
+      "value": "Microsoft.Resources/tags"
+    },
+    "status": {
+      "localizedValue": "Started",
+      "value": "Started"
+    },
+    "subStatus": {
+      "localizedValue": "",
+      "value": ""
+    },
+    "submissionTimestamp": "2026-10-04T11:06:24Z",
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "tenantId": "00000000-0000-4000-8000-0000000000aa"
+  },
+  {
+    "authorization": {
+      "action": "Microsoft.Resources/tags/write",
+      "scope": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default"
+    },
+    "caller": "user@example.invalid",
+    "category": {
+      "localizedValue": "Administrative",
+      "value": "Administrative"
+    },
+    "claims": {
+      "appid": "c44b4083-3bb0-49c1-b47d-974e53cbdf3c",
+      "http://schemas.microsoft.com/identity/claims/objectidentifier": "00000000-0000-4000-8000-0000000000bb",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "user@example.invalid",
+      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn": "user@example.invalid",
+      "idtyp": "user",
+      "ipaddr": "203.0.113.10",
+      "name": "Example User",
+      "ver": "1.0"
+    },
+    "correlationId": "00000000-0000-4000-a000-000000000003",
+    "description": "",
+    "eventDataId": "00000000-0000-4000-9000-000000000006",
+    "eventName": {
+      "localizedValue": "End request",
+      "value": "EndRequest"
+    },
+    "eventTimestamp": "2026-10-04T11:04:58.1873579Z",
+    "httpRequest": {
+      "clientIpAddress": "203.0.113.10",
+      "clientRequestId": "00000000-0000-4000-c000-000000000003",
+      "method": "PATCH",
+      "uri": "https://management.azure.com/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/providers/Microsoft.Resources/tags/default?api-version=2019-10-01"
+    },
+    "id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg/events/00000000-0000-4000-9000-000000000006/ticks/6",
+    "level": "Informational",
+    "operationId": "00000000-0000-4000-b000-000000000003",
+    "operationName": {
+      "localizedValue": "Write tags",
+      "value": "Microsoft.Resources/tags/write"
+    },
+    "properties": {
+      "entity": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg",
+      "eventCategory": "Administrative",
+      "hierarchy": "00000000-0000-4000-8000-0000000000aa/00000000-0000-4000-8000-000000000001",
+      "message": "Microsoft.Resources/tags/write",
+      "statusCode": "OK"
+    },
+    "resourceGroup": "aitdd-dev-main-rg",
+    "resourceGroupName": "aitdd-dev-main-rg",
+    "resourceId": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/aitdd-dev-main-rg",
+    "resourceProviderName": {
+      "localizedValue": "Microsoft Resources",
+      "value": "Microsoft.Resources"
+    },
+    "resourceType": {
+      "localizedValue": "Microsoft.Resources/tags",
+      "value": "Microsoft.Resources/tags"
+    },
+    "status": {
+      "localizedValue": "Succeeded",
+      "value": "Succeeded"
+    },
+    "subStatus": {
+      "localizedValue": "OK (HTTP Status Code: 200)",
+      "value": "OK"
+    },
+    "submissionTimestamp": "2026-10-04T11:06:24Z",
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "tenantId": "00000000-0000-4000-8000-0000000000aa"
+  }
+]

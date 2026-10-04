@@ -1,4 +1,5 @@
-"""Deterministic Activity Log attribution for drifted resources (Task 7.2).
+"""Deterministic Activity Log attribution for drifted resources (Task 7.2; rules
+version 2, Task 9B.2).
 
 Correlates a drift report (drift-engine analyze) with the Activity Log evidence of
 the same run (activity_logs.py, Task 7.1) and writes a separate document,
@@ -31,9 +32,9 @@ Matching (verified read-only against real Activity Log data, 2026-10-03):
     (a 204 NoContent delete is a successful delete)
   - group interval: [earliest row, latest Succeeded row] ([earliest, latest row]
     without a Succeeded row)
-  - detection window: T_start = run.started_at - 5 min, T_end = run.finished_at +
-    5 min (skew); evidence is settled when window.settled_until >= T_end (Task 7.1's
-    20-minute ingestion margin: a project margin, not an Azure SLA)
+  - detection window: T_start = run.started_at - 60 s, T_end = run.finished_at +
+    60 s (skew, Phase 9B G7); evidence is settled when collection.queried_at >=
+    run.finished_at + 10 min (M, Phase 9B G8: a project margin, not an Azure SLA)
 
 Per drifted resource, the first failing step decides (`decide` implements R0-R7):
 
@@ -42,14 +43,22 @@ Per drifted resource, the first failing step decides (`decide` implements R0-R7)
   P2 report     the drift report is valid and succeeded (document level)
   P3 detection  run.started_at / finished_at known
   P4 evidence   evidence not failed; the target's scope was queried completely
-  P5 settled    window.settled_until >= T_end
+  P5 settled    collection.queried_at >= run.finished_at + M
+  P6 readable   the target's scope dropped no unreadable event (UNREADABLE_DROP_REASONS,
+                Phase 9B G4), else unreadable_events_in_scope
   R0            drift action is delete, else update_not_attributable
   R1            lifecycle groups (successful or unresolved, start <= T_end) do not
                 overlap or touch, else order_ambiguous
   R2            there is one, else no_deletion_event; the last one is a delete, else
                 latest_operation_is_write
-  R3            existence anchor A: the latest successful write; none ->
-                no_existence_anchor. It only proves the resource existed then.
+  R3            existence anchor: A = the latest successful write, or B =
+                `prior_detection_run` (a trusted earlier detection run that saw the
+                resource in sync, supplied by the investigation, Phase 9B G9). The later
+                proof wins (A: its latest Succeeded row; B: that run's finished_at);
+                none -> no_existence_anchor. With B, any lifecycle group overlapping its
+                observation window +/- 60 s is order_ambiguous and only groups starting
+                after its finished_at + 60 s count as after the anchor. An anchor only
+                proves the resource existed then.
   R4            after the anchor: exactly one successful delete (the candidate),
                 else multiple_successful_deletes; no unresolved group, else
                 unresolved_operation
@@ -57,10 +66,13 @@ Per drifted resource, the first failing step decides (`decide` implements R0-R7)
                 caller (caller_inconsistent)
   R6            the candidate ends before T_start, else concurrent_with_detection
   R7            no Policy/Autoscale event on the exact resource within the candidate
-                interval +/- 5 min, else automated_activity_overlap
+                interval +/- 5 min (independent of the 60 s skew), else
+                automated_activity_overlap
 
-Anchor B (a trusted prior detection run) is reserved in the rules but has no
-input yet: rules_version 1 accepts only write-event anchors.
+`drift-engine attribute` has no anchor input, so its documents use anchor A only;
+`drift_engine.investigation` passes anchor B. In an investigation, a deletion this
+rule confirms is property-confirmed only under a decisive verdict (Phase 9B G5,
+Option A); this module does not decide that.
 
 Fallback (Task 7.3): `origin_statement` is the single display mapping. A drifted
 resource shows the claim above only when confirmed; every other case (any unknown
@@ -89,7 +101,6 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from drift_engine.activity_logs import (
-    INGESTION_LAG,
     ActivityLogEvidence,
     ArmId,
     Caller,
@@ -106,8 +117,8 @@ from drift_engine.models import Action, DriftReport
 
 logger = logging.getLogger(__name__)
 
-ATTRIBUTION_VERSION = "1"
-RULES_VERSION = "1"
+ATTRIBUTION_VERSION = "2"
+RULES_VERSION = "2"
 ATTRIBUTION_FILE = "drift_attribution.json"
 RULE = "external_deletion_v1"
 CLAIM = "recorded_successful_delete"
@@ -119,10 +130,16 @@ CLAIM_TEMPLATE = (
 # is not confirmed. A rendering, never a stored identity value.
 UNCONFIRMED_ORIGIN = "Change origin could not be confirmed"
 
-SKEW = timedelta(minutes=5)
-SETTLE_MARGIN = INGESTION_LAG  # 20 minutes (Task 7.1); a project margin, not an Azure SLA
-SKEW_MINUTES = int(SKEW / timedelta(minutes=1))
+SKEW = timedelta(seconds=60)  # detection skew (Phase 9B, G7)
+SETTLE_MARGIN = timedelta(minutes=10)  # M (Phase 9B, G8); a project margin, not an Azure SLA
+AUTOMATED_OVERLAP = timedelta(minutes=5)  # R7 window around the candidate; independent of SKEW
+SKEW_SECONDS = int(SKEW / timedelta(seconds=1))
 SETTLE_MARGIN_MINUTES = int(SETTLE_MARGIN / timedelta(minutes=1))
+AUTOMATED_OVERLAP_MINUTES = int(AUTOMATED_OVERLAP / timedelta(minutes=1))
+# Collector drop reasons that hide events which might belong to a target (Phase 9B,
+# G4): a scope with any of them cannot support a decisive or negative finding.
+UNREADABLE_DROP_REASONS = ("conflicting_duplicate", "invalid_event_data_id", "invalid_operation_name",
+                           "invalid_resource_id", "invalid_timestamp", "malformed_event")
 MAX_INPUT_BYTES = 50 * 1024 * 1024
 
 SUCCEEDED = "Succeeded"
@@ -135,6 +152,7 @@ PRECONDITION_REASONS = (
     "evidence_failed",
     "evidence_incomplete",
     "evidence_not_settled",
+    "unreadable_events_in_scope",
     "detection_time_unknown",
     "no_resource_id",
     "invalid_resource_id",
@@ -187,19 +205,27 @@ def _sorted_unique(ids: list[str]) -> bool:
 
 
 class Anchor(_Model):
-    """Existence anchor A: the successful exact-resource write group before the
-    candidate delete. `time` is its latest Succeeded row. It proves only that the
-    resource existed at that time."""
+    """The existence anchor before the candidate delete. It proves only that the
+    resource existed at `time`.
 
-    kind: Literal["write_event"]  # "prior_detection_run" (Anchor B) is not accepted in rules_version 1
-    event_ids: Annotated[list[Token], Field(min_length=1)]
-    run_id: None  # reserved for Anchor B
+    A (`write_event`): the successful exact-resource write group; `time` is its latest
+    Succeeded row. B (`prior_detection_run`): a trusted earlier detection run that saw
+    the resource in sync; `run_id` is that run, `time` its finished_at, no event ids.
+    """
+
+    kind: Literal["write_event", "prior_detection_run"]
+    event_ids: list[Token]
+    run_id: Annotated[str, Field(min_length=1)] | None
     time: Timestamp
 
     @model_validator(mode="after")
     def _consistent(self) -> Anchor:
         if not _sorted_unique(self.event_ids):
             raise ValueError("anchor event_ids must be sorted and unique")
+        if self.kind == "write_event" and (not self.event_ids or self.run_id is not None):
+            raise ValueError("a write_event anchor has event ids and no run_id")
+        if self.kind == "prior_detection_run" and (self.event_ids or self.run_id is None):
+            raise ValueError("a prior_detection_run anchor has a run_id and no event ids")
         return self
 
 
@@ -280,7 +306,7 @@ class ResourceAttribution(_Model):
 class EvidenceWindow(_Model):
     start: Timestamp
     end: Timestamp
-    settled_until: Timestamp
+    queried_at: Timestamp
 
 
 class Binding(_Model):
@@ -293,7 +319,8 @@ class Binding(_Model):
     evidence_outcome: Literal["complete", "incomplete", "failed"] | None
     window: EvidenceWindow | None
     settle_margin_minutes: Literal[SETTLE_MARGIN_MINUTES]
-    skew_minutes: Literal[SKEW_MINUTES]
+    skew_seconds: Literal[SKEW_SECONDS]
+    automated_overlap_minutes: Literal[AUTOMATED_OVERLAP_MINUTES]
 
 
 class Failure(_Model):
@@ -308,10 +335,10 @@ class Failure(_Model):
 
 
 class DriftAttribution(_Model):
-    """The whole `drift_attribution.json` document (attribution_version 1)."""
+    """The whole `drift_attribution.json` document (attribution_version 2)."""
 
-    attribution_version: Literal["1"]
-    rules_version: Literal["1"]
+    attribution_version: Literal["2"]
+    rules_version: Literal["2"]
     outcome: Literal["complete", "incomplete", "failed"]
     failure: Failure | None
     binding: Binding
@@ -461,12 +488,23 @@ def _ids(groups: Iterable[_Group]) -> list[str]:
     return [i for g in groups for i in g.ids]
 
 
+@dataclass(frozen=True)
+class PriorAnchor:
+    """Existence anchor B: a trusted earlier detection run that saw the resource in
+    sync (selected and trust-checked by drift_engine.investigation, Phase 9B G9)."""
+
+    run_id: str
+    started: datetime
+    finished: datetime
+
+
 def decide(drift_action: str, arm: ArmId, events: Iterable[Event],
-           run_started: datetime, run_finished: datetime) -> dict:
-    """R0-R7 for one drifted resource whose preconditions passed (P1-P5).
+           run_started: datetime, run_finished: datetime, prior_anchor: PriorAnchor | None = None) -> dict:
+    """R0-R7 for one drifted resource whose preconditions passed (P1-P6).
 
     `events` are the evidence events matched to the resource's address, in any
-    order. Returns the attribution as a plain dict (see `Attribution`).
+    order. `prior_anchor` is existence anchor B, if any. Returns the attribution as
+    a plain dict (see `Attribution`).
     """
     t_start, t_end = run_started - SKEW, run_finished + SKEW
     groups, other = _groups(events, arm)
@@ -487,16 +525,31 @@ def decide(drift_action: str, arm: ArmId, events: Iterable[Event],
         return unknown("no_deletion_event")
     if lifecycle[-1].kind == "write":
         return unknown("latest_operation_is_write")
-    anchors = [i for i, g in enumerate(lifecycle) if g.kind == "write" and g.outcome == "successful"]
-    if not anchors:
+    writes = [i for i, g in enumerate(lifecycle) if g.kind == "write" and g.outcome == "successful"]
+    anchor = lifecycle[writes[-1]] if writes else None
+    if prior_anchor is not None and (anchor is None or prior_anchor.finished > anchor.end):
+        # anchor B is the later existence proof
+        low, high = prior_anchor.started - SKEW, prior_anchor.finished + SKEW
+        if any(g.start <= high and g.end >= low for g in lifecycle):
+            return unknown("order_ambiguous")
+        since_anchor = [g for g in lifecycle if g.start > high]
+        anchor_doc = {"kind": "prior_detection_run", "event_ids": [], "run_id": prior_anchor.run_id,
+                      "time": format_timestamp(prior_anchor.finished)}
+        anchor_ids: tuple[str, ...] = ()
+    elif anchor is not None:
+        since_anchor = lifecycle[writes[-1] + 1:]
+        anchor_doc = {"kind": "write_event", "event_ids": sorted(anchor.ids), "run_id": None,
+                      "time": format_timestamp(anchor.end)}
+        anchor_ids = anchor.ids
+    else:
         return unknown("no_existence_anchor")
-    anchor = lifecycle[anchors[-1]]
-    since_anchor = lifecycle[anchors[-1] + 1:]
     deletes = [g for g in since_anchor if g.kind == "delete" and g.outcome == "successful"]
     if len(deletes) > 1:
         return unknown("multiple_successful_deletes")
     if any(g.outcome == "unresolved" for g in since_anchor):
         return unknown("unresolved_operation")
+    if not deletes:  # possible only with anchor B: every delete precedes its observation
+        return unknown("no_deletion_event")
     candidate = deletes[0]
     if any(caller is None for caller in candidate.callers):
         return unknown("caller_missing")
@@ -504,18 +557,16 @@ def decide(drift_action: str, arm: ArmId, events: Iterable[Event],
         return unknown("caller_inconsistent")
     if not candidate.end < t_start:
         return unknown("concurrent_with_detection")
-    low, high = candidate.start - SKEW, candidate.end + SKEW
+    low, high = candidate.start - AUTOMATED_OVERLAP, candidate.end + AUTOMATED_OVERLAP
     for event in other:
         if (event.category in AUTOMATED_CATEGORIES and _same_resource(event, arm)
                 and low <= _event_time(event) <= high):
             return unknown("automated_activity_overlap")
     return _attribution(
         "confirmed", None,
-        candidate=[i for i in _ids(lifecycle) if i not in candidate.ids and i not in anchor.ids],
+        candidate=[i for i in _ids(lifecycle) if i not in candidate.ids and i not in anchor_ids],
         related=related, after=_ids(after),
-        caller=candidate.callers[0], decisive=list(candidate.ids),
-        anchor={"kind": "write_event", "event_ids": sorted(anchor.ids), "run_id": None,
-                "time": format_timestamp(anchor.end)},
+        caller=candidate.callers[0], decisive=list(candidate.ids), anchor=anchor_doc,
     )
 
 
@@ -599,10 +650,12 @@ def attribute(report_bytes: bytes | None, evidence_bytes: bytes | None) -> Drift
         "plan_timestamp": plan.get("timestamp"),
         "evidence_sha256": hashlib.sha256(evidence_bytes).hexdigest() if evidence_bytes is not None else None,
         "evidence_outcome": evidence.outcome if evidence is not None else None,
-        "window": ({k: getattr(evidence.window, k) for k in ("start", "end", "settled_until")}
+        "window": ({"start": evidence.window.start, "end": evidence.window.end,
+                    "queried_at": evidence.collection.queried_at}
                    if evidence is not None and evidence.window is not None else None),
         "settle_margin_minutes": SETTLE_MARGIN_MINUTES,
-        "skew_minutes": SKEW_MINUTES,
+        "skew_seconds": SKEW_SECONDS,
+        "automated_overlap_minutes": AUTOMATED_OVERLAP_MINUTES,
     }
 
     def failed(stage: str, reason: str, resources: list[dict]) -> DriftAttribution:
@@ -638,11 +691,9 @@ def attribute(report_bytes: bytes | None, evidence_bytes: bytes | None) -> Drift
     started = parse_timestamp(run.get("started_at"))
     finished = parse_timestamp(run.get("finished_at"))
     detection_known = started is not None and finished is not None and started <= finished
-    settled_until = parse_timestamp(evidence.window.settled_until)
-    events_by_address: dict[str, list[Event]] = {}
-    for event in evidence.events:
-        for match in event.matches:
-            events_by_address.setdefault(match.address, []).append(event)
+    queried_at = parse_timestamp(evidence.collection.queried_at)
+    unreadable = unreadable_scopes(evidence)
+    events_by_address = events_by_address_of(evidence)
 
     resources = []
     for item in drifted:
@@ -651,8 +702,10 @@ def attribute(report_bytes: bytes | None, evidence_bytes: bytes | None) -> Drift
             attribution = _attribution("unknown", "detection_time_unknown")
         elif target.status != "queried":
             attribution = _attribution("unknown", _TARGET_STATUS_REASON[target.status])
-        elif settled_until < finished + SKEW:
+        elif not settled(queried_at, finished):
             attribution = _attribution("unknown", "evidence_not_settled")
+        elif scope_key(target.resource_id) in unreadable:
+            attribution = _attribution("unknown", "unreadable_events_in_scope")
         else:
             attribution = decide(item["drift_action"], parse_resource_id(target.resource_id),
                                  events_by_address.get(item["address"], []), started, finished)
@@ -669,6 +722,32 @@ def attribute(report_bytes: bytes | None, evidence_bytes: bytes | None) -> Drift
               confirmed=sum(1 for r in resources if r["attribution"]["status"] == "confirmed"),
               reasons=dict(sorted(Counter(r for r in reasons if r is not None).items())))
     return document
+
+
+def settled(queried_at: datetime, run_finished: datetime) -> bool:
+    """Evidence is settled for a run when it was queried at least M after the run's
+    observation ended (Phase 9B, G8)."""
+    return queried_at >= run_finished + SETTLE_MARGIN
+
+
+def scope_key(resource_id: str) -> tuple[str, str]:
+    """(subscription, case-folded resource group) of a resource-group-scoped ARM ID."""
+    arm = parse_resource_id(resource_id)
+    return arm.subscription_id, arm.resource_group.lower()
+
+
+def unreadable_scopes(evidence: ActivityLogEvidence) -> set[tuple[str, str]]:
+    """Scopes whose collection dropped an event that could not be read (G4)."""
+    return {(scope.subscription_id, scope.resource_group.lower()) for scope in evidence.scopes
+            if any(reason in UNREADABLE_DROP_REASONS for reason in scope.dropped)}
+
+
+def events_by_address_of(evidence: ActivityLogEvidence) -> dict[str, list[Event]]:
+    grouped: dict[str, list[Event]] = {}
+    for event in evidence.events:
+        for match in event.matches:
+            grouped.setdefault(match.address, []).append(event)
+    return grouped
 
 
 def _read(path: str) -> bytes | None:
@@ -732,7 +811,8 @@ def verify_against_evidence(document: DriftAttribution, evidence_bytes: bytes | 
         write_op, delete_op = lifecycle_operations(arm)
         decisive = [events[i] for i in attribution.decisive_event_ids]
         anchor = [events[i] for i in attribution.anchor.event_ids]
-        for rows, operation, name in ((decisive, delete_op, "decisive"), (anchor, write_op, "anchor")):
+        checks = [(decisive, delete_op, "decisive")] + ([(anchor, write_op, "anchor")] if anchor else [])
+        for rows, operation, name in checks:
             if any(e.operation_name.lower() != operation or e.category != LIFECYCLE_CATEGORY
                    or not _same_resource(e, arm) for e in rows):
                 problems.append(f"{resource.address}: {name} events are not exact-resource {operation} events")
@@ -742,9 +822,13 @@ def verify_against_evidence(document: DriftAttribution, evidence_bytes: bytes | 
                 problems.append(f"{resource.address}: {name} group has no Succeeded row")
         if any(e.caller != attribution.caller for e in decisive):
             problems.append(f"{resource.address}: decisive events do not all carry the confirmed caller")
-        anchor_time = max((_event_time(e) for e in anchor if e.status == SUCCEEDED), default=None)
-        if anchor_time is None or format_timestamp(anchor_time) != attribution.anchor.time:
-            problems.append(f"{resource.address}: anchor time is not its latest Succeeded row")
-        elif not anchor_time < min(_event_time(e) for e in decisive):
+        if attribution.anchor.kind == "write_event":
+            anchor_time = max((_event_time(e) for e in anchor if e.status == SUCCEEDED), default=None)
+            if anchor_time is None or format_timestamp(anchor_time) != attribution.anchor.time:
+                problems.append(f"{resource.address}: anchor time is not its latest Succeeded row")
+                continue
+        else:
+            anchor_time = parse_timestamp(attribution.anchor.time)
+        if not anchor_time < min(_event_time(e) for e in decisive):
             problems.append(f"{resource.address}: the anchor does not precede the decisive delete")
     return problems

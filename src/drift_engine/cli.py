@@ -33,15 +33,21 @@ Exit status (process outcome only - drift is a valid result, not an error):
   141 standard output was closed early (broken pipe)
 
     drift-engine activity-logs --plan plan.json --manifest detection_run.json
-                               [--lookback-days N] [--output activity_log_evidence.json]
+                               [--lookback-days N] [--window-start TIME] [--not-before TIME]
+                               [--output activity_log_evidence.json]
                                [--log-level ...] [--log-format text|json]
 
 Collects Azure Activity Log evidence for the drifted resources of the same plan
-(activity_logs.py, Task 7.1): read-only queries with the current `az login` session,
-needing the `[azure]` extra only when there is drift to look up. It is a manual /
-local collector; the drift workflow does not run it. The evidence may hold callers
-(personal data): a new --output file is created readable by its owner only. It never
-changes the drift report or its exit status.
+(activity_logs.py, Task 7.1; evidence v2, Task 9B.1): read-only queries with the
+current `az login` session, needing the `[azure]` extra only when there is drift to
+look up. It is a manual / local collector; the drift workflow does not run it. The
+evidence may hold callers (personal data): a new --output file is created readable
+by its owner only. It never changes the drift report or its exit status.
+--window-start sets an explicit run-level window start instead of the lookback;
+--not-before refuses (no query, failed evidence) a collection started earlier. Both
+take UTC ISO 8601 times (`Z` or `+00:00`). The pipeline's client ID for
+`pipeline_identity` is read from the DRIFT_ENGINE_PIPELINE_PRINCIPAL environment
+variable (never from the command line) and never written.
 
 Exit status:
   0   evidence complete (every drifted resource was queried completely)
@@ -72,22 +78,67 @@ Exit status:
       internal error (nothing written)
   73  the output file could not be written
   130 / 141 as above
+
+    drift-engine investigate --plan plan.json --manifest detection_run.json --report drift_report.json
+                             [--anchors DIR --repository OWNER/NAME] [--lookback-days N]
+                             [--output drift_investigation.restricted.json]
+                             [--evidence-output activity_log_evidence.json]
+                             [--log-level ...] [--log-format text|json]
+
+Investigates the drifted resources of one run (investigation.py, Task 9B.2): checks
+that --report is the report `analyze` writes for this plan and manifest, selects the
+trusted last-in-sync anchors from --anchors (subdirectories with run.json and
+drift_report.json; needs --repository), waits until the run's finished_at + 10 min
+when there is something to query, collects the Activity Log (read-only, current az
+login session; the pipeline client ID comes from DRIFT_ENGINE_PIPELINE_PRINCIPAL),
+re-collects every 2 min up to finished_at + 20 min while a drifted resource has no
+capable operation, and writes the restricted investigation (callers, resource IDs:
+created readable by its owner only). Before anything is written, the result is
+re-checked against the evidence it names. It never changes the drift report.
+
+Exit status: 0 complete; 1 incomplete or failed (still written); 2 usage error; 70
+re-check failure or internal error (nothing written); 73 write error; 130 / 141.
+--public-output also writes the public drift_investigation.json (Task 9B.3): it is
+projected, re-derived from the restricted document and leak-scanned first; if any
+check fails nothing is written (exit 70).
+
+    drift-engine investigation-check --public drift_investigation.json [--report drift_report.json]
+
+Validates a public investigation (contract, leak scan, and the binding to --report).
+Exit 0 valid, 1 rejected (a fixed code; never the offending value), 2 usage.
+
+    drift-engine who --public drift_investigation.json --terraform state.json --output-dir DIR
+                     [--report drift_report.json]
+
+Local only (refuses in GitHub Actions): looks up, with the current az login session
+(read-only), the caller Azure recorded for each operation of a public investigation,
+prints it and writes DIR/who_evidence.local.json (0600; DIR created 0700). A recorded
+caller of an operation is evidence, never a statement of who caused the drift. Exit 0
+every operation matched, 1 otherwise, 2 usage or refusal, 70 internal, 73 write error.
+
+Restricted output (activity-logs, attribute, investigate) is never written to standard
+output in GitHub Actions (--output is required there), and their unexpected errors
+show the exception type only.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import stat
 import sys
 import tempfile
+import time
 from collections import Counter
 from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
-from drift_engine import __version__, activity_logs, attribution, comparator, severity
+from drift_engine import (
+    __version__, activity_logs, attribution, comparator, investigation, investigation_public, severity, who,
+)
 from drift_engine.classifier import evaluate
 from drift_engine.formatters import FORMATS, render
 from drift_engine.logs import LOG_FORMATS, LOG_LEVELS, configure_logging, log_event
@@ -140,6 +191,11 @@ def _parser() -> argparse.ArgumentParser:
     logs.add_argument("--lookback-days", type=_lookback_days, default=activity_logs.DEFAULT_LOOKBACK_DAYS,
                       help=f"query window in days, 1-{activity_logs.MAX_LOOKBACK_DAYS} "
                            f"(default: {activity_logs.DEFAULT_LOOKBACK_DAYS})")
+    logs.add_argument("--window-start", type=_utc_time,
+                      help="explicit run-level window start (UTC ISO 8601), at most "
+                           f"{activity_logs.MAX_LOOKBACK_DAYS} days back; replaces --lookback-days")
+    logs.add_argument("--not-before", type=_utc_time,
+                      help="earliest allowed query time (UTC ISO 8601); an earlier run queries nothing")
     logs.add_argument("--output", help="write the evidence to this file instead of standard output")
     logs.add_argument("--log-level", choices=LOG_LEVELS,
                       help="emit structured logs at this level and above to standard error (default: off)")
@@ -163,6 +219,63 @@ def _parser() -> argparse.ArgumentParser:
                            help="emit structured logs at this level and above to standard error (default: off)")
     attribute.add_argument("--log-format", choices=LOG_FORMATS, default="text",
                            help="log line format when --log-level is set (default: text)")
+
+    investigate_cmd = commands.add_parser(
+        "investigate",
+        help="investigate drifted resources against the Azure Activity Log (read-only; restricted output)",
+        description=(
+            "Correlate the drifted resources of one run with Azure Activity Log evidence (correlation v2, "
+            "last-in-sync anchor) and write the restricted drift_investigation.restricted.json. Never "
+            "confirms update drift; recorded callers are evidence, not attribution."
+        ),
+    )
+    investigate_cmd.add_argument("--plan", required=True, help="plan.json written by terraform show -json")
+    investigate_cmd.add_argument("--manifest", required=True, help="run manifest (detection_run.json) of the same run")
+    investigate_cmd.add_argument("--report", required=True,
+                                 help="drift report (JSON) written by drift-engine analyze for the same run")
+    investigate_cmd.add_argument("--anchors", help="directory of anchor candidates (needs --repository)")
+    investigate_cmd.add_argument("--repository", help="the current repository, OWNER/NAME (anchor trust check)")
+    investigate_cmd.add_argument("--lookback-days", type=_lookback_days, default=activity_logs.DEFAULT_LOOKBACK_DAYS,
+                                 help=f"lookback window without an anchor, 1-{activity_logs.MAX_LOOKBACK_DAYS} "
+                                      f"(default: {activity_logs.DEFAULT_LOOKBACK_DAYS})")
+    investigate_cmd.add_argument("--output", help="write the investigation to this file instead of standard output")
+    investigate_cmd.add_argument("--evidence-output", help="also write the Activity Log evidence it is bound to")
+    investigate_cmd.add_argument("--public-output",
+                                 help="also write the public drift_investigation.json (checked before writing)")
+    investigate_cmd.add_argument("--log-level", choices=LOG_LEVELS,
+                                 help="emit structured logs at this level and above to standard error (default: off)")
+    investigate_cmd.add_argument("--log-format", choices=LOG_FORMATS, default="text",
+                                 help="log line format when --log-level is set (default: text)")
+
+    check = commands.add_parser(
+        "investigation-check",
+        help="validate a public drift_investigation.json (contract, leak scan, binding)",
+        description="Validate a public investigation: strict contract, fail-closed leak scan and, with --report, "
+                    "its binding to that drift report.",
+    )
+    check.add_argument("--public", required=True, help="public drift_investigation.json")
+    check.add_argument("--report", help="drift report (JSON) it must be bound to")
+    check.add_argument("--log-level", choices=LOG_LEVELS,
+                       help="emit structured logs at this level and above to standard error (default: off)")
+    check.add_argument("--log-format", choices=LOG_FORMATS, default="text",
+                       help="log line format when --log-level is set (default: text)")
+
+    who_cmd = commands.add_parser(
+        "who",
+        help="local only: look up the recorded caller of public investigation operations (read-only)",
+        description="Local only (refuses in GitHub Actions). Re-query the Azure Activity Log for each operation of "
+                    "a public investigation and show the caller Azure recorded. Writes only "
+                    "who_evidence.local.json (0600) under --output-dir.",
+    )
+    who_cmd.add_argument("--public", required=True, help="public drift_investigation.json")
+    who_cmd.add_argument("--terraform", required=True,
+                         help="terraform show -json state (or plan JSON) mapping addresses to ARM IDs")
+    who_cmd.add_argument("--output-dir", required=True, help="directory for who_evidence.local.json (local only)")
+    who_cmd.add_argument("--report", help="drift report (JSON) the public file must be bound to")
+    who_cmd.add_argument("--log-level", choices=LOG_LEVELS,
+                         help="emit structured logs at this level and above to standard error (default: off)")
+    who_cmd.add_argument("--log-format", choices=LOG_FORMATS, default="text",
+                         help="log line format when --log-level is set (default: text)")
     return parser
 
 
@@ -174,6 +287,13 @@ def _lookback_days(text: str) -> int:
     if not 1 <= value <= activity_logs.MAX_LOOKBACK_DAYS:
         raise argparse.ArgumentTypeError(f"must be between 1 and {activity_logs.MAX_LOOKBACK_DAYS}")
     return value
+
+
+def _utc_time(text: str) -> datetime:
+    moment = activity_logs.parse_timestamp(text)
+    if moment is None:
+        raise argparse.ArgumentTypeError(f"not a UTC ISO 8601 time (Z or +00:00): {text!r}")
+    return moment
 
 
 def _use_color(choice: str, to_terminal: bool) -> bool:
@@ -242,18 +362,41 @@ def analyze(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _refuse_restricted_stdout(args: argparse.Namespace) -> bool:
+    """Restricted documents never go to standard output in GitHub Actions (public logs)."""
+    if os.environ.get("GITHUB_ACTIONS") == "true" and args.output is None:
+        print("ERROR: in GitHub Actions this command writes restricted data and needs --output FILE; "
+              "it never writes to standard output.", file=sys.stderr)
+        return True
+    return False
+
+
+def _read_input(path: str, limit: int) -> bytes | None:
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(limit + 1)
+    except OSError:
+        return None
+    return data if len(data) <= limit else None
+
+
 def _activity_log_source() -> activity_logs.ActivityLogSource:
     """The Azure source; the SDK is imported only if a query is actually made."""
     return activity_logs.AzureMonitorSource()
 
 
 def collect_activity_logs(args: argparse.Namespace) -> int:
+    if _refuse_restricted_stdout(args):
+        return EXIT_USAGE
     evidence = activity_logs.collect_evidence(
         args.plan,
         args.manifest,
         source=_activity_log_source(),
         queried_at=datetime.now(timezone.utc),
         lookback_days=args.lookback_days,
+        window_start=args.window_start,
+        not_before=args.not_before,
+        pipeline_principal=os.environ.get(activity_logs.PIPELINE_PRINCIPAL_ENV, "").strip() or None,
     )
     text = activity_logs.render_evidence(evidence)
     if args.output is None:
@@ -289,6 +432,8 @@ def collect_activity_logs(args: argparse.Namespace) -> int:
 
 
 def attribute_drift(args: argparse.Namespace) -> int:
+    if _refuse_restricted_stdout(args):
+        return EXIT_USAGE
     document, evidence_bytes = attribution.attribute_files(args.report, args.evidence)
     problems = attribution.verify_against_evidence(document, evidence_bytes)
     if problems:
@@ -326,6 +471,144 @@ def attribute_drift(args: argparse.Namespace) -> int:
         print(summary)
         print(f"Attribution: {args.output}")
     return EXIT_OK if document.outcome == "complete" else EXIT_FAILED
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def investigate_drift(args: argparse.Namespace) -> int:
+    if _refuse_restricted_stdout(args):
+        return EXIT_USAGE
+    if args.anchors is not None and not args.repository:
+        print("ERROR: --anchors needs --repository OWNER/NAME", file=sys.stderr)
+        return EXIT_USAGE
+    report_bytes = _read_input(args.report, investigation.MAX_INPUT_BYTES)
+    result = investigation.investigate(
+        args.plan, args.manifest, report_bytes,
+        source=_activity_log_source(), clock=_now, sleep=_sleep,
+        anchors_dir=args.anchors, repository=args.repository,
+        pipeline_principal=os.environ.get(activity_logs.PIPELINE_PRINCIPAL_ENV, "").strip() or None,
+        lookback_days=args.lookback_days,
+    )
+    document = result.document
+    problems = investigation.verify_against_evidence(document, result.evidence_bytes)
+    if problems:
+        log_event(logger, logging.ERROR, "investigation_recheck_failed",
+                  "investigation does not match the evidence it names", problems=len(problems))
+        print(
+            "ERROR: the investigation does not match the evidence it names; nothing was written.\n"
+            "  This indicates an engine defect; please report it. Drift detection results are unaffected.",
+            file=sys.stderr,
+        )
+        return EXIT_CONTRACT_VIOLATION
+    text = investigation.render_investigation(document)
+    public_text = None
+    if args.public_output is not None:
+        public_text, public_problems = investigation.publish(document)
+        if public_problems:
+            log_event(logger, logging.ERROR, "public_projection_rejected",
+                      "public investigation failed its checks", problems=len(public_problems))
+            print("ERROR: the public investigation failed its contract, consistency or leak checks; nothing was "
+                  "written.\n  This indicates an engine defect; please report it. Drift detection results are "
+                  "unaffected.", file=sys.stderr)
+            return EXIT_CONTRACT_VIOLATION
+    try:
+        if args.evidence_output is not None and result.evidence_bytes is not None:
+            _write_atomic(args.evidence_output, result.evidence_bytes.decode("utf-8"), private=True)
+        if args.output is None:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        else:
+            _write_atomic(args.output, text, private=True)
+        if public_text is not None:
+            _write_atomic(args.public_output, public_text)
+    except OSError as exc:
+        log_event(logger, logging.ERROR, "output_write_failed", "cannot write the investigation",
+                  error_type=type(exc).__name__)
+        print(f"ERROR: cannot write the investigation ({type(exc).__name__}).", file=sys.stderr)
+        return EXIT_CANT_WRITE
+
+    verdicts = Counter(r.verdict for r in document.resources)
+    links = Counter(r.property_link for r in document.resources)
+    summary = (f"investigation_outcome={document.outcome}  resources={len(document.resources)} "
+               f"[{', '.join(f'{k}={v}' for k, v in sorted(verdicts.items()))}]  "
+               f"property_links=[{', '.join(f'{k}={v}' for k, v in sorted(links.items()))}]")
+    if document.outcome != "complete":
+        reason = document.failure.reason if document.failure is not None else "incomplete"
+        print(f"INVESTIGATION {document.outcome.upper()} [{reason}]\n"
+              "  Drift detection results are unaffected.", file=sys.stderr)
+    if args.output is not None:
+        print(summary)
+        print(f"Investigation: {args.output}")
+    if public_text is not None:
+        print(f"Public investigation: {args.public_output}")
+    return EXIT_OK if document.outcome == "complete" else EXIT_FAILED
+
+
+def check_public_investigation(args: argparse.Namespace) -> int:
+    data = _read_input(args.public, investigation_public.MAX_INPUT_BYTES)
+    try:
+        if data is None:
+            raise investigation_public.PublicInvestigationError("invalid_json")
+        document = investigation_public.load_public(data)
+        if args.report is not None:
+            report = _read_input(args.report, investigation_public.MAX_INPUT_BYTES)
+            if report is None:
+                raise investigation_public.PublicInvestigationError("binding_mismatch")
+            investigation_public.check_binding(document, report)
+    except investigation_public.PublicInvestigationError as exc:
+        kinds = Counter(f.rsplit(": ", 1)[-1] for f in exc.findings)
+        detail = f" ({', '.join(f'{k}={v}' for k, v in sorted(kinds.items()))})" if kinds else ""
+        log_event(logger, logging.WARNING, "public_investigation_rejected", "public investigation rejected",
+                  code=exc.code, findings=len(exc.findings))
+        print(f"PUBLIC INVESTIGATION REJECTED [{exc.code}]{detail}", file=sys.stderr)
+        return EXIT_FAILED
+    verdicts = Counter(r.verdict for r in document.resources)
+    print(f"public_investigation=valid  outcome={document.outcome}  resources={len(document.resources)} "
+          f"[{', '.join(f'{k}={v}' for k, v in sorted(verdicts.items()))}]")
+    return EXIT_OK
+
+
+def who_lookup(args: argparse.Namespace) -> int:
+    try:
+        who.refuse_in_ci(os.environ)
+    except who.WhoRefused as exc:
+        print(f"ERROR: {exc}.", file=sys.stderr)
+        return EXIT_USAGE
+    public_bytes = _read_input(args.public, investigation_public.MAX_INPUT_BYTES)
+    terraform_bytes = _read_input(args.terraform, investigation.MAX_INPUT_BYTES)
+    report_bytes = _read_input(args.report, investigation_public.MAX_INPUT_BYTES) if args.report else None
+    if public_bytes is None or terraform_bytes is None or (args.report and report_bytes is None):
+        print("ERROR: cannot read an input file.", file=sys.stderr)
+        return EXIT_USAGE
+    target = os.path.join(args.output_dir, who.WHO_FILE)
+    if os.path.islink(args.output_dir) or os.path.islink(target):
+        print("ERROR: refusing to write through a symbolic link.", file=sys.stderr)
+        return EXIT_CANT_WRITE
+    result = who.run_who(public_bytes, terraform_bytes, source=_activity_log_source(), now=_now(),
+                         report_bytes=report_bytes)
+    document = result.document
+    try:
+        os.makedirs(args.output_dir, mode=0o700, exist_ok=True)
+        _write_atomic(target, json.dumps(document, indent=2, sort_keys=True) + "\n", private=True)
+    except OSError as exc:
+        print(f"ERROR: cannot write {who.WHO_FILE} ({type(exc).__name__}).", file=sys.stderr)
+        return EXIT_CANT_WRITE
+    if document["failure"] is not None:
+        print(f"WHO LOOKUP FAILED [{document['failure']['code']}: {document['failure']['detail']}]", file=sys.stderr)
+        return EXIT_FAILED
+    for item in document["results"]:
+        callers = ", ".join(item["callers"]) if item["callers"] else "(none recorded)"
+        line = f"{item['address']} {item['op_id']} {item['operation_name']} {item['start']}  {item['status']}"
+        print(f"{line}  recorded caller: {callers}" if item["status"] == "matched" else line)
+    print("A recorded caller is the identity Azure logged for that operation; it is not proof of who caused the drift.")
+    print(f"Local WHO evidence: {target}")
+    return EXIT_OK if result.complete else EXIT_FAILED
 
 
 def _target_mode(path: str, private: bool = False) -> int:
@@ -392,7 +675,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.log_level is not None:
         configure_logging(args.log_level, args.log_format)
-    command = {"activity-logs": collect_activity_logs, "attribute": attribute_drift}.get(args.command, analyze)
+    command = {"activity-logs": collect_activity_logs, "attribute": attribute_drift,
+               "investigate": investigate_drift, "investigation-check": check_public_investigation,
+               "who": who_lookup}.get(args.command, analyze)
     try:
         return command(args)
     except KeyboardInterrupt:
@@ -403,13 +688,25 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # last resort: never a traceback-only exit, never "no drift"
         log_event(logger, logging.ERROR, "unexpected_error", "unexpected internal error",
                   error_type=type(exc).__name__)
-        logger.debug("traceback", exc_info=True)
+        if command not in _RESTRICTED_COMMANDS:  # a traceback carries the exception message
+            logger.debug("traceback", exc_info=True)
         consequence = {
             collect_activity_logs: "  No Activity Log evidence was written; drift detection results are unaffected.",
             attribute_drift: "  No attribution was written; drift detection results are unaffected.",
+            investigate_drift: "  No investigation was written; drift detection results are unaffected.",
+            check_public_investigation: "  The public investigation was not validated.",
+            who_lookup: "  No WHO evidence was written.",
         }.get(command, "  Drift status is UNKNOWN - this must not be treated as 'no drift'.")
-        print(f"INTERNAL ERROR: unexpected {type(exc).__name__}: {exc}\n{consequence}", file=sys.stderr)
+        if command in _RESTRICTED_COMMANDS:
+            # restricted data: an exception message can echo input values (callers, IDs)
+            print(f"INTERNAL ERROR: unexpected {type(exc).__name__}.\n{consequence}", file=sys.stderr)
+        else:
+            print(f"INTERNAL ERROR: unexpected {type(exc).__name__}: {exc}\n{consequence}", file=sys.stderr)
         return EXIT_INTERNAL_ERROR
+
+
+_RESTRICTED_COMMANDS = frozenset({collect_activity_logs, attribute_drift, investigate_drift,
+                                  check_public_investigation, who_lookup})
 
 
 if __name__ == "__main__":

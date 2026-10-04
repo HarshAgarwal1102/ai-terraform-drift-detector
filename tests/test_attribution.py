@@ -10,8 +10,9 @@ contract, and every drift report by drift_engine's own classifier. IDs, callers 
 addresses are synthetic.
 
 Timeline used throughout (UTC): detection run 2026-10-03 10:00:00-10:05:00, so
-T_start = 09:55:00 and T_end = 10:10:00 (5-minute skew); evidence queried at
-12:00:00 (settled until 11:40:00); lifecycle events on 2026-10-02.
+T_start = 09:59:00 and T_end = 10:06:00 (60-second skew, rules version 2); evidence
+queried at 12:00:00 (settled from 10:15:00 = finished + 10 min); lifecycle events on
+2026-10-02.
 """
 
 from __future__ import annotations
@@ -57,8 +58,8 @@ from test_activity_logs import (  # noqa: E402  (shared 7.1 helpers; no test cla
 
 UTC = dt.timezone.utc
 RUN_STARTED, RUN_FINISHED = "2026-10-03T10:00:00Z", "2026-10-03T10:05:00Z"
-T_START = dt.datetime(2026, 10, 3, 9, 55, tzinfo=UTC)
-T_END = dt.datetime(2026, 10, 3, 10, 10, tzinfo=UTC)
+T_START = dt.datetime(2026, 10, 3, 9, 59, tzinfo=UTC)
+T_END = dt.datetime(2026, 10, 3, 10, 6, tzinfo=UTC)
 QUERIED = dt.datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
 DAY = dt.datetime(2026, 10, 2, tzinfo=UTC)
 GUID_CALLER = "11111111-2222-4333-8444-555555555555"
@@ -464,7 +465,7 @@ class AmbiguityTests(_Base):
         day = dt.datetime(2026, 10, 3, tzinfo=UTC)
         for moment, expected in ((T_START - dt.timedelta(seconds=1), ("confirmed", None)),
                                  (T_START, ("unknown", "concurrent_with_detection")),
-                                 (T_START + dt.timedelta(minutes=8), ("unknown", "concurrent_with_detection"))):
+                                 (T_START + dt.timedelta(minutes=3), ("unknown", "concurrent_with_detection"))):
             with self.subTest(moment):
                 rows = (self.log.group("write", at_time(8, day=day))
                         + self.log.group("delete", moment, statuses=("Succeeded",)))
@@ -514,7 +515,7 @@ class PreconditionTests(_Base):
         return self.W(8) + self.D(9)
 
     def test_settled_boundary(self):
-        settled = QUERIED.replace(hour=10, minute=30)  # settled_until 10:10:00 == T_end
+        settled = QUERIED.replace(hour=10, minute=15)  # finished 10:05:00 + M (10 min)
         self.assertEqual(self.status(self.rows(), queried_at=settled), ("confirmed", None))
         scenario = self.scenario(None, self.rows(), queried_at=settled - dt.timedelta(seconds=1))
         document = scenario.attribute()
@@ -618,7 +619,7 @@ class PreconditionTests(_Base):
         good = self.scenario(None, self.rows())
         failed_run = self.scenario(None, self.rows(), manifest={"outcome": "failed", "failure_stage": "plan",
                                                                 "failure_reason": "x"})
-        duplicate = good.evidence_bytes.replace(b'"evidence_version": "1"', b'"evidence_version": "1", "evidence_version": "1"')
+        duplicate = good.evidence_bytes.replace(b'"evidence_version": "2"', b'"evidence_version": "2", "evidence_version": "2"')
         cases = [
             (None, good.evidence_bytes, "report_invalid"), (b"{", good.evidence_bytes, "report_invalid"),
             (b'{"outcome": "succeeded"}', good.evidence_bytes, "report_invalid"),
@@ -743,10 +744,17 @@ class ContractTests(_Base):
         self.invalid(lambda d: self.a(d)["anchor"].update(extra=1))
 
     def test_constants(self):
-        self.invalid(lambda d: d.update(attribution_version="2"))
-        self.invalid(lambda d: d.update(rules_version="2"))
-        self.invalid(lambda d: d["binding"].update(skew_minutes=0))
-        self.invalid(lambda d: d["binding"].update(settle_margin_minutes=60))
+        self.assertEqual((self.doc["attribution_version"], self.doc["rules_version"]), ("2", "2"))
+        self.assertEqual({k: self.doc["binding"][k] for k in ("skew_seconds", "settle_margin_minutes",
+                                                               "automated_overlap_minutes")},
+                         {"skew_seconds": 60, "settle_margin_minutes": 10, "automated_overlap_minutes": 5})
+        for version in ("1", "3"):
+            self.invalid(lambda d, v=version: d.update(attribution_version=v))
+            self.invalid(lambda d, v=version: d.update(rules_version=v))
+        self.invalid(lambda d: d["binding"].update(skew_seconds=300))
+        self.invalid(lambda d: d["binding"].update(settle_margin_minutes=20))
+        self.invalid(lambda d: d["binding"].update(automated_overlap_minutes=1))
+        self.invalid(lambda d: d["binding"]["window"].update(settled_until="2026-10-03T11:40:00.000000Z"))
         self.invalid(lambda d: self.a(d).update(rule="single_writer"))
         self.invalid(lambda d: self.a(d).update(claim="caused_the_drift"))
         self.invalid(lambda d: self.a(d)["anchor"].update(kind="prior_detection_run"))
@@ -950,11 +958,11 @@ class SafetyTests(_Base):
 # ---------------------------------------------------------------------------
 
 MUTANTS = {
-    "anchor-not-required": ('    if not anchors:\n        return unknown("no_existence_anchor")\n',
-                            '    if not anchors:\n        anchors = [0]\n'),
+    "anchor-not-required": ('    else:\n        return unknown("no_existence_anchor")\n',
+                            '    else:\n        anchor_doc, anchor_ids, since_anchor = None, (), lifecycle\n'),
     "anchor-any-successful-group": ('if g.kind == "write" and g.outcome == "successful"]', 'if g.outcome == "successful"]'),
-    "anchor-earliest-write": ("    anchor = lifecycle[anchors[-1]]\n    since_anchor = lifecycle[anchors[-1] + 1:]",
-                              "    anchor = lifecycle[anchors[0]]\n    since_anchor = lifecycle[anchors[0] + 1:]"),
+    "anchor-earliest-write": ("    anchor = lifecycle[writes[-1]] if writes else None",
+                              "    anchor = lifecycle[writes[0]] if writes else None"),
     "multiple-deletes-allowed": ("    if len(deletes) > 1:", "    if False:"),
     "unresolved-ignored": ('    if any(g.outcome == "unresolved" for g in since_anchor):', "    if False:"),
     "unresolved-dropped-from-lifecycle": ('lifecycle = [g for g in groups if g.outcome != "failed" and g.start <= t_end]',
@@ -981,7 +989,12 @@ MUTANTS = {
                                  "        operation = event.operation_name"),
     "descendants-decide": ("                or not _same_resource(event, arm)):\n            other.append(event)",
                            "                ):\n            other.append(event)"),
-    "settle-check-removed": ("        elif settled_until < finished + SKEW:", "        elif False:"),
+    "settle-check-removed": ("        elif not settled(queried_at, finished):", "        elif False:"),
+    "settle-from-start": ("    return queried_at >= run_finished + SETTLE_MARGIN",
+                          "    return queried_at >= run_finished - timedelta(minutes=5) + SETTLE_MARGIN"),
+    "r7-tied-to-skew": ("    low, high = candidate.start - AUTOMATED_OVERLAP, candidate.end + AUTOMATED_OVERLAP",
+                        "    low, high = candidate.start - SKEW, candidate.end + SKEW"),
+    "unreadable-ignored": ("        elif scope_key(target.resource_id) in unreadable:", "        elif False:"),
     "binding-check-removed": ('            or subject.run_id != binding["run_id"] or subject.plan_timestamp != binding["plan_timestamp"]):',
                               "            ):"),
     "target-set-check-removed": ('    if set(targets) != {r["address"] for r in drifted}:', "    if False:"),
@@ -1014,9 +1027,11 @@ class SafeguardMutationTests(_Base):
             "caller-missing": self.scenario(None, self.W(8) + self.D(9, callers=[CALLER, None, CALLER])),
             "caller-mixed": self.scenario(None, self.W(8) + self.D(9, callers=[GUID_CALLER, CALLER, CALLER])),
             "concurrent": self.scenario(None, log.group("write", at_time(8, day=day3))
-                                        + log.group("delete", at_time(9, 55, day=day3), statuses=("Succeeded",))),
+                                        + log.group("delete", at_time(10, 1, day=day3), statuses=("Succeeded",))),
+            "concurrent-boundary": self.scenario(None, log.group("write", at_time(8, day=day3))
+                                                 + log.group("delete", at_time(9, 59, day=day3), statuses=("Succeeded",))),
             "concurrent-skew": self.scenario(None, log.group("write", at_time(8, day=day3))
-                                             + log.group("delete", at_time(9, 57, day=day3), statuses=("Succeeded",))),
+                                             + log.group("delete", at_time(9, 59, 30, day=day3), statuses=("Succeeded",))),
             "disk-case": self.scenario(None, self.W(8) + self.D(9, statuses=("Started", "Failed", "Started", "Succeeded"))
                                        + self.D(9, 1, statuses=("Started", "Succeeded"), caller=OTHER)),
             "touching": self.scenario(None, self.W(8) + log.group("delete", at_time(8, 0, 4), statuses=("Succeeded",))),
@@ -1030,7 +1045,13 @@ class SafeguardMutationTests(_Base):
                                           + self.D(9, op="MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/DELETE")),
             "disguised-child": self.scenario(None, self.W(8) + log.group("delete", at_time(9), rid=RULE_ID,
                                                                           op=f"{OPS[NSG_ID]}/delete")),
-            "not-settled": self.scenario(None, self.W(8) + self.D(9), queried_at=QUERIED.replace(hour=10, minute=20)),
+            "not-settled": self.scenario(None, self.W(8) + self.D(9), queried_at=QUERIED.replace(hour=10, minute=14)),
+            "settled-just": self.scenario(None, self.W(8) + self.D(9), queried_at=QUERIED.replace(hour=10, minute=15)),
+            "automated-4min": self.scenario(None, self.W(8) + self.D(9) + log.event(
+                at_time(9, 4), resourceId=NSG_ID, category={"value": "Policy"},
+                operationName={"value": "Microsoft.Authorization/policies/audit/action"})),
+            "unreadable": self.scenario(None, self.W(8) + self.D(9) + [ev(9001, ts="2026-10-02T09:30:00Z",
+                                                                         operationName={"value": "bad name"})]),
             "incomplete": self.scenario(None, script={RG: [page(*(self.W(8) + self.D(9)), more=True), page()]},
                                         limits=al.Limits(max_pages_per_scope=1)),
             "parent": self.scenario(both, log.group("write", at_time(7), rid=RG_ID) + self.W(8)

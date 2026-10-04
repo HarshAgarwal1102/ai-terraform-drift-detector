@@ -30,7 +30,7 @@ import unittest
 from unittest import mock
 
 from test_activity_logs import (  # noqa: E402  (shared helpers; no test classes imported)
-    CALLER, DELETE, FIXTURES, NSG_ADDR, NSG_ID, RG, RG_ADDR, SUB, FakeSource, page,
+    CALLER, DELETE, FIXTURES, NSG_ADDR, NSG_ID, RG, RG_ADDR, SUB, FakeSource, ev, page,
 )
 from test_attribution import (  # noqa: E402
     GUID_CALLER, OTHER, QUERIED, ROOT, T_START, UTC, _Base, at_time, deleted, updated,
@@ -186,7 +186,7 @@ class FallbackTests(_Base):
 
     def test_not_settled(self):
         document = self.scenario(deleted(), self.W(8) + self.D(9),
-                                 queried_at=QUERIED.replace(hour=10, minute=20)).attribute()
+                                 queried_at=QUERIED.replace(hour=10, minute=14)).attribute()
         self.assertEqual(self.resource(document).attribution.reason, "evidence_not_settled")
         self.assert_fallback(document)
 
@@ -210,6 +210,8 @@ class FallbackTests(_Base):
                                                           limits=al.Limits(max_pages_per_scope=1)).attribute(), NSG_ADDR),
             "evidence_not_settled": lambda: (self.scenario(deleted(), self.W(8) + self.D(9),
                                                            queried_at=QUERIED.replace(hour=10)).attribute(), NSG_ADDR),
+            "unreadable_events_in_scope": lambda: (self.scenario(deleted(), self.W(8) + self.D(9) + [ev(
+                9001, ts="2026-10-02T09:30:00Z", operationName={"value": "bad name"})]).attribute(), NSG_ADDR),
             "detection_time_unknown": lambda: (self.scenario(deleted(), self.W(8) + self.D(9),
                                                              manifest={"started_at": DELETE}).attribute(), NSG_ADDR),
             "no_resource_id": lambda: (self.scenario(deleted(NSG_ADDR, DELETE), script={}).attribute(), NSG_ADDR),

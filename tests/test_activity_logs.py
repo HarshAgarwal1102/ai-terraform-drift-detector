@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import stat
 import subprocess
@@ -621,8 +622,11 @@ class WindowAndFilterTests(_Base):
         self.assertEqual(source.calls, [(SUB, f"eventTimestamp ge '{WINDOW_START}' and eventTimestamp le "
                                               f"'{WINDOW_END}' and resourceGroupName eq '{RG}'")])
         self.assertEqual(evidence.window.model_dump(), {
-            "start": "2026-09-03T12:00:00.000000Z", "end": "2026-10-03T12:00:00.000000Z",
-            "lookback_days": 30, "settled_until": "2026-10-03T11:40:00.000000Z"})
+            "basis": "lookback", "start": "2026-09-03T12:00:00.000000Z", "end": "2026-10-03T12:00:00.000000Z",
+            "lookback_days": 30})
+        self.assertEqual(evidence.collection.model_dump(), {
+            "queried_at": "2026-10-03T12:00:00.654321Z", "not_before": None,
+            "max_ingestion_delay_ms": None, "ingestion_delay_samples": 0})
 
     def test_lookback_bounds(self):
         paths = bundle(self.tmp, "plan_evidence", "external_drift")
@@ -681,7 +685,9 @@ class NormalizationTests(_Base):
             "submission_timestamp": "2026-10-02T10:00:00.000000Z",
             "operation_name": "Microsoft.Resources/tags/write",
             "status": "Succeeded", "sub_status": "OK", "category": "Administrative", "level": "Informational",
-            "resource_id": RG_ID, "caller": CALLER, "anomalies": [],
+            "resource_id": RG_ID, "caller": CALLER,
+            "event_phase": "unknown", "caller_type": "unknown", "client_app": "unknown", "pipeline_identity": None,
+            "anomalies": [],
             "matches": [{"address": RG_ADDR, "relation": "exact"}],
         })
 
@@ -730,7 +736,7 @@ class NormalizationTests(_Base):
         self.assertEqual(set(evidence.events[0].model_dump()), {
             "event_data_id", "correlation_id", "operation_id", "event_timestamp", "submission_timestamp",
             "operation_name", "status", "sub_status", "category", "level", "resource_id", "caller",
-            "anomalies", "matches"})
+            "event_phase", "caller_type", "client_app", "pipeline_identity", "anomalies", "matches"})
 
     def test_timestamps(self):
         cases = {
@@ -1083,7 +1089,7 @@ class ContractTests(_Base):
         self.assertEqual(self.doc["trust"], "untrusted_external")
 
     def test_unknown_fields_are_rejected_everywhere(self):
-        for path in ([], ["subject"], ["window"], ["scopes", 0], ["targets", 0], ["events", 0],
+        for path in ([], ["subject"], ["window"], ["collection"], ["scopes", 0], ["targets", 0], ["events", 0],
                      ["events", 0, "matches", 0]):
             for name in ("extra", "claims", "caller_identity", "actor", "confirmed"):
                 with self.subTest(path=path, name=name):
@@ -1097,8 +1103,10 @@ class ContractTests(_Base):
     def test_constants(self):
         self.invalid(lambda d: d.update(trust="trusted"))
         self.invalid(lambda d: d.update(source="azure"))
-        self.invalid(lambda d: d.update(evidence_version="2"))
-        self.invalid(lambda d: d.update(evidence_version=1))
+        self.assertEqual(self.doc["evidence_version"], "2")
+        self.invalid(lambda d: d.update(evidence_version="1"))
+        self.invalid(lambda d: d.update(evidence_version="3"))
+        self.invalid(lambda d: d.update(evidence_version=2))
 
     def test_strict_types(self):
         self.invalid(lambda d: d["scopes"][0].update(pages="1"))
@@ -1196,13 +1204,17 @@ class ContractTests(_Base):
             evidence.outcome = "failed"
 
     def test_input_failure_document(self):
-        doc = {"evidence_version": "1", "source": "azure_activity_log", "trust": "untrusted_external",
+        doc = {"evidence_version": "2", "source": "azure_activity_log", "trust": "untrusted_external",
                "outcome": "failed", "failure": {"stage": "input", "reason": "invalid_lookback"},
-               "subject": {"run_id": None, "plan_timestamp": None}, "window": None,
+               "subject": {"run_id": None, "plan_timestamp": None}, "window": None, "collection": None,
                "scopes": [], "targets": [], "events": []}
         al.ActivityLogEvidence.model_validate(doc)
         with self.assertRaises(ValidationError):
             al.ActivityLogEvidence.model_validate(dict(doc, failure=None))
+        with self.assertRaises(ValidationError):  # an input failure has no collection
+            al.ActivityLogEvidence.model_validate(dict(doc, collection={
+                "queried_at": "2026-10-03T12:00:00.000000Z", "not_before": None,
+                "max_ingestion_delay_ms": None, "ingestion_delay_samples": 0}))
 
 
 # ---------------------------------------------------------------------------
@@ -1326,7 +1338,8 @@ class AzureMonitorSourceTests(_Base):
         (record,) = result.events
         self.assertEqual(set(record), {"eventDataId", "correlationId", "operationId", "eventTimestamp",
                                        "submissionTimestamp", "operationName", "status", "subStatus", "category",
-                                       "level", "resourceId", "caller"})
+                                       "level", "resourceId", "caller", "eventName", "claims"})
+        self.assertEqual(record["claims"], {})  # only appid, idtyp and xms_mirid presence are read
         self.assertEqual(record["caller"], CALLER)
         self.assertEqual(record["eventTimestamp"], "2026-10-02T10:00:00+00:00")
         self.assertEqual(record["operationName"], {"value": "Microsoft.Resources/tags/write"})
@@ -1689,6 +1702,476 @@ class CliTests(_Base):
 
     def test_default_source_is_the_azure_monitor_source(self):
         self.assertIsInstance(cli._activity_log_source(), al.AzureMonitorSource)
+
+
+# ---------------------------------------------------------------------------
+# Evidence v2 (Task 9B.1): derived caller fields, verified extensions, window and
+# collection timing, on sanitized fixtures of the real Azure event shape
+# ---------------------------------------------------------------------------
+
+REAL_SHAPE = os.path.join(FIXTURES, "activity_log", "rg_tag_writes.json")
+TAGS_EXT_ID = f"{RG_ID}/providers/Microsoft.Resources/tags/default"
+PORTAL_APP = "c44b4083-3bb0-49c1-b47d-974e53cbdf3c"
+CLI_APP = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
+PIPELINE_APP = "00000000-0000-4000-8000-0000000000cc"
+REAL_QUERIED_AT = dt.datetime(2026, 10, 4, 11, 20, 0, tzinfo=dt.timezone.utc)
+# Every non-allowlisted value of the sanitized fixture: none may reach the evidence.
+REAL_SHAPE_FORBIDDEN = ("Example User", "203.0.113.10", "2001:db8::10", "198.51.100.10",
+                        "00000000-0000-4000-8000-0000000000aa", "00000000-0000-4000-8000-0000000000bb",
+                        "00000000-0000-4000-c000-", "hierarchy", "objectidentifier", "ipaddr", "clientRequestId",
+                        "authorization", "httpRequest", "tenantId", "/events/", "api-version",
+                        PORTAL_APP, CLI_APP)
+DOC_IP = re.compile(r"\b(?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}\b|2001:db8:", re.IGNORECASE)
+
+
+def real_shape_events() -> list[dict]:
+    with open(REAL_SHAPE, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def strings(value):
+    """Every string inside a JSON value (keys included)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from strings(item)
+
+
+class RealShapeTests(_Base):
+    """The verified 2026-10-04 shape: a portal tag edit is Microsoft.Resources/tags/write,
+    BeginRequest/Started on <rg>/providers/Microsoft.Resources/tags/default and
+    EndRequest/Succeeded on <rg>, one correlationId."""
+
+    def collect_real(self, events=None, **kwargs):
+        kwargs.setdefault("queried_at", REAL_QUERIED_AT)
+        source = FakeSource({RG: [page(*(events if events is not None else real_shape_events()))]})
+        return collect(self.network(), source, **kwargs)
+
+    def test_fixture_is_sanitized(self):
+        text = open(REAL_SHAPE, encoding="utf-8").read()
+        guids = set(re.findall(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", text))
+        self.assertEqual({g for g in guids if not g.startswith("00000000-0000-4000-")}, {PORTAL_APP, CLI_APP})
+        self.assertEqual(set(re.findall(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", text)), {"user@example.invalid"})
+        ips = set(re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text))
+        self.assertTrue(ips and all(DOC_IP.fullmatch(ip) for ip in ips), ips)
+
+    def test_portal_tag_edit_pair(self):
+        evidence = self.collect_real()
+        self.assertEqual(evidence.outcome, "complete")
+        events = [e.model_dump(mode="json") for e in evidence.events]
+        self.assertEqual(len(events), 6)
+        started, succeeded = events[4], events[5]
+        common = {"operation_name": "Microsoft.Resources/tags/write", "category": "Administrative",
+                  "level": "Informational", "caller": "user@example.invalid", "caller_type": "user",
+                  "client_app": "azure_portal", "pipeline_identity": None, "anomalies": []}
+        self.assertEqual({k: started[k] for k in common}, common)
+        self.assertEqual({k: succeeded[k] for k in common}, common)
+        self.assertEqual(started["correlation_id"], succeeded["correlation_id"])
+        self.assertEqual((started["event_phase"], started["status"], started["sub_status"]), ("begin", "Started", None))
+        self.assertEqual((succeeded["event_phase"], succeeded["status"], succeeded["sub_status"]),
+                         ("end", "Succeeded", "OK"))
+        self.assertEqual((started["resource_id"], started["matches"]),
+                         (TAGS_EXT_ID, [{"address": RG_ADDR, "relation": "extension"}]))
+        self.assertEqual((succeeded["resource_id"], succeeded["matches"]),
+                         (RG_ID, [{"address": RG_ADDR, "relation": "exact"}]))
+        # seven fractional digits truncated to microseconds
+        self.assertEqual((started["event_timestamp"], succeeded["event_timestamp"]),
+                         ("2026-10-04T11:04:56.093597Z", "2026-10-04T11:04:58.187357Z"))
+        self.assertEqual(succeeded["submission_timestamp"], "2026-10-04T11:06:24.000000Z")
+        self.assertEqual(self.target(evidence, RG_ADDR).matched_events, 6)
+
+    def test_cli_tag_writes_map_to_azure_cli(self):
+        events = self.collect_real().events
+        self.assertEqual([e.client_app for e in events], ["azure_cli"] * 4 + ["azure_portal"] * 2)
+        self.assertEqual([e.event_phase for e in events], ["begin", "end"] * 3)
+        self.assertEqual(len({e.correlation_id for e in events}), 3)
+
+    def test_ingestion_delay(self):
+        evidence = self.collect_real()
+        # largest: 2026-10-03T11:21:42Z - 2026-10-03T11:19:50.225309Z = 111.774691 s
+        self.assertEqual(evidence.collection.model_dump(), {
+            "queried_at": "2026-10-04T11:20:00.000000Z", "not_before": None,
+            "max_ingestion_delay_ms": 111774, "ingestion_delay_samples": 6})
+
+    def test_nothing_but_allowlisted_values_is_stored(self):
+        evidence = self.collect_real()
+        text = al.render_evidence(evidence)
+        for marker in REAL_SHAPE_FORBIDDEN:
+            self.assertNotIn(marker, text)
+        for value in strings(evidence.model_dump(mode="json")):
+            self.assertIsNone(DOC_IP.search(value), value)
+            self.assertNotIn("claims\"", value)
+        self.assertIn("user@example.invalid", text)  # the caller stays in this restricted evidence
+
+    def test_deterministic_under_shuffling_and_paging(self):
+        events = real_shape_events()
+        baseline = self.collect_real(events)
+        rng = random.Random(9)
+        for _ in range(5):
+            shuffled = events[:]
+            rng.shuffle(shuffled)
+            # byte-identical with equal paging
+            self.assertEqual(al.render_evidence(self.collect_real(shuffled)), al.render_evidence(baseline))
+            # with other paging only the page count differs
+            split = rng.randrange(1, len(shuffled))
+            source = FakeSource({RG: [page(*shuffled[:split], more=True), page(*shuffled[split:])]})
+            evidence = collect(self.network(), source, queried_at=REAL_QUERIED_AT)
+            for part in ("events", "targets", "window", "collection"):
+                self.assertEqual(getattr(evidence, part), getattr(baseline, part))
+            self.assertEqual(evidence.scopes[0].pages, 2)
+
+
+class DerivedIdentityTests(_Base):
+    def derive(self, claims, principal=None):
+        return al.derive_identity(claims, principal)
+
+    def test_caller_type(self):
+        cases = [
+            ({"idtyp": "user", "appid": PORTAL_APP}, "user"),  # verified
+            ({"idtyp": "USER"}, "user"),
+            ({"idtyp": "app", "appid": PIPELINE_APP}, "service_principal"),  # synthetic, unverified
+            ({"idtyp": "app", "xms_mirid": "/subscriptions/x/mi"}, "managed_identity"),  # synthetic, unverified
+            ({"idtyp": "app", "xms_mirid": ""}, "service_principal"),
+            ({"idtyp": "device"}, "unknown"),
+            ({"idtyp": 1}, "unknown"),
+            ({"appid": PORTAL_APP}, "unknown"),
+            ({}, "unknown"),
+        ]
+        for claims, expected in cases:
+            with self.subTest(claims):
+                identity, anomaly = self.derive(claims)
+                self.assertEqual((identity["caller_type"], anomaly), (expected, None))
+
+    def test_client_app(self):
+        cases = [(PORTAL_APP, "azure_portal"), (CLI_APP, "azure_cli"), (PORTAL_APP.upper(), "azure_portal"),
+                 (PIPELINE_APP, "other_application"), ("not-a-guid", "unknown"), (None, "unknown"), (7, "unknown")]
+        for appid, expected in cases:
+            with self.subTest(appid):
+                claims = {"idtyp": "user"} if appid is None else {"idtyp": "user", "appid": appid}
+                self.assertEqual(self.derive(claims)[0]["client_app"], expected)
+
+    def test_pipeline_identity(self):
+        cases = [
+            ({"idtyp": "app", "appid": PIPELINE_APP}, PIPELINE_APP, True),
+            ({"idtyp": "app", "appid": PIPELINE_APP.upper()}, PIPELINE_APP, True),
+            ({"idtyp": "app", "appid": "00000000-0000-4000-8000-0000000000dd"}, PIPELINE_APP, False),
+            ({"idtyp": "user", "appid": PORTAL_APP}, PIPELINE_APP, False),
+            ({"idtyp": "app", "appid": PIPELINE_APP}, None, None),
+            ({"idtyp": "app"}, PIPELINE_APP, None),
+        ]
+        for claims, principal, expected in cases:
+            with self.subTest(claims=claims, principal=principal):
+                self.assertIs(self.derive(claims, principal)[0]["pipeline_identity"], expected)
+
+    def test_missing_and_rejected_claims(self):
+        unknown = {"caller_type": "unknown", "client_app": "unknown", "pipeline_identity": None}
+        self.assertEqual(self.derive(None, PIPELINE_APP), (unknown, "claims_missing"))
+        for claims in ([], "idtyp=user", 3):
+            with self.subTest(claims):
+                self.assertEqual(self.derive(claims, PIPELINE_APP), (unknown, "claims_rejected"))
+
+    def test_through_collection(self):
+        app_event = ev(1, claims={"idtyp": "app", "appid": PIPELINE_APP, "ipaddr": CLIENT_IP})
+        missing = ev(2, claims=DELETE)
+        rejected = ev(3, claims=["idtyp", "user"])
+        evidence = collect(self.network(), FakeSource({RG: [page(app_event, missing, rejected)]}),
+                           pipeline_principal=PIPELINE_APP.upper())
+        by_n = {e.event_data_id[-1]: e for e in evidence.events}
+        self.assertEqual((by_n["1"].caller_type, by_n["1"].client_app, by_n["1"].pipeline_identity, by_n["1"].anomalies),
+                         ("service_principal", "other_application", True, []))
+        self.assertEqual((by_n["2"].caller_type, by_n["2"].pipeline_identity, by_n["2"].anomalies),
+                         ("unknown", None, ["claims_missing"]))
+        self.assertEqual(by_n["3"].anomalies, ["claims_rejected"])
+        self.assertNotIn(PIPELINE_APP, al.render_evidence(evidence).lower())
+        self.assertNotIn(PIPELINE_APP.upper(), al.render_evidence(evidence))
+
+    def test_invalid_pipeline_principal_is_an_input_failure(self):
+        for principal in ("pipeline-marker", "", 42, PIPELINE_APP + "x"):
+            with self.subTest(principal):
+                evidence = collect(self.network(), NoCallSource(), pipeline_principal=principal)
+                self.assertEqual(evidence.failure.reason, "invalid_pipeline_principal")
+                text = al.render_evidence(evidence)
+                for marker in ("pipeline-marker", PIPELINE_APP):
+                    self.assertNotIn(marker, text)
+
+    def test_event_phase(self):
+        cases = [({"value": "BeginRequest"}, "begin"), ({"value": "EndRequest"}, "end"),
+                 ({"value": "endrequest"}, "end"), ({"value": "EventWithoutTitle"}, "unknown"),
+                 ({"value": 5}, "unknown"), ("BeginRequest", "unknown"), (DELETE, "unknown")]
+        for name, expected in cases:
+            with self.subTest(name):
+                evidence = collect(self.network(), FakeSource({RG: [page(ev(1, eventName=name))]}))
+                self.assertEqual(evidence.events[0].event_phase, expected)
+
+    def test_differing_derived_fields_are_conflicting_duplicates(self):
+        first = ev(1, claims={"idtyp": "user", "appid": PORTAL_APP})
+        second = ev(1, claims={"idtyp": "user", "appid": CLI_APP})
+        evidence = collect(self.network(), FakeSource({RG: [page(first, second)]}))
+        self.assertEqual(evidence.events, [])
+        self.assertEqual(evidence.scopes[0].dropped, {"conflicting_duplicate": 2})
+
+
+class RelationTests(_Base):
+    def relation(self, resource_id, resources=None):
+        evidence = collect(self.network(resources=resources), FakeSource({RG: [page(ev(1, resourceId=resource_id))]}))
+        self.assertEqual(len(evidence.events), 1, evidence.scopes)
+        return evidence.events[0].matches[0].model_dump()
+
+    def test_verified_extension_only(self):
+        cases = [
+            (RG_ID, RG_ADDR, "exact"),
+            (TAGS_EXT_ID, RG_ADDR, "extension"),
+            (TAGS_EXT_ID.upper().replace(SUB.upper(), SUB), RG_ADDR, "extension"),
+            # contained resources share the extension path shape: never extensions
+            (f"{RG_ID}/providers/Microsoft.Resources/deployments/deploy-1", RG_ADDR, "descendant"),
+            (f"{RG_ID}/providers/Microsoft.Authorization/locks/lock-1", RG_ADDR, "descendant"),
+            (f"{RG_ID}/providers/Microsoft.Resources/tags/other", RG_ADDR, "descendant"),
+            (OTHER_ID, RG_ADDR, "descendant"),
+            (f"{NSG_ID}/providers/Microsoft.Resources/tags/default", NSG_ADDR, "extension"),
+            (RULE_ID, NSG_ADDR, "descendant"),
+            (f"{RULE_ID}/providers/Microsoft.Resources/tags/default", NSG_ADDR, "descendant"),
+        ]
+        for resource_id, address, relation in cases:
+            with self.subTest(resource_id):
+                self.assertEqual(self.relation(resource_id), {"address": address, "relation": relation})
+
+    def test_relation_to(self):
+        key = RG_ID.lower()
+        self.assertEqual(al.relation_to(key, key), "exact")
+        self.assertEqual(al.relation_to(key + "/providers/microsoft.resources/tags/default", key), "extension")
+        self.assertEqual(al.relation_to(key + "/providers/microsoft.resources/tags/defaultx", key), "descendant")
+        self.assertIsNone(al.relation_to(key + "x", key))
+        self.assertIsNone(al.relation_to(key, key + "/x"))
+
+    def test_contract_checks_the_relation(self):
+        doc = collect(self.network(), FakeSource({RG: [page(ev(1, resourceId=TAGS_EXT_ID))]})).model_dump(mode="json")
+        for wrong in ("descendant", "exact"):
+            with self.subTest(wrong):
+                bad = copy.deepcopy(doc)
+                bad["events"][0]["matches"][0]["relation"] = wrong
+                with self.assertRaises(ValidationError) as ctx:
+                    al.ActivityLogEvidence.model_validate(bad)
+                self.assertIn("relation", str(ctx.exception))
+
+
+class WindowV2Tests(_Base):
+    def test_explicit_window_start(self):
+        source = FakeSource()
+        start = dt.datetime(2026, 9, 20, 8, 30, 15, 999999, tzinfo=dt.timezone.utc)
+        evidence = collect(self.network(), source, window_start=start)
+        self.assertEqual(evidence.window.model_dump(), {
+            "basis": "explicit", "start": "2026-09-20T08:30:15.000000Z", "end": "2026-10-03T12:00:00.000000Z",
+            "lookback_days": None})
+        self.assertEqual(source.calls, [(SUB, "eventTimestamp ge '2026-09-20T08:30:15Z' and eventTimestamp le "
+                                              f"'{WINDOW_END}' and resourceGroupName eq '{RG}'")])
+
+    def test_explicit_window_drops_earlier_events(self):
+        start = dt.datetime(2026, 10, 2, 0, 0, tzinfo=dt.timezone.utc)
+        events = [ev(1, ts="2026-10-01T23:59:59Z"), ev(2, ts="2026-10-02T00:00:00Z")]
+        evidence = collect(self.network(), FakeSource({RG: [page(*events)]}), window_start=start)
+        self.assertEqual([e.event_timestamp for e in evidence.events], ["2026-10-02T00:00:00.000000Z"])
+        self.assertEqual(evidence.scopes[0].dropped, {"timestamp_outside_window": 1})
+
+    def test_window_start_bounds(self):
+        end = QUERIED_AT.replace(microsecond=0)
+        ok = [end - dt.timedelta(days=89), end - dt.timedelta(seconds=1),
+              (end - dt.timedelta(days=3)).astimezone(dt.timezone(dt.timedelta(hours=-7)))]
+        for start in ok:
+            with self.subTest(ok=start):
+                self.assertEqual(collect(self.network(), FakeSource(), window_start=start).window.basis, "explicit")
+        bad = [end, QUERIED_AT, end + dt.timedelta(days=1), end - dt.timedelta(days=89, seconds=1),
+               start.replace(tzinfo=None), "2026-09-20T00:00:00Z", 0]
+        for start in bad:
+            with self.subTest(bad=start):
+                evidence = collect(self.network(), NoCallSource(), window_start=start)
+                self.assertEqual(evidence.failure.model_dump(), {"stage": "input", "reason": "invalid_window_start"})
+                self.assertIsNone(evidence.collection)
+
+    def test_not_before(self):
+        evidence = collect(self.network(), FakeSource(), not_before=QUERIED_AT)
+        self.assertEqual(evidence.collection.not_before, "2026-10-03T12:00:00.654321Z")
+        for not_before in (QUERIED_AT + dt.timedelta(microseconds=1), QUERIED_AT + dt.timedelta(minutes=10)):
+            with self.subTest(not_before):
+                evidence = collect(self.network(), NoCallSource(), not_before=not_before)
+                self.assertEqual(evidence.failure.model_dump(), {"stage": "input", "reason": "query_before_not_before"})
+                self.assertEqual((evidence.window, evidence.collection, evidence.scopes), (None, None, []))
+        for not_before in (QUERIED_AT.replace(tzinfo=None), "2026-10-03T12:00:00Z"):
+            with self.subTest(not_before):
+                evidence = collect(self.network(), NoCallSource(), not_before=not_before)
+                self.assertEqual(evidence.failure.reason, "invalid_not_before")
+
+    def test_legacy_settled_until_is_removed(self):
+        # Task 9B.2: settling is decided by consumers from collection.queried_at (G8)
+        for kwargs in ({}, {"window_start": QUERIED_AT - dt.timedelta(days=2)}):
+            with self.subTest(kwargs):
+                doc = collect(self.network(), FakeSource(), **kwargs).model_dump(mode="json")
+                self.assertNotIn("settled_until", doc["window"])
+                bad = copy.deepcopy(doc)
+                bad["window"]["settled_until"] = doc["window"]["end"]
+                with self.assertRaises(ValidationError):
+                    al.ActivityLogEvidence.model_validate(bad)
+        self.assertFalse(hasattr(al, "INGESTION_LAG"))
+
+    def test_ingestion_delay_samples(self):
+        events = [
+            ev(1, ts="2026-10-02T10:00:00Z", submissionTimestamp="2026-10-02T10:01:30.5009Z"),
+            ev(2, ts="2026-10-02T10:00:00Z", submissionTimestamp="2026-10-02T09:59:59Z"),  # earlier: excluded
+            ev(3, ts="2026-10-02T10:00:00Z", submissionTimestamp="garbage"),  # rejected: excluded
+            ev(4, ts="2026-10-02T10:00:00Z", submissionTimestamp=DELETE),  # absent: excluded
+            ev(5, ts="2026-10-02T10:00:00Z", submissionTimestamp="2026-10-02T10:00:00Z"),
+        ]
+        evidence = collect(self.network(), FakeSource({RG: [page(*events)]}))
+        self.assertEqual((evidence.collection.max_ingestion_delay_ms, evidence.collection.ingestion_delay_samples),
+                         (90500, 2))
+        by_n = {e.event_data_id[-1]: e.anomalies for e in evidence.events}
+        self.assertEqual((by_n["2"], by_n["3"]), (["submission_before_event"], ["submission_timestamp_rejected"]))
+
+
+class EvidenceV2ContractTests(_Base):
+    def setUp(self):
+        super().setUp()
+        events = [ev(1, ts="2026-10-02T10:00:00Z", submissionTimestamp="2026-10-02T10:02:00Z",
+                     eventName={"value": "EndRequest"}, claims={"idtyp": "user", "appid": PORTAL_APP}),
+                  ev(2, resourceId=TAGS_EXT_ID)]
+        self.doc = collect(self.network(), FakeSource({RG: [page(*events)]}),
+                           window_start=QUERIED_AT - dt.timedelta(days=3)).model_dump(mode="json")
+
+    def invalid(self, mutate, message=None):
+        doc = copy.deepcopy(self.doc)
+        mutate(doc)
+        with self.assertRaises(ValidationError) as ctx:
+            al.ActivityLogEvidence.model_validate(doc)
+        if message:
+            self.assertIn(message, str(ctx.exception))
+
+    def test_valid(self):
+        self.assertEqual(al.ActivityLogEvidence.model_validate(self.doc).model_dump(mode="json"), self.doc)
+
+    def test_window(self):
+        self.invalid(lambda d: d["window"].update(lookback_days=3), "explicit window")
+        self.invalid(lambda d: d["window"].update(basis="lookback"), "lookback window")
+        self.invalid(lambda d: d["window"].update(start="2026-09-30T12:00:00.500000Z"), "whole seconds")
+        self.invalid(lambda d: d["window"].update(start=d["window"]["end"]), "explicit window")
+        self.invalid(lambda d: d["window"].update(start="2026-07-01T12:00:00.000000Z"), "explicit window")
+        self.invalid(lambda d: d["window"].update(basis="other"))
+
+    def test_collection(self):
+        self.invalid(lambda d: d.update(collection=None), "window and collection are required")
+        self.invalid(lambda d: d["collection"].update(queried_at="2026-10-03T12:00:01.000000Z"), "queried_at")
+        self.invalid(lambda d: d["collection"].update(not_before="2026-10-03T12:00:01.000000Z"), "not_before")
+        self.invalid(lambda d: d["collection"].update(max_ingestion_delay_ms=1), "ingestion delay")
+        self.invalid(lambda d: d["collection"].update(ingestion_delay_samples=0), "null exactly")
+        self.invalid(lambda d: d["collection"].update(max_ingestion_delay_ms=None), "null exactly")
+        self.invalid(lambda d: d["collection"].update(max_ingestion_delay_ms=1.5))
+
+    def test_event_fields(self):
+        self.assertEqual({k: self.doc["events"][0][k] for k in ("event_phase", "caller_type", "client_app")},
+                         {"event_phase": "end", "caller_type": "user", "client_app": "azure_portal"})
+        self.invalid(lambda d: d["events"][0].update(caller_type="admin"))
+        self.invalid(lambda d: d["events"][0].update(client_app="c44b4083-3bb0-49c1-b47d-974e53cbdf3c"))
+        self.invalid(lambda d: d["events"][0].update(event_phase="started"))
+        self.invalid(lambda d: d["events"][0].update(pipeline_identity="yes"))
+        self.invalid(lambda d: d["events"][0].update(anomalies=["claims_missing"]), "without usable claims")
+        self.invalid(lambda d: d["events"][0].update(anomalies=["submission_before_event"]), "submission_before_event")
+        self.invalid(lambda d: d["events"][0].update(submission_timestamp="2026-10-02T09:00:00.000000Z"),
+                     "submission_before_event")
+        for name in ("claims", "appid", "idtyp", "ipaddr"):
+            with self.subTest(name):
+                self.invalid(lambda d, name=name: d["events"][0].update({name: "x"}))
+
+
+class EvidenceV2CliTests(_Base):
+    main, args, tearDown = CliTests.main, CliTests.args, CliTests.tearDown
+
+    def test_window_start_and_not_before_options(self):
+        paths = self.network()
+        start = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).replace(microsecond=0)
+        text = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        code, _, _ = self.main(self.args(paths, "--window-start", text,
+                                         "--not-before", text.replace("Z", "+00:00")))
+        self.assertEqual(code, 0)
+        doc = json.load(open(self.output))
+        expected = al.format_timestamp(start)
+        self.assertEqual((doc["window"]["basis"], doc["window"]["start"], doc["window"]["lookback_days"]),
+                         ("explicit", expected, None))
+        self.assertEqual(doc["collection"]["not_before"], expected)
+
+    def test_not_before_in_the_future_queries_nothing(self):
+        code, _, err = self.main(self.args(self.network(), "--not-before", "2999-01-01T00:00:00Z"), NoCallSource())
+        self.assertEqual(code, 1)
+        self.assertIn("ACTIVITY LOG EVIDENCE FAILED [query_before_not_before]", err)
+
+    def test_bad_time_options_are_usage_errors(self):
+        paths = self.network()
+        for extra in (["--window-start", "2026-01-01"], ["--window-start", "2026-01-01T00:00:00+05:30"],
+                      ["--not-before", "yesterday"], ["--not-before", "2026-01-01T00:00:00z"]):
+            with self.subTest(extra), self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(io.StringIO()):
+                cli.main(self.args(paths, *extra))
+            self.assertEqual(ctx.exception.code, 2)
+
+    def test_pipeline_principal_from_environment_is_never_written(self):
+        event = ev(1, claims={"idtyp": "app", "appid": PIPELINE_APP})
+        for value, expected in ((PIPELINE_APP, True), (f"  {PIPELINE_APP.upper()}  ", True), ("", None), (None, None)):
+            with self.subTest(value):
+                env = {k: v for k, v in os.environ.items() if k != al.PIPELINE_PRINCIPAL_ENV}
+                if value is not None:
+                    env[al.PIPELINE_PRINCIPAL_ENV] = value
+                with mock.patch.dict(os.environ, env, clear=True):
+                    code, out, err = self.main(self.args(self.network(), "--log-level", "debug"),
+                                               FakeSource({RG: [page(event)]}))
+                self.assertEqual(code, 0)
+                doc = json.load(open(self.output))
+                self.assertIs(doc["events"][0]["pipeline_identity"], expected)
+                for text in (open(self.output).read(), out, err):
+                    self.assertNotIn(PIPELINE_APP, text.lower())
+
+    def test_invalid_pipeline_principal_from_environment(self):
+        with mock.patch.dict(os.environ, {al.PIPELINE_PRINCIPAL_ENV: "not-a-guid"}):
+            code, _, err = self.main(self.args(self.network()), NoCallSource())
+        self.assertEqual(code, 1)
+        self.assertIn("[invalid_pipeline_principal]", err)
+        self.assertNotIn("not-a-guid", err + open(self.output).read())
+
+
+@unittest.skipUnless(HAS_AZURE, "needs the 'azure' extra (pip install -e '.[azure]')")
+class EvidenceV2SdkTests(_Base):
+    """The real SDK over a fake HTTP transport, fed the sanitized real-shape records."""
+
+    FILTER = AzureMonitorSourceTests.FILTER
+    source, pages = AzureMonitorSourceTests.source, AzureMonitorSourceTests.pages
+
+    def test_sdk_reads_only_the_three_claims(self):
+        records = real_shape_events()
+        records[0]["claims"]["xms_mirid"] = "/subscriptions/x/resourcegroups/y/providers/mi-marker"
+        (result,) = self.pages(self.source([(200, {"value": records})]))
+        self.assertEqual(result.events[0]["claims"], {"idtyp": "user", "appid": CLI_APP, "xms_mirid": True})
+        self.assertEqual(result.events[5]["claims"], {"idtyp": "user", "appid": PORTAL_APP})
+        self.assertEqual(result.events[5]["eventName"], {"value": "EndRequest"})
+        text = json.dumps(result.events)
+        for marker in ("mi-marker", "Example User", "203.0.113.10", "2001:db8::10", "objectidentifier"):
+            self.assertNotIn(marker, text)
+
+    def test_claims_record(self):
+        self.assertIsNone(al._claims_record(None))
+        self.assertEqual(al._claims_record(["x"]), [])
+        self.assertEqual(al._claims_record({"upn": "u", "idtyp": "app", "xms_mirid": ""}), {"idtyp": "app"})
+
+    def test_end_to_end_real_shape(self):
+        source = self.source([(200, {"value": real_shape_events()})])
+        evidence = collect(self.network(), source, queried_at=REAL_QUERIED_AT,
+                           window_start=REAL_QUERIED_AT - dt.timedelta(days=2))
+        self.assertEqual(evidence.outcome, "complete")
+        self.assertEqual([(e.event_phase, e.client_app, e.matches[0].relation) for e in evidence.events[4:]],
+                         [("begin", "azure_portal", "extension"), ("end", "azure_portal", "exact")])
+        self.assertEqual(evidence.collection.max_ingestion_delay_ms, 111774)
+        text = al.render_evidence(evidence)
+        for marker in REAL_SHAPE_FORBIDDEN + ("fake-token-for-tests",):
+            self.assertNotIn(marker, text)
 
 
 if __name__ == "__main__":

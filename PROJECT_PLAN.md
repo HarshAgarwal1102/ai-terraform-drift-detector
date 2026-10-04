@@ -124,9 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis
-- **Current Active Task**: Task 10.2 — Terraform Plan Cost Delta Calculation (not started; begins with its design review)
-- **Phases Completed**: 9 of 14
+- **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
+- **Current Active Task**: Task 9B.4 — AI Report v2, Deterministic Investigation Narrative & Recommendation Policy (not started; begins with its design review)
+- **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
 
@@ -1534,9 +1534,20 @@ The dedicated infrastructure expansion anticipated by the Phase 1 scope note: ad
   - **Lesson for later phases**: creating a subnet and its NSG association in one apply leaves computed attributes stale in state until a refresh is persisted; the engine reports that as `converged_drift`. After applies that add associated network resources, run a reviewed `apply -refresh-only` (or expect one converged-drift scan).
 
 ### PHASE 6 — LangGraph AI Analysis Engine
-**Status**: 🟢 COMPLETED
+**Status**: 🟡 WORK IN PROGRESS — reopened 2026-10-04 (requirement gap; the remaining work is owned by Phase 9B)
 
 Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI-compatible models to analyze detected drift, evaluate security and cost implications, and recommend remediation steps based on strict empirical evidence.
+
+> **Requirement-gap amendment (2026-10-04, user decision):**
+> - **Evidence**: a real Azure test produced a report without the required content. The user added a tag to `aitdd-dev-main-rg` in the Azure Portal; drift run `37197574080` detected it; the AI artifact `ai-analysis-report-37197574080` holds no Azure evidence, no WHO/WHEN, no AI analysis (CI runs with `AI_LLM_PROVIDER=none`) and no recommended action.
+> - **Gap**: Tasks 6.1–6.7 met their recorded acceptance criteria, but the phase objective is not delivered end to end:
+>   - `run_analysis` takes only the drift report (no Azure evidence input);
+>   - the report contract fixes `attribution` to `{actor: unknown, confirmed: false, pending: phase_7_activity_log}`;
+>   - the report has no WHEN (event time vs detection time);
+>   - remediation options are deliberately unranked (no recommended action);
+>   - without an LLM there is no investigation narrative.
+> - **Ownership**: Phase 9B (Tasks 9B.4–9B.6) owns the remaining work. The task records below are kept unchanged as history; amendment lines point to the superseding 9B task.
+> - **Closure**: Phase 6 returns to 🟢 when Task 9B.6 passes.
 
 #### Task 6.1 — LangGraph Infrastructure & LLM Configuration
 - **Status**: 🟢 COMPLETED
@@ -1689,6 +1700,7 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
 - **Started**: 2026-10-03
 - **Completed**: 2026-10-03
 - **Objective**: Implement LangGraph nodes `analyze_root_cause` and `assess_risk` to hypothesize drift origin based strictly on available evidence.
+- **Amendment (2026-10-04, requirement gap — see Phase 6 header)**: the constant `actor = "unknown"` / `confirmed = false` and the `confirmation_requires = "activity_log"` placeholder are superseded by Task 9B.4. There, deterministic investigation evidence (never the LLM) supplies the recorded operation, timing, caller type and channel; actor attribution is `confirmed` only where Phase 9B's correlation proves it. The record below is historical.
 - **Dependencies**: Task 6.4
 - **Files/Areas**: `src/ai_engine/nodes/root_cause.py`; plus (approved design) `src/ai_engine/nodes/analyze_drift.py`, `src/ai_engine/evidence.py`, `src/ai_engine/nodes/common.py`, `src/ai_engine/graph.py`, `tests/fixtures/root_cause_plans/`, tests
 - **Acceptance Criteria**:
@@ -1719,6 +1731,7 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
 - **Started**: 2026-10-03
 - **Completed**: 2026-10-03
 - **Objective**: Implement LangGraph nodes `recommend_remediation` and `generate_report` to synthesize full Markdown AI analysis report.
+- **Amendment (2026-10-04, requirement gap — see Phase 6 header)**: "options are never ranked or recommended" and the report contract v1 (constant `attribution.pending = "phase_7_activity_log"`, Root Cause "unconfirmed until Phase 7") are superseded by Task 9B.4 (report v2 and the deterministic recommendation policy v1). The record below is historical.
 - **Dependencies**: Task 6.5
 - **Files/Areas**: `src/ai_engine/nodes/report_generator.py`; plus (approved design) `src/ai_engine/nodes/remediation.py`, `src/ai_engine/graph.py`, `tests/fixtures/report_plans/`, tests
 - **Acceptance Criteria**:
@@ -1784,15 +1797,33 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
 ---
 
 ### PHASE 7 — Azure Activity Log Investigation
-**Status**: 🟢 COMPLETED
+**Status**: 🟡 WORK IN PROGRESS — reopened 2026-10-04 (requirement gap; the remaining work is owned by Phase 9B)
 
 Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azure control plane events (caller identity, timestamp, operation name).
+
+> **Requirement-gap amendment (2026-10-04, user decision):**
+> - **Evidence**: the same real Azure test as Phase 6 (drift run `37197574080`). No Activity Log evidence was collected and nothing reached the report.
+> - **Gap**: Tasks 7.1–7.3 met their recorded acceptance criteria, but the phase objective (caller identity, timestamp and operation name for detected drift) is delivered neither in CI nor for update drift:
+>   - collection is local-only and not in any workflow;
+>   - normalization discards every claim, so caller type and client application are lost;
+>   - correlation considers only exact-resource `<type>/write|delete`, but the verified tag operation is `Microsoft.Resources/tags/write` (Phase 9B, verified event shape), so it lands in `related`;
+>   - rule R0 stops all update drift with no evidence;
+>   - the ±5-minute skew and the 20 + 5-minute settling rule misclassify the verified timing (operation 1 min 41 s before plan evidence started; event available after 49–112 s);
+>   - Anchor B (last in-sync observation, blocker B1) has no producer;
+>   - no restricted path exists for the recorded caller.
+> - **Ownership**: Phase 9B (Tasks 9B.1–9B.3, 9B.5, 9B.6) owns the remaining work. The task records below are kept unchanged as history; amendment lines point to the superseding 9B task.
+> - **Closure**: Phase 7 returns to 🟢 when Task 9B.6 passes.
 
 #### Task 7.1 — Azure Activity Log API Integration
 - **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-03
 - **Completed**: 2026-10-03
 - **Objective**: Implement Python module using `azure-mgmt-log` / Azure REST API to query activity logs for target resource IDs within drift timeframe. *(Design review 2026-10-03: `azure-mgmt-log` does not exist — the SDK is `azure-mgmt-monitor` + `azure-identity`. Terraform records no drift start time, so "drift timeframe" is a lookback window of N days ending at the query time; correlation with the drift is Task 7.2.)*
+- **Amendment (2026-10-04, requirement gap — see Phase 7 header)**: superseded in part by Task 9B.1:
+  - evidence v2 adds claims-derived `caller_type`, `client_app` and `pipeline_identity`, plus the event phase and the `extension` relation;
+  - the run-level `window_start` (G9) and `not_before`/`queried_at` (G8) are added; the 20-minute `settled_until` stays as a legacy field until Task 9B.2 replaces its use;
+  - CI collection moves to Task 9B.5.
+  Limitation (a)'s open check "which operation name a tag edit uses" is answered by the verified event shape recorded in Phase 9B. The record below is historical.
 - **Dependencies**: Task 6.6
 - **Files/Areas**: `src/drift_engine/activity_logs.py`; plus (approved design) `src/drift_engine/cli.py` (`activity-logs` subcommand), `src/drift_engine/__init__.py` (package rule), `pyproject.toml` / `requirements.txt` (`[azure]` extra), `tests/test_activity_logs.py`
 - **Acceptance Criteria**:
@@ -1820,6 +1851,13 @@ Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azur
 - **Started**: 2026-10-03
 - **Completed**: 2026-10-03
 - **Objective**: Deterministically correlate drifted resources with exact-resource write/delete operation groups in the Task 7.1 Activity Log evidence, and record the caller Azure logged only where the approved correlation rules establish it. *(Reworded 2026-10-03 per the approved Task 7.2 design and the read-only Azure verification: Activity Log events carry no property diffs, so drift **attributes** cannot be correlated; only external deletions can be confirmed.)*
+- **Amendment (2026-10-04, requirement gap — see Phase 7 header)**: superseded in part by Task 9B.2:
+  - correlation v2 (capable operations, five verdicts, property link) replaces R0's blanket `update_not_attributable` for presentation;
+  - `external_deletion_v1` stays the only rule that can confirm (rules version 2): re-parameterized to Phase 9B's timing (G7/G8), blocked by unreadable target-scope events, R7 kept at ±5 min;
+  - blocker B1 (Anchor B producer) is resolved by Phase 9B's last-in-sync anchor (G9), accepted as existence anchor `prior_detection_run` (G5);
+  - `drift-engine attribute` and `drift_attribution.json` are retained and adapted (attribution version 2);
+  - B4 (caller exposure) is settled for investigation artifacts by Phase 9B's privacy profile (G11/G12).
+  The record below is historical.
 - **Dependencies**: Task 7.1
 - **Files/Areas**: `src/drift_engine/attribution.py` (new), `src/drift_engine/cli.py` (`attribute` subcommand), `src/drift_engine/__init__.py` (docstring), `tests/test_attribution.py` (new). *(Approved design: separate module and separate `drift_attribution.json`; `activity_logs.py`, the drift report schema and the AI layer unchanged.)*
 - **Acceptance Criteria** *(reworded per the approved design)*:
@@ -1845,6 +1883,7 @@ Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azur
 - **Started**: 2026-10-03
 - **Completed**: 2026-10-03
 - **Objective**: Implement fallback behavior when Activity Logs are disabled, expired, or lack relevant events.
+- **Amendment (2026-10-04, requirement gap — see Phase 7 header)**: the AI-boundary statement ("`ai_engine` never imports `activity_logs`/`attribution` … the AI report is identical with and without evidence/attribution files") is superseded by Tasks 9B.3/9B.4. `ai_engine` may read only the public investigation model (`drift_engine.investigation_public`), never raw evidence or the restricted investigation, and never imports `activity_logs`/`attribution`. Investigation reports use the Phase 9B requirement wording "not confirmed by available evidence" for every unconfirmed fact. `origin_statement` ("Change origin could not be confirmed") remains only for the Task 7.2 attribution document. The record below is historical.
 - **Dependencies**: Task 7.2
 - **Files/Areas**: `src/drift_engine/attribution.py` (fallback display mapping), tests. *(Corrected 2026-10-03 per the approved Task 7.3 design review: the Activity Log collector `activity_logs.py` is unchanged.)*
 - **Acceptance Criteria**:
@@ -1873,6 +1912,7 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 > **Phase 8 restructuring (approved 2026-10-03, Task 8.1 design review and final architectural review):**
 > - **Execution order: 8.1 → 8.3 → 8.2** (tasks keep their numbers; they are listed here in execution order and the dependency fields enforce it).
 > - **Public-repository profile** for every Phase 8 GitHub surface (issue titles/bodies, comments, PRs, labels, workflow logs, step summary): no Activity Log caller identity in any form (UPN, object ID, claim text, hash); no Phase 7 inputs (`activity_log_evidence.json`, `drift_attribution.json`) and no import of `drift_engine.activity_logs` / `drift_engine.attribution`; no LLM; `GITHUB_TOKEN` only, job-level permissions. **This resolves blocker B4 (Task 7.2).**
+> - **Phase 9B note (2026-10-04)**: this profile is unchanged for every Phase 8 surface. Phase 9B adds no investigation content, caller type, client application or Activity Log data to GitHub issues, comments or the issues job. Investigation data appears only in the separate investigation and AI artifacts, under the Phase 9B public profile (G11).
 > - **No AI analysis in Phase 8**: the deferred Task 6.6 AI CLI/workflow integration is owned by Phase 9A, not by Phase 8.
 
 #### Task 8.1 — Deterministic Drift Issue Creator
@@ -2690,6 +2730,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 - **Started**: 2026-10-04
 - **Completed**: 2026-10-04
 - **Objective**: Provide an `ai-analysis` CLI over `run_analysis` / `write_report`, and run it without an LLM in a separate CI workflow after every valid drift-detection run. It publishes the AI report as its own artifact for downstream consumers. The deterministic drift result is never changed.
+- **Amendment (2026-10-04, Phase 9B)**: D5's "No Activity Log data or caller identity: `ai_engine` never reads Phase 7 output" is superseded by Phase 9B's public investigation profile (G11), integrated in Task 9B.5. The caller identity, subscription/tenant/resource/event IDs, IPs and raw Activity Log content remain excluded from every public artifact. `AI_LLM_PROVIDER=none` in CI stays unchanged (G14). The record below is historical.
 - **Dependencies**: Task 6.6, Task 5.4 (Phase 6's evidence-vs-inference checks are also complete)
 - **Downstream consumers**: Task 10.3 (AI cost explanation), Task 13.1 (consumes real AI report artifacts).
 - **Locked decisions (2026-10-04)**:
@@ -2848,8 +2889,620 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 
 ---
 
+### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.3 complete; Task 9B.4 next)
+
+Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
+
+> **Product requirement (user, 2026-10-04)**: for each drifted resource the report answers:
+> 1. **WHAT**: resource; the property/attribute where deterministically knowable; expected and actual values; the relevant Azure operation(s).
+> 2. **WHEN**: Activity Log event time; detection time; the correlation window. Event time and detection time are always distinguished.
+> 3. **WHO**: the Activity Log caller identity and caller type where safely available. Confirmed evidence is separated from inference, and an actor is never invented.
+> 4. **WHY**: AI analysis in context: impact, risk, and whether the recorded operation is consistent with the detected drift. Inference is always labelled.
+> 5. **WHAT TO DO**: deterministic remediation options, a recommended action, human approval required, and never an autonomous destructive change.
+>
+> Any fact the evidence cannot prove is reported as **"not confirmed by available evidence"**. It is never omitted, guessed or invented.
+
+> **Verified Azure event shape (2026-10-04, read-only check by Claude, user-requested)**:
+> - **Method**: `az monitor activity-log list` on `aitdd-dev-main-rg` for 2026-10-03 to 2026-10-04, run in the user's logged-in CLI session. No write.
+> - **Raw output**: `.artifacts/task-activity-log-shape-check/raw_rg_events.json` (gitignored, 0600; it contains the caller UPN, IP address and claims, so it is never committed and only sanitized fixtures derive from it).
+> - **Operation**: a portal tag edit on the resource group is the operation `Microsoft.Resources/tags/write`, category `Administrative`, level `Informational`, HTTP `PATCH`, logged as two rows that share one `correlationId`:
+>   - `BeginRequest` / `Started` (no subStatus): `resourceId = <rg-id>/providers/Microsoft.Resources/tags/default`;
+>   - `EndRequest` / `Succeeded` (subStatus `OK`, `properties.statusCode`): `resourceId = <rg-id>` (the resource group itself).
+>   - `authorization.action = Microsoft.Resources/tags/write` on both rows, and `authorization.scope = <rg-id>/providers/Microsoft.Resources/tags/default`.
+>   - `operationId` equalled `correlationId` in two of three operations, so it is not relied on.
+> - **No property data**: `properties` holds only `entity`, `eventCategory`, `hierarchy`, `message` (plus `statusCode`). There is no request/response body, no tag name and no value. The Activity Log does not prove which property changed.
+> - **Caller**: `caller` equals the `upn` claim. `claims.idtyp = user`. `claims.appid` was the Azure Portal first-party application for the 2026-10-04 operation and the Azure CLI first-party application for two 2026-10-03 tag writes.
+> - **Ingestion delay**: `submissionTimestamp − eventTimestamp` was 49–112 s across 6 rows. Microsoft publishes no ingestion SLA.
+> - **Test-run timeline** (drift run `37197574080`, public job timings):
+>   - operation 11:04:56.09Z–11:04:58.19Z;
+>   - Generate Plan Evidence 11:06:39–11:06:57Z (manifest `started_at` = script start);
+>   - plan timestamp 11:06:49Z;
+>   - previous valid run `37178020110` (04:47:39–04:49:01Z): `has_drift: false`, all 5 resources `in_sync`.
+> - **Under the Phase 7 rules**:
+>   - not collected (no CI step);
+>   - grouped as `related` (not the resource-group lifecycle operation; the Started row is a descendant);
+>   - R0 `update_not_attributable`;
+>   - P5 `evidence_not_settled` if collected in-job;
+>   - "during detection" under the ±5-minute skew.
+
+#### Phase 9B locked decisions (user-approved 2026-10-04)
+
+- **G1 — Ownership and status**: Phase 9B owns the requirement end to end. Phase 6 and Phase 7 are 🟡 with requirement-gap amendments; their completed task records stay unchanged as history. Phase 10 is 🔴 BLOCKED (on hold) until Phase 9B is completed and verified. Tasks run strictly one at a time: 9B.1 → 9B.2 → 9B.3 → 9B.4 → 9B.5 → 9B.6. Each task starts with a design review that refines details inside these locked rules; changing a G-decision needs user approval.
+- **G2 — Sources of truth**:
+  - **Terraform** (the drift report) owns resource, attribute path, expected value and actual value.
+  - **The Azure Activity Log** owns the recorded operation, its timestamps and status, the recorded caller and the event context.
+  - **The correlation layer** (deterministic code) decides how strongly the two relate.
+  - **The AI** only interprets this evidence.
+  - No design relies on the Activity Log carrying property values.
+- **G3 — Three separate claims, never merged**:
+  1. **Recorded operation**: evidence, "Azure recorded operation O on this resource at T, status S, caller type C, channel A".
+  2. **Relationship to the drift**: verdict (G4) plus property link (G5).
+  3. **Actor attribution**: `confirmed` only when the property link is `confirmed`; otherwise "not confirmed by available evidence".
+
+  A recorded caller is never presented as the author of the drift unless claim 3 is confirmed.
+
+  **Meaning of the verdicts (amended 2026-10-04, Task 9B.2 design review)**: `sole_capable_operation` / `latest_capable_operation` mean only that the operation *can explain every relevant drifted property area* (G6) under the timing and completeness rules. They never mean that the exact Terraform property or value was proven. Update drift can never become property-confirmed; only the deletion path (G5) can produce `property_link = confirmed`.
+- **G4 — Correlation verdicts (exactly five, per drifted resource)** *(amended 2026-10-04, Task 9B.2 design review, user-approved issues 1, 2, 4)*:
+  - **Inputs**: Administrative operation groups only (G6), classified by timing (G7), and the resource's *relevant property areas* (G6). A **candidate** is a successful (or unresolved) group of a capable or unclassified operation inside the resource's window (G9) or `during_observation`.
+  - `sole_capable_operation`: all of the following hold:
+    - a last-in-sync anchor exists (G9);
+    - exactly one successful capable group is `before_observation` within [anchor window start, observation start], and it is capable for **every** relevant property area;
+    - there is no other candidate in that window, and no candidate `during_observation`;
+    - there is no automated-activity signal, no unresolved group and no unreadable event in the target's scope (below).
+  - `latest_capable_operation`: no anchor, and all of the following hold:
+    - the most recent successful candidate `before_observation` in the lookback window is a capable group that explains **every** relevant property area (the earlier ones are counted);
+    - there is no candidate `during_observation`;
+    - there is no automated-activity signal, no unresolved group and no unreadable event in the target's scope.
+  - `ambiguous`: anything that prevents the two verdicts above while some candidate or signal exists. One fixed reason code says which:
+    - `multiple_capable_operations`, `partial_capability` (no single capable group explains every relevant area);
+    - `unclassified_operation`, `during_observation`, `unresolved_operation`, `automated_activity`;
+    - `unreadable_events_in_scope` (a verdict that would otherwise be `sole` or `latest`).
+  - `no_capable_operation_found`: the investigation completed and found no candidate and no signal in the window. It is always qualified by completeness (G8) and never phrased as "no change happened". It is not allowed when the target's scope has unreadable events: that case is `not_investigated`.
+  - `not_investigated`: no usable evidence for the resource, with a fixed reason code: collection failed or incomplete for its scope, no or invalid or unsupported resource ID, evidence binding failure, failed evidence, unknown detection time, the artifact missing (Task 9B.4), or `unreadable_events_in_scope` instead of `no_capable_operation_found`.
+  - **Window membership and ordering (user-approved 2026-10-04, rule details 1 and 3)**:
+    - A group is in a resource's window when its **end** is at or after the window start. Groups that straddle the start are included, which only adds candidates.
+    - `latest_capable_operation` needs a well-defined latest group. If any other successful candidate overlaps the latest one in time (its end is at or after the latest's start), the verdict is `ambiguous`: `multiple_capable_operations` when that other group is capable, else `unclassified_operation`.
+  - **Unreadable events in the target's scope**: the collector dropped events of the target's (subscription, resource group) scope for `malformed_event`, `invalid_event_data_id`, `invalid_timestamp`, `invalid_resource_id`, `invalid_operation_name` or `conflicting_duplicate`. Such events could belong to the target and cannot be read, so these verdicts are conservative. Other drop reasons (`excluded_category`, `out_of_scope`, `timestamp_outside_window`, `duplicate`) do not count.
+- **G5 — Property link** *(amended 2026-10-04, Task 9B.2 design review, user-approved issues 6, 7)*:
+  - `inferred_not_provable` whenever at least one successful capable group exists for the resource in its window, whatever the verdict (the Activity Log carries no property values).
+  - `confirmed` only where deterministic evidence proves it: only for a **deletion** (`drift_action = delete`), and only through the deletion rule `external_deletion_v1` under rules version 2. The rule id is unchanged; Task 7.2's rule is re-parameterized:
+    - the detection skew becomes 60 s (G7);
+    - "settled" becomes `queried_at ≥ run.finished_at + M` (G8);
+    - a deletion cannot be confirmed when the target's scope has unreadable events (G4);
+    - **existence anchor** may be A (`write_event`, as before) or B (`prior_detection_run`: the trusted last-in-sync anchor of G9 for that address, proving the resource existed at the anchor's observation);
+    - every other safeguard (R1–R7) is unchanged, including R7's **±5-minute** automated-activity overlap window around the candidate delete, which stays independent of the 60 s observation skew.
+  - `none` when there is no successful capable group (`no_capable_operation_found`, `not_investigated`, or an `ambiguous` verdict with no capable group).
+  - **Invariant**: update, create and replace drift is never `confirmed`.
+  - **Invariant (Option A, user decision 2026-10-04)**: `property_link = confirmed` requires **both**:
+    1. the deletion rule `external_deletion_v1` (rules version 2) confirms; and
+    2. the G4 verdict is `sole_capable_operation` or `latest_capable_operation`.
+
+    An `ambiguous` (or any other) verdict never coexists with a confirmed property link or confirmed actor attribution. A deletion the rule confirms under another verdict stays `inferred_not_provable`, with reason `verdict_not_decisive`.
+  - **Existence-anchor ordering (user-approved 2026-10-04, rule detail 2)**:
+    - When both A (latest successful exact-resource write) and B (`prior_detection_run`) exist, the **later** existence proof is used: A's time is its latest Succeeded row; B's time is the anchor run's `run.finished_at`.
+    - With B, the candidate delete must start after B's `run.finished_at + 60 s`. Any lifecycle group overlapping B's observation window [`run.started_at − 60 s`, `run.finished_at + 60 s`] gives `order_ambiguous`.
+    - The R4 "exactly one successful delete after the anchor" and every other R1–R7 check apply unchanged.
+
+  Actor attribution (G3 claim 3) is `confirmed` only with `confirmed` property link.
+- **G6 — Capable-operations model (versioned table, v1 = verified operations only)**:
+  - **Verified extension types** (amended 2026-10-04, Task 9B.1 design review): an event is an `extension` of a target only when its resource ID is `<id>` followed by an allowlisted extension suffix. v1 allows exactly one: `/providers/Microsoft.Resources/tags/default` (verified). Everything else below a target is `descendant`.
+    - **Why an allowlist**: a resource group's contained resources (e.g. `…/resourceGroups/rg/providers/Microsoft.Resources/deployments/x`) have the same path shape as extension resources. A namespace rule such as `<id>/providers/Microsoft.Resources/*` would misclassify them and make every resource-group verdict `ambiguous`.
+    - A new extension type needs a recorded real-Azure shape check, like a new table entry.
+  - **Categories (amended 2026-10-04, Task 9B.2 design review, issue 4)**: only `Administrative` operation groups can be capable or unclassified.
+    - A `Policy` or `Autoscale` event on `<id>` or a verified extension with the same `correlationId` as an Administrative candidate group is attached to that group (no effect).
+    - Any other such event in the resource's window or `during_observation` is an **automated-activity signal**: `ambiguous` (`automated_activity`).
+  - **Relevant property areas (amended 2026-10-04, Task 9B.2 design review, issue 2)**:
+    - update drift: the areas of its drifted paths (`attribute_changes` of class `drifted`, `drifted_converged` or `drifted_and_config_changed` whose assessment is not `noise`). Area `tags` when the first path element is `tags`, else `other`. With no such path, the area is `other`.
+    - deletion drift: `existence_delete`. Create drift: `existence_create`. Replace drift: both.
+    - A group is capable for an area per the table below. `sole` / `latest` need one group capable for **every** relevant area.
+    - A known table operation that is capable only for areas that did not drift (e.g. a tags write when only `other` drifted) is listed and has no effect.
+  - **Tags family** (drifted path starts with `tags`): the operation `Microsoft.Resources/tags/write`. Its rows may sit on `<id>` (`exact`) or `<id>/providers/Microsoft.Resources/tags/default` (`extension`) and are grouped by `correlationId` (the verified shape).
+  - **Any attribute family** (areas `tags`, `other`, `existence_create`): the resource's own lifecycle write `<namespace>/<type>/write` on exactly `<id>` (as Task 7.2).
+  - **Deletion** (area `existence_delete`): `<namespace>/<type>/delete` on exactly `<id>`.
+  - **Group key**: (`correlationId`, case-folded operation name) over the target's `exact` and `extension` rows; an event without a correlationId is a group of its own.
+  - **Unclassified**: any other successful or unresolved Administrative write/delete/action group on exactly `<id>` or on one of its verified extensions (`extension` relation). It is listed, and in the window it makes the verdict `ambiguous`.
+  - **Never decide**: operations on other resources (for a resource-group target, the resources it contains), on ARM child resources or on unverified extension types (all `descendant`). They are counted and named by operation only. The statement mentions recorded child operations when they exist.
+  - **Table growth**: a new entry needs a recorded real-Azure shape check. Unverified shapes may be fixture-tested but stay out of the table.
+- **G7 — Timing model**:
+  - **Observation window** = [`run.started_at`, `run.finished_at`] of the detection run's plan evidence (Terraform's refresh happens inside it). Skew = **60 s**.
+  - **Operation group interval** = [first row, last Succeeded row] (or last row when nothing succeeded).
+  - **Classification**: `before_observation` if the group ends before `started_at − 60 s`; `after_observation` if it starts after `finished_at + 60 s`; otherwise `during_observation`.
+  - **Reported separately**: operation start and end (event time), availability (`submissionTimestamp`), observation window, plan timestamp, and the last-in-sync observation (detection times).
+- **G8 — Settling, redesigned**:
+  - A recorded positive finding needs no settling.
+  - Completeness matters only for `sole_capable_operation`, `no_capable_operation_found` and the deletion rule.
+  - The first query runs no earlier than observation **end** (`run.finished_at`) + **M = 10 min** *(amended 2026-10-04, Task 9B.2 design review, issue 3: measured from the end, so every `during_observation` event has at least M to be ingested)*.
+  - If any queried drifted resource has no capable operation, re-query every **2 min** until `run.finished_at` + **C = 20 min**.
+  - Recorded completeness: `queried_at`, M, C, the poll count and the maximum observed `submissionTimestamp − eventTimestamp`.
+  - **Ownership (amended 2026-10-04, Task 9B.1 design review)**:
+    - Each poll is one collection. The collector (Task 9B.1) never sleeps or polls. It records `queried_at`, `not_before` and the maximum observed ingestion delay of that collection, and refuses a query whose `queried_at` is before `not_before` (input failure `query_before_not_before`).
+    - Waiting, the poll loop, the poll count and the investigation's completeness record belong to Task 9B.2, which decides after each collection whether a drifted resource still lacks a capable operation.
+  - Completeness-dependent statements say "among events available at `<queried_at>`".
+  - The deletion rule's "settled" check is `queried_at ≥ run.finished_at + M` (G5).
+  - These values replace Task 7.1's 20-minute `settled_until` margin and Task 7.2's ±5-minute detection skew / P5 rule (not R7's ±5-minute overlap window, G5). M, C and the skew were accepted as recommended (2026-10-04); changing them needs user approval.
+- **G9 — Last-in-sync anchor (resolves Task 7.2 blocker B1)**:
+  - **Definition**: the latest earlier valid drift report of the same workflow and environment, within artifact retention (≤ 30 days, ≤ 50 runs examined), in which the address was `in_sync`.
+  - **Trust checks**:
+    - the run belongs to this repository's `drift-detection.yml`, on head branch `main`, with event `schedule` or `workflow_dispatch`;
+    - the report validates as `DriftReport` with `outcome: succeeded`;
+    - `run.run_id` is bound to that run id and attempt;
+    - the environment is equal;
+    - its `run.finished_at` is before this run's `run.started_at`.
+    - **Added (2026-10-04, Task 9B.2 design review, issue 5)**:
+      - its workflow run id differs from the current run's, which excludes every attempt of the current run;
+      - its repository equals the current repository;
+      - its plan timestamp is earlier than the current plan timestamp;
+      - at most **50** candidates are examined (any beyond are rejected as `candidate_limit`);
+      - every rejected candidate is recorded with a fixed reason code.
+
+      These checks can only make the anchor older, which only adds candidates; they never make `sole` more likely.
+    - **Candidate input (user-approved 2026-10-04, rule detail 6)**: a directory (written by Task 9B.5's fetch script) whose candidates are the immediate subdirectories containing a `run.json`.
+      - `run.json` is a strict object `{id, run_attempt, repository, workflow_path, head_branch, event}`. The candidate's `drift_report.json` sits beside it.
+      - Any other entry (a file, or a subdirectory without `run.json`) is not a candidate: it is recorded as `not_a_candidate`, does not count toward the limit and is never read as a report.
+      - Candidates are examined in ascending directory-name order (deterministic). The first 50 are examined; the rest are rejected as `candidate_limit`.
+  - **Deletion anchor (amended 2026-10-04, issue 6)**: for a deletion, the same anchor is accepted as existence anchor B (`prior_detection_run`, G5).
+  - **Window**: from anchor `run.started_at − 60 s` (conservative: it can only add candidates) to the observation start.
+  - **No anchor**: lookback window (default 30 days, max 89); `sole_capable_operation` is then impossible.
+  - **Per-resource anchors, run-level query window (amended 2026-10-04, Task 9B.1 design review)**:
+    - The anchor is chosen **per drifted address**, while the Activity Log is queried once per resource group for the whole run.
+    - Task 9B.2 therefore computes one run-level `window_start` = the earliest of every drifted address's window start (its anchor start, or the lookback start for an address without an anchor), never earlier than `queried_at − 89 days`, and passes it to the collector.
+    - Task 9B.2 then narrows each address to its own anchor window from that one evidence document.
+- **G10 — CI placement and isolation (mirrors Task 10.1 D5)**:
+  - **Placement**: new steps in `plan-and-analyze` after `Upload Drift Report` and **before** the cost step (the cost step runs `az logout`). They run only for a valid drift result (`drift_detected` literal `true`/`false`).
+  - **Install**: `.[azure]` in a separate venv, exactly pinned through `ci/azure-constraints.txt`.
+  - **Status capture**: the step records its status and a fixed failure code as outputs and exits 0, the same documented exception as Task 10.1 D5.
+  - **Upload**: `drift-investigation-<run_id>` (public file only, 30 days) uses `continue-on-error: true` as a second documented exception. This amends Task 10.1 D5's "no other step may use `continue-on-error`".
+  - **Job settings for `plan-and-analyze`**: permissions `id-token: write`, `contents: read`, `actions: read` (anchor lookup); timeout 30 → 45 min.
+  - **New `investigation` check job**: `contents: read` only, no Azure, no secrets. It fails the run on any investigation failure, while `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are unaffected.
+  - **Logs and step summaries**: counts and fixed codes only.
+- **G11 — Public privacy profile** (every public artifact, workflow log, step summary and LLM input):
+  - **Never**: caller identity in any form (UPN, name, object ID, app ID, hash), subscription/tenant IDs, ARM resource IDs, event/correlation/operation IDs, IP addresses, claims, HTTP request data, raw Activity Log content or free text (`description`, `properties.*`).
+  - **Allowed**:
+    - Terraform address and type;
+    - operation name, status, category and event phase;
+    - relation (`exact` / `extension`) and resource scope kind;
+    - timestamps (event, availability, observation, anchor);
+    - caller type (G13), client application (G13) and `pipeline_identity` (G13);
+    - verdict, property link and attribution status with reason codes;
+    - completeness, and counts.
+  - Public operation references are ordinals (`op-<n>`).
+  - Raw evidence and the restricted investigation exist only on the runner (0600) and are never uploaded or printed. An allowlist plus a fail-closed leak scan (GUID, `@`, IPv4/IPv6, `/subscriptions/`, `/providers/` path, URL) guard every public file.
+  - **Public investigation schema (user-approved 2026-10-04, Task 9B.3 design review, decision C)**: strict and allowlist-based; any field not listed is dropped.
+    - **Top level**:
+      - `public_version`, `rules`, `outcome`, `failure`;
+      - `exposure` (`caller_identity`, `resource_id`, `event_id`, `correlation_id` all `withheld`; `who_path: local_only`);
+      - `binding` (run id, plan timestamp, drift report SHA-256, evidence outcome, observation window);
+      - `completeness`;
+      - `anchors` (examined count, accepted count, rejected **counts by reason only**).
+    - **Per resource**: address, drift action, relevant areas; window (kind, start; for an anchor its GitHub run id, plan timestamp, started/finished and report SHA-256); verdict, reason, `decisive_operation`, property link and reason, `unreadable_events_in_scope`, descendant counts and operation names.
+    - **Per operation**: `op_id`, operation name, outcome, relations, start, end, `available_at`, timing, `in_window`, role, capable areas, `caller_status`, `caller_type`, `client_app`, `pipeline_identity`, the number of attached events.
+    - **Automated events**: ordinal `auto-<n>`, operation name, category, timestamp, timing, `in_window`, signal.
+    - **Deletion rule**: status, reason, rule, claim, anchor kind/time/run id; no caller, and counts instead of event-id lists.
+    - **Actor attribution**: status, rule, claim; no caller.
+    - **Never public**, even indirectly:
+      - `evidence_sha256` or any hash of the restricted evidence or investigation (they hash content that contains callers);
+      - correlation ids and event ids;
+      - anchor candidate directory names and per-candidate rejection detail.
+    - The anchor's GitHub run id and report SHA-256 are safe references: they derive from public drift artifacts.
+    - `op-<n>` / `auto-<n>` are per-resource ordinals in a deterministic order (start, end, then event ids as tie-break) and encode no identifier.
+  - **Restricted-data CLI hardening (user-approved 2026-10-04, decision D)**:
+    - In GitHub Actions (`GITHUB_ACTIONS=true`), `drift-engine activity-logs`, `attribute` and `investigate` refuse to write their restricted document to standard output (usage error, exit 2); `--output` is required there. Local use is unchanged.
+    - For these commands and `who`, an unexpected error prints only the exception type and a fixed message, never `str(exc)` (a validation error on restricted data can echo input values).
+- **G12 — Restricted WHO path: local-only**:
+  - **Command**: a maintainer runs `drift-engine who` locally (own `az login`, read-only). Its inputs are the downloaded public investigation file and a local `terraform show -json` / plan JSON that maps addresses to ARM IDs.
+  - **Matching**: it re-queries a narrow window (each public operation's start/end ± 1 s), re-normalizes, and requires exactly one operation group that matches operation name, timestamps, status, relation, caller type and client application. Then it prints the recorded caller and writes `who_evidence.local.json` (0600) under `.artifacts/`, never committed.
+  - **Limit**: Activity Log retention (90 days).
+  - **Details (user-approved 2026-10-04, Task 9B.3 design review, decisions A, E, D)**:
+    - **Collection**: `activity_logs.collect_window(source, targets, start, end)` is the local historic collection entry point, a plan-independent bounded window over the same scope query, normalization and safeguards. `collect_evidence()` is unchanged.
+    - **Matching**: exact equality of the group's start and end (microseconds), operation name, outcome, relations, caller type and client application. The ±1 s is only the query window.
+    - **Inputs**: the public file (contract and leak scan), optionally `--report` (must match its binding), and either `terraform show -json` state (`values`, child modules included) or plan JSON (`prior_state.values`) for address → ARM ID.
+    - **Errors**: fixed codes `no_match`, `multiple_matches`, `retention_exceeded`, `binding_failed`, `query_failed`; none prints a caller.
+      - `binding_failed` covers: the public file fails its contract or leak scan, `--report` does not match its binding, or an address has no ARM ID locally.
+    - **Output**: `--output-dir` is required (created 0700 if missing); exactly one file `who_evidence.local.json`, written 0600 and atomically, refusing a symlinked target. The recorded caller is printed to standard output.
+    - **Local only, enforced**: `who` refuses to run under `GITHUB_ACTIONS=true`.
+    - **Module**: the WHO logic lives in `src/drift_engine/who.py`.
+  - **Rejected**: an encrypted restricted artifact. Its weakness is public ciphertext of personal data protected by one long-lived maintainer key that can't be revoked for already-published artifacts; revisit only by user decision (Phase 12).
+- **G13 — Caller type, client application, pipeline identity** (derived on the runner; raw claims never stored):
+  - **`caller_type`**:
+    - `idtyp = user` → `user` (verified);
+    - `idtyp = app` → `service_principal`, or `managed_identity` when an `xms_mirid` claim exists (fixture-only, unverified);
+    - otherwise `unknown`.
+  - **`client_app`**: allowlist of verified first-party applications only, `azure_portal` and `azure_cli` (both verified 2026-10-03/04). Any other app ID → `other_application`; missing → `unknown`. A new entry needs recorded evidence. `azure_cli` also covers Terraform run locally with CLI authentication; the report says so.
+  - **`pipeline_identity`**: `true` / `false` when the event's principal can be compared on the runner with the running job's own principal (never written); otherwise `null`.
+- **G14 — AI boundary**:
+  - **Module boundary (user-approved 2026-10-04, decision F)**: `drift_engine.investigation_public` is the only investigation-related module `ai_engine` may import. An AST test forbids any `ai_engine` import of `investigation`, `who`, `activity_logs` or `attribution`; a subprocess test checks that importing `investigation_public` loads none of them.
+  - **LLM input**: only the sanitized deterministic investigation model (G11 fields plus the Terraform evidence already allowed); never raw Activity Log data, identities or IDs.
+  - **CI**: the LLM stays disabled (`AI_LLM_PROVIDER=none`, CLI refusal unchanged). Enabling a real LLM is a later, separate user decision and not part of Phase 9B.
+  - **Limits on the LLM**: it may explain consistency, impact and risk. It may not change a verdict, property link, attribution, recommendation, severity or option, and may not cite an operation or timestamp absent from the model.
+  - **Guards** reject actor naming, identity-like strings and claims stronger than the deterministic verdict (e.g. "X changed tags.owner", "this operation caused the drift").
+- **G15 — Deterministic fallback is mandatory**: without an LLM the report fully answers WHAT, WHEN, WHO (as far as G11 allows) and correlation, plus the recommendation, using fixed versioned statement templates. An LLM only adds labelled interpretation.
+- **G16 — AI report v2 and recommendation policy v1**: see the outline below. Report v2 replaces v1's constant `attribution.pending`. The policy replaces "options are never ranked or recommended" (Task 6.6) and adds a recommended option or an explicit "human decision required". Approval stays required and nothing executes.
+- **G17 — Unchanged**:
+  - Terraform configuration and RBAC (Reader covers Activity Log reads);
+  - the drift report contract and `drift-engine analyze`;
+  - `drift_detected`/`drift_status` semantics;
+  - GitHub issues (Phase 8 profile);
+  - `security-scan.yml`, `terraform-auth-test.yml`;
+  - remediation command catalogue and approval/execution constants;
+  - the no-autonomous-apply principle.
+
+#### Data flow (target)
+
+1. `plan-and-analyze` (OIDC, Reader): `plan.json` and the manifest → `drift-engine analyze` → upload `drift-report-<run_id>` (unchanged).
+2. `drift-engine investigate`, in the same job:
+   1. targets (address → ARM ID, drift action, drifted path families) from `plan.json`;
+   2. observation window from the manifest/report;
+   3. last-in-sync anchor from earlier drift reports (G9);
+   4. Activity Log query and normalization v2 with settle/poll (G8);
+   5. correlation v2 → restricted investigation (runner only);
+   6. public projection (`investigate --public-output`);
+   7. verification (projection ⊂ restricted ⊂ evidence) and leak scan, all before the public file is written.
+3. Upload `drift-investigation-<run_id>` (`drift_investigation.json`). Then the cost step (unchanged).
+4. `investigation` check job: `--check` and a counts-only summary.
+5. `ai-analysis.yml` (`workflow_run`, no Azure):
+   - downloads and binds the drift report and the investigation;
+   - runs AI engine v2: deterministic WHAT/WHEN/WHO/correlation, fallback narrative, recommendation policy, and LLM interpretation only when enabled (never in CI in Phase 9B);
+   - uploads `ai-analysis-report-<run_id>` (`ai_analysis_report.json` / `.md`, report v2).
+6. Maintainer, locally: `drift-engine who` gives the recorded identity, kept local only (G12).
+
+#### Report v2 outline (locked; field names finalised in Task 9B.4)
+
+- **`report_version: "2"`, `provenance`**: run id; drift report and investigation canonical SHA-256; versions (report, investigation, capable-operations table, statements, recommendation policy); LLM record (status, provider, `evidence_sent`).
+- **`investigation`**: status; window (anchor or lookback); completeness (G8); exposure (`caller_identity: withheld`, `resource_id: withheld`, `event_id: withheld`, `who_path: local_only`).
+- **`resources[]`**, per drifted resource:
+  - `what` (basis `terraform_evidence`): classification, severity, changes with path, expected, actual;
+  - `operations[]` (basis `activity_log_evidence`): `op-<n>`, operation name, status, relation, phase, start, end, availability, timing (G7), capable family or `unclassified`, caller type, client app, `pipeline_identity`, `caller_identity: withheld`;
+  - `when`: the decisive operation's start/end and availability, last-in-sync observation, observation window, plan timestamp, gap in seconds;
+  - `who`:
+    - `recorded_caller` {status `recorded` | `not_recorded` | `multiple_operations` | `not_investigated`, type, client app, `pipeline_identity`, identity `withheld`}. It describes the **decisive operation**, which exists only for `sole_capable_operation` / `latest_capable_operation` (or a confirmed deletion). `ambiguous` with several candidate operations is `multiple_operations`, and each operation's caller data stays in `operations[]` *(amended 2026-10-04, Task 9B.2 design review, issue 9)*;
+    - `actor_attribution` {status `confirmed` | `not_confirmed_by_available_evidence`, rule};
+  - `correlation`: verdict (G4), reason, property link (G5), counts (capable, unclassified, child, after-observation), fixed statement text;
+  - `analysis`: deterministic narrative (statement templates) plus optional AI interpretation labelled `inference`;
+  - `remediation`: options (unchanged catalogue) plus `recommendation` {option or `null`, decision `recommended` | `human_decision_required` | `no_options`, policy rule, rationale code, notes}, approval required, execution not allowed.
+- **Run-level**: the five Phase 6 analysis sections (inference); `limitations` (fixed, including "Activity Log records operations, not property values"; "caller identities are withheld in public reports; WHO is available locally via `drift-engine who`"; the `azure_cli` channel caveat; completeness caveats).
+- **Markdown order**: Summary → What changed → Recorded Azure operations → When → Who → Correlation → Analysis → Recommendation & options → Limitations → Provenance. Every unprovable fact renders as "not confirmed by available evidence".
+
+#### Recommendation policy v1 (deterministic, versioned; first matching rule wins)
+
+1. **R0**: no options → decision `no_options`.
+2. **R1**: any option is `human_decision_required` (ambiguous, `drift_and_config_change`, `undetermined`) → no recommended option; decision `human_decision_required`, rationale `ambiguous_intent`.
+3. **R2**: the plan-direction option is destructive or `data_not_restored` → no recommended option; `human_decision_required`, rationale `plan_direction_destructive`.
+4. **R3**: classification `converged_drift` → recommend `refresh_state_only`, rationale `record_converged_state`.
+5. **R4**: otherwise → recommend the plan-direction option, rationale `terraform_is_source_of_truth`. If `accept_remote_value` exists, add the fixed note: "If the recorded Azure change was intended, choose accept_remote_value instead and update the configuration."
+
+Investigation verdicts and caller data never change the recommendation in v1. Every recommendation keeps `approval.required = true`, `execution.allowed = false`, `automatic_apply = false`.
+
+#### Phase 9B end-to-end acceptance (verified in Task 9B.6)
+
+The user adds a tag to the Terraform-managed `aitdd-dev-main-rg` in the Azure Portal, with a valid in-sync drift report available within retention, then dispatches drift detection. The final public AI report v2 shows:
+- **WHAT**: `external_drift` on `tags.<key>`, expected absent, actual value.
+- **Operation**: `Microsoft.Resources/tags/write`, Succeeded, relation `exact`/`extension` pair under one group.
+- **WHEN**:
+  - operation start/end matching the Azure record to the second, with availability;
+  - last-in-sync observation;
+  - observation window and plan timestamp, labelled separately;
+  - timing `before_observation`.
+- **WHO**: `recorded_caller` type `user`, client `azure_portal`, `pipeline_identity: false`, identity withheld; actor attribution `not_confirmed_by_available_evidence`.
+- **Correlation**: `sole_capable_operation`, property link `inferred_not_provable`, completeness recorded.
+- **Analysis**: deterministic narrative (no LLM in CI).
+- **Recommendation**: `restore_declared` (R4) with the accept-remote note, approval required.
+
+In addition:
+- the drift result is unchanged by the investigation;
+- the public files pass the leak scan;
+- `drift-engine who` locally reproduces the identity Azure recorded.
+
+#### Task 9B.1 — Activity Log Evidence v2 & Collection Timing
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-04
+- **Completed**: 2026-10-04
+- **Objective**: Extend the Activity Log collector to evidence v2 with the investigation fields required by G7, G8, G11 and G13, using the verified event shape. Still collection only (no correlation).
+- **Dependencies**: Tasks 7.1–7.3 (implementation), Phase 9B locked decisions G1–G17
+- **Files/Areas**: `src/drift_engine/activity_logs.py`, `src/drift_engine/cli.py` (`activity-logs` options), `tests/test_activity_logs.py`, new `tests/fixtures/activity_log/` (sanitized fixtures derived from the verified shape: synthetic GUIDs, `user@example.invalid`, no real IPs; test inputs may use only documentation-range addresses `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and `2001:db8::/32` to prove IPs are dropped, and no IP ever appears in an output), `src/drift_engine/__init__.py` (docstring)
+- **Acceptance Criteria**:
+  - [x] **Evidence v2 fields**: `evidence_version: "2"` with per event:
+    - `event_phase` (`begin` / `end` / `unknown`, from `eventName`);
+    - `caller_type` (G13);
+    - `client_app` (G13, verified allowlist only);
+    - `pipeline_identity` (`true` / `false` / `null`, from an optional comparison principal supplied at collection time and never written);
+    - `submission_timestamp` kept.
+
+    Raw claims, `httpRequest`, `authorization`, `properties` and `description` are still never stored; `caller` is kept only in this restricted evidence.
+  - [x] **Relations**: `exact`, `extension` (verified extension types only, G6: v1 `<id>/providers/Microsoft.Resources/tags/default`), `descendant` (everything else below a target, including a resource group's contained resources such as `Microsoft.Resources/deployments`). The verified Started row (`…/tags/default`) is `extension` and the Succeeded row (`<rg-id>`) is `exact`, both on the resource-group target.
+  - [x] **Window and timing**:
+    - The collector accepts an optional run-level `window_start` (G9: the earliest per-resource anchor or lookback start, computed by Task 9B.2), else the lookback start. It also accepts an optional `not_before`.
+    - It records `basis` (`lookback` / `explicit`), `queried_at`, `not_before` and the maximum observed ingestion delay (`submissionTimestamp − eventTimestamp`).
+    - A collection whose `queried_at` is before `not_before` issues no query and fails with `query_before_not_before`. The collector never sleeps or polls; the poll loop, poll count and completeness record are Task 9B.2's (G8).
+    - **`settled_until` (end − 20 min) stays in evidence v2 as a legacy field.** Task 7.2's `attribution.py` (rule P5, binding window, verifier) still reads it. Task 9B.2 removes it when it re-parameterizes `external_deletion_v1` to G7/G8.
+  - [x] **Unchanged from Task 7.1**: security behaviour (read-only GET allowlist, `AzureCliCredential` only, limits, fixed error codes, deterministic rendering).
+- **Validation**:
+  - [x] Unit tests on sanitized real-shape fixtures: the Started/Succeeded pair, the shared correlation ID, extension and exact relations, `idtyp = user`, Portal and CLI app mapping, `other_application`, missing claims; plus synthetic `idtyp = app` with and without `xms_mirid` (marked unverified).
+  - [x] Tests that claims, IPs and request data never reach the output (property-based over all string fields), determinism, window and `not_before` edges, and every existing failure code.
+  - [x] Task 7.1 tests updated for v2. Optional, user-approved: a local read-only collection on `aitdd-dev-main-rg` reproduces the verified fields (Execution Rule 10). *(The optional live check was not run: it needs separate user approval. The fixture is derived from the 2026-10-04 real read-only query instead.)*
+- **Implementation Notes**:
+  - Starts with a design review (field names, the `pipeline_identity` comparison input, the poll interface used by Task 9B.2).
+  - **Design review (2026-10-04, user-approved fixes)**: the verified-extension allowlist (G6), the run-level `window_start` (G9), the legacy `settled_until`, the poll and completeness ownership moved to Task 9B.2 (G8), and documentation-range IPs in test inputs.
+    - `pipeline_identity` compares `claims.appid` with the pipeline client ID, read from the environment variable `DRIFT_ENGINE_PIPELINE_PRINCIPAL` and never written: `true` on equality (case-insensitive), `false` on a difference, `null` when either side is missing.
+    - Only the claims `idtyp`, `appid` and the presence of `xms_mirid` are read; no claim value is stored.
+- **Completion Notes**:
+  - **Files**:
+    - changed `src/drift_engine/activity_logs.py` (evidence v2), `src/drift_engine/cli.py` (`activity-logs --window-start/--not-before`, principal from `DRIFT_ENGINE_PIPELINE_PRINCIPAL`), `src/drift_engine/__init__.py` (docstring);
+    - new `tests/fixtures/activity_log/rg_tag_writes.json` + `README.md` (six sanitized real-shape records: the Portal pair and two CLI pairs);
+    - `tests/test_activity_logs.py` (v1 expectations updated, 35 new tests); `tests/test_attribution.py` (one fixture expectation: the evidence version string in the duplicate-key case).
+    - **Unchanged**: `attribution.py` and its rules, the drift report and schema, `ai_engine`, workflows, Terraform, dependencies.
+  - **Evidence v2**:
+    - `evidence_version: "2"`;
+    - per event `event_phase` (`begin`/`end`/`unknown` from eventName), `caller_type` (`user`/`service_principal`/`managed_identity`/`unknown`), `client_app` (`azure_portal`/`azure_cli`/`other_application`/`unknown`), `pipeline_identity` (`true`/`false`/`null`);
+    - new anomalies `claims_missing` (absent claims), `claims_rejected` (not an object), `submission_before_event`;
+    - only `idtyp`, `appid` and the *presence* of `xms_mirid` are read: the SDK adapter forwards just these (`xms_mirid` as `true`), no claim value is stored, and the caller stays in this restricted evidence only.
+  - **Relations**: `exact` / `extension` / `descendant` through `relation_to`, with `VERIFIED_EXTENSIONS = ("/providers/microsoft.resources/tags/default",)`. The verified Started row is `extension` and the Succeeded row `exact` on the resource-group target. `…/providers/Microsoft.Resources/deployments/*`, locks, `tags/other` and anything below a child resource stay `descendant`. The evidence checks recompute the relation.
+  - **Window and timing**:
+    - `Window` v2 has `basis` (`lookback`, or `explicit` from `window_start`: rounded down to the second, after end − 89 days and before the end; else `invalid_window_start`) and the legacy `settled_until` (end − 20 min, for Task 7.2 until Task 9B.2).
+    - New `collection` block: `queried_at` (µs), `not_before`, `max_ingestion_delay_ms` (whole ms, rounded down, over kept events whose submission time is not earlier) and `ingestion_delay_samples`. It is null exactly for input failures and cross-checked against the window end and the events.
+    - New input failures `invalid_window_start`, `invalid_not_before`, `invalid_pipeline_principal`, `query_before_not_before`; each fails before any query.
+    - The collector never sleeps or polls.
+  - **Behaviour change (intended)**: two copies of one eventDataId that differ only in derived claims are now conflicting duplicates (every copy dropped).
+  - **Tests** (session-scratchpad venv, Python 3.13.12, azure-mgmt-monitor 7.0.0, azure-identity 1.26.0, azure-core 1.41.0; no Azure, no credentials):
+    - `tests/test_activity_logs.py` **157 passed** (122 Task 7.1 + 35 new: real-shape pair, CLI vs Portal mapping, ingestion delay 111 774 ms, allowlist scan of every string field, determinism under shuffling/paging, identity derivation matrix incl. synthetic `idtyp = app` with/without `xms_mirid` (unverified), pipeline identity, event phase, relation matrix, explicit window bounds, `not_before` edges, contract tampering, CLI options and environment principal never written, SDK adapter over a fake transport with the real-shape records);
+    - full suite **1995 passed** (1757 subtests); `drift_engine` coverage **99.94%** (gate 85%; `activity_logs.py` 100%);
+    - **6/6 ad hoc mutants caught** (namespace-wide extension, unknown app mapped to the Portal, `not_before` ignored, all claims forwarded, unbounded `window_start`, `pipeline_identity` always true);
+    - `unittest discover` OK in the venv (the system Python without pytest fails to import the 14 pytest-only modules, unrelated and pre-existing);
+    - `./scripts/validate.sh` passed; gitleaks 8.30.1: no leaks in the changed files;
+    - a check against the local raw query output found no real identifier in any changed or new file. The only non-synthetic GUIDs in the fixture are the two public first-party app IDs.
+  - **Not done / limitations**:
+    - (a) the optional live read-only collection was not run (needs user approval);
+    - (b) `service_principal`, `managed_identity` and `pipeline_identity = true` are verified on synthetic claims only; no real service-principal write exists (the CI identity is Reader);
+    - (c) tag edits on non-resource-group resources are fixture-only (the `extension` rule is generic over the verified suffix);
+    - (d) `settled_until` stays until Task 9B.2.
+
+#### Task 9B.2 — Correlation v2 & Last-In-Sync Anchor
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-04
+- **Completed**: 2026-10-04
+- **Objective**: Deterministically relate Terraform drift to Activity Log evidence. This covers the capable-operations table, operation grouping, timing, anchor selection, verdicts, property link and actor attribution (G3–G9), and produces the restricted investigation document.
+- **Dependencies**: Task 9B.1
+- **Files/Areas**: new `src/drift_engine/investigation.py`; `src/drift_engine/attribution.py` (`external_deletion_v1` re-parameterized to G7/G8, rules version 2, reused by the investigation); `src/drift_engine/cli.py` (`investigate` subcommand: plan, manifest, drift report, anchor-candidates directory, comparison principal, lookback, M/C/skew from the locked defaults); new `tests/test_investigation.py`; `tests/test_attribution.py`, `tests/test_attribution_fallback.py` (updated)
+- **Acceptance Criteria**:
+  - [x] **Capable operations**: table v1 exactly as G6, versioned. Operation groups by (`correlationId`, operation) across `exact` and `extension` rows of the target. The verified tag pair forms one successful `tags` group. Only Administrative groups are capable or unclassified; Policy/Autoscale events are attached by correlationId or are automated-activity signals (G6).
+  - [x] **Property areas (G6)**: relevant areas from the drift report's non-noise drifted paths. `sole` / `latest` only for a group capable for every relevant area, else `partial_capability`.
+  - [x] **Unreadable events (G4)**: unreadable target-scope drops turn `sole` / `latest` into `ambiguous` and `none` into `not_investigated`, and block deletion confirmation.
+  - [x] **Timing (G7)**: `before_observation` / `during_observation` / `after_observation` against the manifest window with a 60 s skew. `after_observation` groups are listed but never candidates.
+  - [x] **Anchor (G9)**: selection over a supplied set of earlier reports plus run metadata, with every trust check, including the added ones (different run id, same repository, earlier plan timestamp, ≤ 50 candidates). A failed check excludes that report, recorded with a fixed code; no anchor → lookback.
+  - [x] **Verdicts and links**: exactly the five verdicts (G4) with fixed reason codes, the property link (G5) and actor attribution (G3). Update drift is never `confirmed` (model invariant).
+    - Deletion is `confirmed` only through `external_deletion_v1` (rules version 2), with existence anchor A (`write_event`) or B (`prior_detection_run`) and every R1–R7 safeguard, R7 at ±5 min.
+    - The decisive operation exists only for `sole` / `latest` (or a confirmed deletion).
+  - [x] **Settle/poll (G8)**: the first query at `run.finished_at` + M; re-query every 2 min up to `run.finished_at` + C while any queried drifted resource lacks a capable operation. This task owns the waiting, the poll loop, the poll count and the completeness record (each poll is one Task 9B.1 collection with `not_before`).
+  - [x] **Run-level window (G9)**: computes `window_start` from the per-resource anchors and passes it to the collector, then narrows each address to its own anchor window.
+  - [x] **Option A invariant (G5)**: `property_link = confirmed` (and confirmed actor attribution) only when the deletion rule confirms **and** the verdict is `sole` / `latest`; otherwise a rule-confirmed deletion is `inferred_not_provable` (`verdict_not_decisive`). It is enforced as a model invariant.
+  - [x] **Report binding**: `investigate --report` must equal the drift report recomputed from `--plan` + `--manifest` (same canonical SHA-256 as `ai_engine`'s `drift_report_sha256`, computed without importing `ai_engine`); a mismatch is an input failure and nothing is queried.
+  - [x] **No needless wait**: with no drift or no queryable target, there is no wait and no Azure query, and `not_before` is null.
+  - [x] **Legacy field removed**: evidence `settled_until` (retained by Task 9B.1) is removed, together with Task 7.2's P5 and binding-window use of it, when `external_deletion_v1` is re-parameterized.
+  - [x] **`drift-engine attribute` retained and adapted**: `drift_attribution.json` moves to attribution version 2 / rules version 2 (the G5 timing, the unreadable-events block, anchor A or B). A `prior_detection_run` anchor needs the anchor input, which only the investigation supplies, so `attribute` alone keeps anchor A only. `origin_statement` (Task 7.3) is unchanged.
+  - [x] **Restricted output**: `drift_investigation.restricted.json`, a strict frozen model, byte-identical for identical inputs, 0600. It is bound to the drift report (run id, plan timestamp, canonical SHA-256) and the evidence SHA-256. `verify_against_evidence` independently re-checks every operation id, group, time and caller.
+- **Validation**:
+  - [x] Scenario matrix, real-shape fixtures:
+    - the tag pair before observation with an anchor → `sole_capable_operation`;
+    - the same without an anchor → `latest_capable_operation`;
+    - two tag writes → `ambiguous`;
+    - a tag write during observation → `ambiguous`;
+    - an unclassified operation on the resource → `ambiguous`;
+    - other resources in the resource group → no effect, counted;
+    - an after-observation operation → listed only;
+    - failed or unresolved groups;
+    - none → `no_capable_operation_found`;
+    - collection failure / no ID / binding failure → `not_investigated`;
+    - deletion confirmed / unknown.
+  - [x] Skew and M/C boundaries ±1 s. Anchor trust-check failures (branch, event, workflow, repository, same run id or attempt, run binding, environment, `finished_at` and plan-timestamp ordering, candidate limit, invalid report, address not `in_sync`).
+  - [x] Property-area matrix (tags only, other only, tags + other with a tags write only → `partial_capability`, a lifecycle write explaining both), unreadable-event cases for every verdict, and Policy/Autoscale attached vs separate.
+  - [x] Overlapping candidates under `latest`; straddling window membership; anchor A vs B ordering and B-overlap `order_ambiguous`; a rule-confirmed deletion under an `ambiguous` verdict stays unconfirmed; candidate-directory handling (`not_a_candidate`, ordering, limit).
+  - [x] Determinism under shuffling and paging. Safeguard mutants are all caught: a verdict upgrade, a dropped ambiguity rule, an ignored skew, an anchor trust check removed, update drift confirmed, the unreadable-event rule removed, `partial_capability` ignored, Policy events counted as capable, settling from `started_at`, R7 tied to the 60 s skew, and Option A removed (confirmation under a non-decisive verdict).
+  - [x] Task 7.2/7.3 suites updated and passing.
+- **Implementation Notes**:
+  - Starts with a design review (reason codes, statement template ids, the anchor-candidate input format shared with Task 9B.5).
+- **Completion Notes**:
+  - **Files**:
+    - new `src/drift_engine/investigation.py`, `tests/test_investigation.py`;
+    - changed `src/drift_engine/attribution.py` (rules / attribution version 2), `src/drift_engine/activity_logs.py` (legacy `settled_until` and `INGESTION_LAG` removed), `src/drift_engine/cli.py` (`investigate` subcommand), `src/drift_engine/__init__.py` (docstring);
+    - tests updated: `tests/test_attribution.py` (v2 timeline T_start 09:59 / T_end 10:06 / settled from 10:15, constants, mutant sources, new scenarios), `tests/test_attribution_fallback.py` (new reason `unreadable_events_in_scope`, settled boundary), `tests/test_activity_logs.py` (window without `settled_until`).
+    - **Unchanged**: the drift report and schema, `ai_engine`, workflows, Terraform, dependencies; `origin_statement` (Task 7.3).
+    - The evidence version stays `"2"`: the legacy field was part of the v2 transition planned in 9B.1, and no v2 document exists outside tests.
+  - **Investigation** (`investigate()`):
+    - **Inputs and anchors**: verifies `--report` against the canonical hash of the report `analyze` writes for the plan and manifest, then selects trusted anchor runs (all G9 checks; codes `metadata_invalid`, `wrong_repository`, `wrong_workflow`, `wrong_branch`, `wrong_event`, `same_run`, `report_invalid`, `report_failed`, `run_binding_mismatch`, `environment_mismatch`, `observation_unknown`, `not_earlier`, `plan_not_earlier`, `outside_retention` (an anchor older than 88 days could not fit the collector's 89-day window), `not_a_candidate` (files, directories without `run.json`, symlinks), `candidate_limit`).
+    - **Settling**: waits until `finished_at + 10 min` only when a drifted target is queryable. No drift or no usable ID means no wait and no query. Unknown detection time means no query at all.
+    - **Polling**: collects with the run-level `window_start` (earliest per-address anchor start, else the lookback), correlates, and re-collects every 2 min up to `finished_at + 20 min` while a queried resource has no capable operation.
+    - **Output**: the restricted document (`trust: restricted`) with binding, completeness (`not_before`, `queried_at`, `polls`, `settled`, max ingestion delay), anchor candidates and per-resource results.
+  - **Correlation**: table v1, property areas, Administrative-only grouping by (correlationId, operation) over exact + extension rows, Policy/Autoscale attachment by correlationId or automated signal, timing (60 s skew), window membership by group end, the G4 verdict order, Option A, deletion via `attribution.decide` with anchor B.
+    - **Model invariants** enforce the rules (e.g. only a deletion can be property-confirmed, a confirmed link needs a `sole` / `latest` verdict and a confirmed rule on the same operation, the decisive operation explains every area, unreadable scopes allow no `sole` / `latest` / `none`).
+    - `verify_against_evidence` independently re-checks every operation's rows (existence, relation, category, group key, start/end, outcome, caller, timing, capability per a restated table), attached and automated events and confirmed-deletion rows. The CLI writes nothing (exit 70) if it reports a problem.
+  - **Rules version 2** (`attribution.py`): skew 60 s, settled = `queried_at >= finished_at + 10 min`, P6 `unreadable_events_in_scope`, existence anchor B (`prior_detection_run`; the later proof wins; lifecycle overlap with B's observation ±60 s → `order_ambiguous`; deletes must start after B's `finished_at + 60 s`), R7 at ±5 min, binding `{skew_seconds: 60, settle_margin_minutes: 10, automated_overlap_minutes: 5, window: {start, end, queried_at}}`. `drift-engine attribute` has no anchor input, so it uses anchor A only.
+  - **Real-shape result**: with the sanitized fixture of the 2026-10-04 portal tag edit and an in-sync anchor run, the investigation gives:
+    - `sole_capable_operation` with decisive `Microsoft.Resources/tags/write` (exact + extension, Succeeded, `before_observation`, caller type `user`, client `azure_portal`);
+    - `property_link: inferred_not_provable`, actor `not_confirmed`;
+    - a 592 s wait to `finished_at + 10 min`, one poll.
+
+    Without the anchor: `latest_capable_operation` over two CLI writes and the portal write.
+  - **Tests** (session-scratchpad venv, Python 3.13.12, azure-mgmt-monitor 7.0.0; no Azure, credentials or real clock):
+    - `tests/test_investigation.py` **81 passed** (111 subtests), covering:
+      - real shape;
+      - the verdict matrix (sole, latest, multiple, during, unclassified, children and resource-group contents counted only, after-observation, failed, unresolved, none, irrelevant);
+      - property areas incl. `partial_capability`;
+      - unreadable events for every verdict, each drop reason and the deletion block;
+      - Policy/Autoscale attached vs signal, never capable, outside window / after observation;
+      - skew ±1 s, window membership (straddling, exact edge, run-level vs per-resource window);
+      - overlapping `latest`; settling from `finished_at` incl. a long observation; polling to a hit and to the cap ±1 s; not settled; no needless wait; unknown detection time;
+      - not-investigated paths;
+      - deletion: anchor A under `latest`, anchor B under `sole`, later-anchor choice, B overlap, Option A with an unclassified operation and with a distant Policy event, R7 independent of the skew, update drift never confirmed;
+      - every anchor trust check and the current report never usable as an anchor; candidate-directory handling (non-candidates, ordering, limit 50);
+      - report binding (tampered / invalid / other plan / failed run / canonical hash equal to `ai_engine`'s);
+      - contract invariants and tampering; the verifier; determinism under shuffling and paging; the CLI (0600 outputs, counts-only stdout, exit codes 0/1/2/70/73, principal never written).
+    - **Safeguard mutants 18/18 caught** in the default suite: verdict upgrade, unclassified / during / unresolved / automated / overlap rules dropped, skew ignored, three anchor trust checks and the candidate limit removed, update drift confirmed, unreadable rule removed, `partial_capability` ignored, Policy counted as capable, settling from `started_at`, Option A removed, window membership by start.
+    - **Task 7.2 suite**: three new attribution mutants (settling from start, R7 tied to the skew, unreadable ignored) plus a re-timed boundary scenario, all caught.
+    - **Full suite 2076 passed** (1852+ subtests); `drift_engine` coverage **99.61%** (`activity_logs.py` and `attribution.py` 100%, `investigation.py` 99%); `unittest discover` OK; `./scripts/validate.sh` passed; gitleaks: no leaks in changed files; no real identifier from the local raw query in any change.
+  - **Not done / limitations**:
+    - (a) `drift_attribution.json` (local `attribute` tool) has no G4 verdict, so Option A is not applied there: it can still confirm a deletion that the investigation marks `ambiguous` (e.g. an unclassified operation after the delete). The investigation (used in CI from Task 9B.5) is the authoritative result.
+    - (b) Policy/Autoscale, service-principal and managed-identity shapes are fixture-only (unverified in real Azure).
+    - (c) Operations before the run-level window are not collected at all (they are counted as `timestamp_outside_window` drops), so out-of-window operations appear only for addresses whose own window is narrower than the run-level one.
+    - (d) Two defensive branches (`decisive_operation_mismatch`, a recomputed report failing its contract) are not reachable with valid inputs and stay untested.
+    - (e) Anchor candidates are supplied as a directory; fetching them from GitHub is Task 9B.5; no real Azure run (Task 9B.6).
+
+#### Task 9B.3 — Public Investigation Projection, Privacy Profile & Local WHO Path
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-04
+- **Completed**: 2026-10-04
+- **Objective**: Produce the public `drift_investigation.json` under the G11 profile, verify it against the restricted document, and provide the local-only WHO path (G12).
+- **Dependencies**: Task 9B.2
+- **Files/Areas** *(amended 2026-10-04, design review decisions A–F)*:
+  - new `src/drift_engine/investigation_public.py` (public model, loader and leak scan; **no import of `activity_logs`, `attribution`, `investigation` or `who`**, so `ai_engine` can import it);
+  - new `src/drift_engine/who.py` (local WHO);
+  - `src/drift_engine/investigation.py` (`project()`, `verify_projection()`);
+  - `src/drift_engine/activity_logs.py` (`collect_window()` only);
+  - `src/drift_engine/cli.py` (`investigate --public-output`; `investigation-check` and `who` subcommands; the restricted stdout refusal in GitHub Actions; type-only errors);
+  - `src/drift_engine/__init__.py` (docstring);
+  - new `tests/test_investigation_public.py`, `tests/test_who.py`;
+  - small updates to existing CLI tests in `tests/test_activity_logs.py`, `tests/test_attribution.py`, `tests/test_investigation.py`.
+- **Acceptance Criteria**:
+  - [x] **Public model**: an allowlist-only, strict, frozen model with exactly the G11 public schema (decision C); `op-<n>` / `auto-<n>` ordinals; exposure block; binding (run id, plan timestamp, drift report canonical SHA-256). No restricted-content hash, correlation id, event id, candidate name or rejection detail. Byte-identical output.
+  - [x] **Public output (decision B)**: `investigate --public-output` projects, verifies restricted/public consistency and runs the leak scan before writing; any failure writes no public file (exit 70).
+  - [x] **Projection check**: every public field equals its restricted source (an independent re-derivation).
+  - [x] **Leak scan**: the fail-closed scan rejects a GUID, `@`, IPv4/IPv6, `/subscriptions/`, `/providers/` path or URL in any string. `investigation-check` validates a downloaded public file (contract, binding, leak scan).
+  - [x] **Local WHO**: `drift-engine who` (local, read-only) matches each public operation to exactly one recorded operation group (G12) and prints the recorded caller.
+    - It collects through `collect_window()` (decision A).
+    - It writes only `who_evidence.local.json` (0600, atomic, no symlink target) under the required `--output-dir` (0700 if created).
+    - No match, several matches, retention exceeded, a binding failure or a failed query each give a fixed error and no caller.
+    - It refuses to run under `GITHUB_ACTIONS=true`.
+  - [x] **Restricted-data CLI hardening (decision D)**: in GitHub Actions, `activity-logs`, `attribute` and `investigate` refuse restricted stdout output (exit 2). Unexpected errors of these commands and `who` print the exception type only, never `str(exc)`.
+  - [x] **AI boundary (decision F)**: AST test: no `ai_engine` module imports `investigation`, `who`, `activity_logs` or `attribution`.
+- **Validation**:
+  - [x] Leak mutants: a planted value in every public string field (UPN, object ID, subscription ID, ARM ID, event ID, IP) is caught.
+  - [x] Projection tampering is caught.
+  - [x] `who` over a fake source: a unique match; zero/multiple matches; a timestamp off by more than 1 s (and an unequal timestamp inside the window); caller type or client mismatch; retention; binding failures (contract, leak, report mismatch, unknown address); both Terraform JSON input shapes; output permissions and the symlink refusal; the GitHub Actions refusal.
+  - [x] Hardening: the stdout refusal for each restricted command under `GITHUB_ACTIONS=true`, and an internal error carrying a planted caller never printing it.
+  - [x] Safeguard mutants on the projection, leak scan, `who` matching and the CLI guards are caught.
+  - [x] Import boundary: importing `investigation_public` loads no `azure.*`, `activity_logs`, `attribution`, `investigation` or `who` module (subprocess test).
+- **Implementation Notes**:
+  - Starts with a design review (the exact public field list, the `who` input mapping from `terraform show -json`).
+  - **Design review (2026-10-04, decisions A–F user-approved)**: recorded in G11, G12, G14, the data flow and the criteria above.
+- **Completion Notes**:
+  - **Files**:
+    - new `src/drift_engine/investigation_public.py`, `src/drift_engine/who.py`, `tests/test_investigation_public.py`, `tests/test_who.py`;
+    - changed `src/drift_engine/investigation.py` (`group_operations()` factored out of the 9B.2 grouping, behaviour unchanged; `project()`, `verify_projection()`, `publish()`; `canonical_sha256` now shared from `investigation_public`), `src/drift_engine/activity_logs.py` (`collect_window()` / `WindowCollection` only), `src/drift_engine/cli.py`, `src/drift_engine/__init__.py` (docstring).
+    - The existing 7.x / 9B.1 / 9B.2 test files are unchanged; their CLI tests pass with the hardening.
+    - **Unchanged**: `collect_evidence()`, `attribution.py`, the drift report and schema, `ai_engine`, workflows, Terraform, dependencies.
+  - **Public document** (`drift_investigation.json`, `public_version: "1"`):
+    - exactly the G11 schema (decision C), as strict frozen models with `extra="forbid"` at every level; per-resource ordinals `op-<n>` / `auto-<n>`; the exposure block;
+    - binding (run id, plan timestamp, drift report canonical SHA-256, evidence outcome, observation); anchors as counts by reason; the anchor reference by GitHub run id and report SHA-256;
+    - public model invariants (numbering, decisive operation, Option A and actor consistency, unreadable scope, descendant sums).
+    - **Never present**: callers, resource / event / correlation IDs, `evidence_sha256` or any hash of restricted content, candidate names, per-candidate rejections.
+  - **`publish()`** = project → public contract → `verify_projection()` (an independent field-by-field re-derivation) → `leak_findings()`, all before rendering. `investigate --public-output` writes nothing (restricted, evidence or public) and exits 70 when any check fails.
+  - **Leak scan**: every string and dict key is checked for GUIDs, `@`, IP addresses (`ipaddress` parsing of candidate tokens, so ISO timestamps never match), `/providers/` and `/subscriptions/` paths and URLs. Findings report a location and kind only; content keys are shown as `<key>`, never echoed.
+  - **`investigation-check`**: strict JSON, leak scan, contract and (with `--report`) the binding. It prints a fixed code plus finding counts by kind, never a value.
+  - **Local WHO** (`who.py`, `drift-engine who`):
+    - Terraform state (`values`, child modules) or plan JSON (`prior_state`) gives address → ARM ID;
+    - per public operation, `collect_window()` over [start − 1 s, end + 1 s] (start rounded down, end up), regrouped with the investigation's `group_operations()`;
+    - a match needs exact start/end (µs), operation, outcome, relations, caller type and client app;
+    - fixed result codes `matched` / `no_match` / `multiple_matches` / `retention_exceeded` / `query_failed`; global `binding_failed` with details `invalid_json` / `leak` / `contract` / `too_large` / `binding_mismatch` / `terraform_invalid` / `address_unknown` / `invalid_resource_id`;
+    - refuses under `GITHUB_ACTIONS=true` (in `run_who` and in the CLI); writes only `who_evidence.local.json` (0600, atomic) under `--output-dir` (created 0700), and refuses a symlinked file or directory;
+    - prints the recorded caller with the fixed note that it is not proof of who caused the drift.
+  - **Hardening (decision D)**:
+    - `activity-logs`, `attribute` and `investigate` exit 2 without `--output` under `GITHUB_ACTIONS=true`.
+    - For restricted commands (these three, `investigation-check`, `who`) the last-resort handler prints only the exception type and suppresses the debug traceback (which carries the message).
+    - `investigate` write errors report the exception type only.
+  - **Tests** (session-scratchpad venv; no Azure, credentials or real clock):
+    - `tests/test_investigation_public.py` **24 passed** (1,700+ subtests):
+      - projection of six scenarios (rich anchored + unanchored with attached/automated/descendant events and rejected candidates, confirmed deletion, failed input, failed evidence, unreadable scope, no drift): clean, byte-identical, loader round-trip;
+      - no restricted value in any public text; the exact key sets; unknown fields rejected at every level;
+      - leak kinds, no false positives on allowed content, findings never echo values;
+      - **a planted UPN / object ID / subscription path / ARM ID / event ID / IPv4 / IPv6 / URL in every one of the 100+ public string fields and keys caught by the scan and the loader**;
+      - projection tampering (13 cases); a consistent-but-leaky restricted document refused by the leak scan alone; publish failures;
+      - CLI `--public-output` + `investigation-check` (valid, leak, JSON, contract, binding, unreadable);
+      - hardening (stdout refusal per command in GitHub Actions; a planted caller in an exception never printed, incl. `--log-level debug`; `analyze` keeps detailed messages);
+      - public contract invariants and loader errors; subprocess import boundary (no `azure.*`, `activity_logs`, `attribution`, `investigation`, `who`); **AST boundary over all of `src/ai_engine/`**; constants equal to the restricted modules.
+    - `tests/test_who.py` **20 passed**: `collect_window` (bounded window and rounding, bad input, per-scope failure); both Terraform JSON shapes; unique / zero / multiple matches; timestamps off by 2 s and by 0.5 s; caller type, client, operation and outcome mismatches; retention; query failure; every binding failure; resources without operations; the GitHub Actions refusal; CLI output (0700 / 0600, single file, caller printed only on a match, symlink refusals, unreadable inputs, write error).
+    - **Safeguard mutants 23/23 caught**, covering:
+      - the leak scan (each kind, keys, loader skip, extra fields allowed, binding hash);
+      - the projection (attached count, publish without leak scan or consistency check, verifier blind to operations);
+      - `who` matching (start, client, multiple, retention, CI refusal, unknown address);
+      - the CLI guards (stdout refusal, verbose restricted errors, public check skipped).
+    - **Full suite 2118 passed** (3,627 subtests); `drift_engine` coverage **99.65%** (`activity_logs.py`, `attribution.py`, `investigation_public.py`, `who.py` 100%; `investigation.py` 99%; `cli.py` 99%); `unittest discover` OK; `./scripts/validate.sh` passed.
+    - gitleaks: no finding in `src/drift_engine` or the new or changed tests; the one finding in `tests/` is the pre-existing synthetic key in `tests/test_infracost.py:45` (Task 10.1, untouched). No real identifier from the local raw query appears in any change.
+  - **Not done / limitations**:
+    - (a) no real `who` lookup against Azure (Task 9B.6, user-run);
+    - (b) public fields such as the drift report's free-form `run_id` are protected only by the leak scan and its length bounds; a value that is sensitive without matching any leak pattern (e.g. a plain personal name in a run id) is not detectable. The CI run id is always `github-<id>-<attempt>`;
+    - (c) `who` re-queries one window per operation (more Azure calls for resources with many operations);
+    - (d) the public document's GitHub run ids and report hashes are public by design (they reference public drift artifacts).
+
+#### Task 9B.4 — AI Report v2, Deterministic Investigation Narrative & Recommendation Policy
+- **Status**: ⬜ NOT STARTED
+- **Objective**: Make the AI engine consume the public investigation model and produce report v2 (G16). This covers the WHAT/WHEN/WHO/correlation sections, the mandatory deterministic narrative (G15), recommendation policy v1, the sanitized LLM evidence model and guards (G14), and verification.
+- **Dependencies**: Task 9B.3
+- **Files/Areas**: `src/ai_engine/cli.py` (`--investigation`), `src/ai_engine/graph.py` (state input), `src/ai_engine/evidence.py` (sanitized investigation evidence for the LLM), `src/ai_engine/nodes/analyze_drift.py` (prompt: explain consistency/impact/risk only), `src/ai_engine/nodes/common.py` (guards), `src/ai_engine/nodes/root_cause.py` (deterministic attribution source replaces the constants), `src/ai_engine/nodes/remediation.py` (recommendation policy v1), `src/ai_engine/nodes/report_generator.py` (report v2, Markdown), `src/ai_engine/verify.py`, `src/ai_engine/config.py` (the disabled reason says "explicitly none" when the provider is set to `none`); tests: `tests/test_ai_report.py`, `tests/test_ai_engine.py`, `tests/test_ai_root_cause.py`, `tests/test_ai_cli.py`, new `tests/test_ai_investigation.py`, `tests/corpora/`, `tests/mutation/mutants.json`
+- **Acceptance Criteria**:
+  - [ ] **Report v2**: implements the locked outline. Without `--investigation` the report records `investigation.status = not_available` and every drifted resource `not_investigated` (`investigation_not_provided`). An invalid or unbound investigation file → exit 1, nothing written.
+  - [ ] **Deterministic fallback (no LLM)**: answers WHAT/WHEN/WHO/correlation and the recommendation with versioned statement templates. Every unprovable fact renders "not confirmed by available evidence".
+  - [ ] **Recommendation policy v1**: rules R0–R4 exactly, with approval and execution constants unchanged.
+  - [ ] **LLM evidence model**: only public-model fields plus allowed Terraform evidence; `evidence_sent` records the investigation keys sent. Guards reject identity-like strings, actor naming, verdict-upgrade wording, and operations or timestamps not in the model. AI cannot change any deterministic field.
+  - [ ] **`verify_report` v2**: independently checks the investigation sections against the public investigation file and the drift report.
+  - [ ] LLM stays disabled in CI (unchanged CLI refusal).
+- **Validation**:
+  - [ ] Report v2 on every fixture: the verified tag scenario, the no-anchor, ambiguous, none, not-investigated and deletion-confirmed scenarios, and no drift.
+  - [ ] Markdown order and escaping.
+  - [ ] Policy table over all option fixtures.
+  - [ ] Fake-model tests: a valid explanation accepted; actor naming, identity strings, "caused" / "confirmed" upgrades and an invented time or operation rejected; deterministic state byte-identical with and without the LLM.
+  - [ ] Guard and injection corpora extended.
+  - [ ] Mutation harness extended (verdict, policy and guard mutants caught).
+  - [ ] Network guard active; no real LLM.
+- **Implementation Notes**:
+  - Starts with a design review (field names, statement templates, guard patterns, prompt changes within the one-logical-call guarantee of Phase 6).
+- **Completion Notes**:
+  - None.
+
+#### Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows)
+- **Status**: ⬜ NOT STARTED
+- **Objective**: Run the investigation in `plan-and-analyze` and publish `drift-investigation-<run_id>` (G10), add the `investigation` check job, and feed the public investigation into `ai-analysis.yml`. Detection, issues, report and cost results stay unchanged.
+- **Dependencies**: Task 9B.4; Task 10.1 (step order and D5 exception pattern); Task 9A.1 (binding conventions)
+- **Files/Areas**: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`, new `ci/azure-constraints.txt`, new `scripts/investigation_analysis.sh` (orchestrates install check, anchor fetch, `investigate`, projection, check; fixed status codes; counts-only output), new `scripts/fetch_prior_drift_reports.py` (GitHub API, `actions: read`, G9 metadata and download into a runner directory), new `tests/test_investigation_workflow.py`, `tests/test_infracost.py` (exception list), `tests/test_ai_cli.py` (workflow structure); `README.md`, `docs/drift-detection-spec.md` (§8.3 and a new investigation section), `docs/architecture.md`
+- **Acceptance Criteria**:
+  - [ ] **Workflow structure**: steps after `Upload Drift Report` and before the cost step; separate pinned venv with an exact-pin check; outputs `investigation_status` / `investigation_failure` / `investigation_upload_outcome`; the documented exit-0 capture; exactly two `continue-on-error` uploads in the workflow; `plan-and-analyze` permissions `id-token: write`, `contents: read`, `actions: read` and timeout 45; the `investigation` job (`contents: read`, no Azure or secrets) with `--check` and a counts-only summary.
+  - [ ] **Isolation**: for every investigation failure (install, anchor fetch, Azure auth/authorization/throttling/timeout, correlation, projection, leak scan, upload), `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are identical to a run without Phase 9B, and the `investigation` job fails.
+  - [ ] **AI workflow**: downloads `drift-investigation-<source run id>` by pattern. Missing → report v2 with `not_investigated`. Present → validated and bound, else the job fails with no artifact. `AI_LLM_PROVIDER: none` unchanged; counts-only summary.
+  - [ ] **Hygiene**: no public log or summary carries a G11-forbidden value (scanned in executed-step tests). Raw and restricted files are never uploaded.
+- **Validation**:
+  - [ ] Workflow-structure tests and executed-step tests (runner-realistic, as in Task 10.1).
+  - [ ] Synthetic gate tests for every failure code and the missing/invalid investigation paths.
+  - [ ] Pin closure test for `ci/azure-constraints.txt`.
+  - [ ] Real CI proof (approval-gated): one no-drift `workflow_dispatch`. Before it, the user removes any leftover test tag from `aitdd-dev-main-rg` (e.g. `owner` from the 2026-10-04 test), so the resource group is in sync; this run later serves as the Task 9B.6 anchor. The investigation step runs with no Azure query, the artifact is present, the `investigation` job passes, and the AI report v2 shows no drifted resources and no investigation claims.
+- **Implementation Notes**:
+  - Starts with a design review (step and job names, the exact exit-code mapping, the anchor-fetch limits).
+- **Completion Notes**:
+  - None.
+
+#### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
+- **Status**: ⬜ NOT STARTED
+- **Objective**: Prove the product requirement with real Azure evidence through CI. Then close Phase 9B and return Phases 6 and 7 to 🟢; Phase 10 resumes.
+- **Dependencies**: Task 9B.5
+- **Files/Areas**: `.artifacts/task-9B.6-ci-proof/` (gitignored; downloaded artifacts and local WHO output), `PROJECT_PLAN.md`, `README.md` (limitations)
+- **Acceptance Criteria**:
+  - [ ] **Primary scenario** (user actions, Execution Rule 10): the user adds a tag to `aitdd-dev-main-rg` in the Azure Portal and dispatches drift detection. A valid in-sync drift report within retention is required; the Task 9B.5 no-drift proof run serves as that anchor.
+    - The drift run reports `external_drift` on `tags.<key>`, unaffected by the investigation.
+    - The public AI report v2 meets every item of "Phase 9B end-to-end acceptance": WHAT; operation `Microsoft.Resources/tags/write` Succeeded; WHEN matching the Azure record to the second; WHO type `user`, client `azure_portal`, `pipeline_identity: false`, identity withheld; actor attribution not confirmed; verdict `sole_capable_operation`; property link `inferred_not_provable`; completeness; deterministic narrative; recommendation `restore_declared` with the accept-remote note and approval required.
+  - [ ] **Control A**: a second portal tag change on the same resource group, then dispatch → `ambiguous` (two capable operations since the anchor).
+  - [ ] **Control B**: the user removes the test tags (portal), then dispatch → no drift and no investigation claims; the AI report v2 has no drifted resources.
+  - [ ] **Leak scan**: every downloaded public artifact (`drift-report`, `drift-investigation`, `ai-analysis-report`) contains no UPN, email, GUID, IP, `/subscriptions/` or ARM ID. The public job logs show counts and codes only.
+  - [ ] **Local WHO**: `drift-engine who` on the primary run's public investigation reproduces the identity Azure recorded (checked by the user locally; never committed).
+  - [ ] **Determinism**: regenerating the AI report locally from the downloaded drift report and investigation gives byte-identical JSON and Markdown.
+  - [ ] **Closure**: Phase 9B 🟢; Phase 6 and Phase 7 headers back to 🟢 with closure notes referencing this task; Phase 10 → 🟡 WORK IN PROGRESS and Task 10.2 → ⬜ NOT STARTED; Current Active Task → Task 10.2.
+- **Validation**:
+  - [ ] All of the above recorded with run ids, artifact digests and timings. `latest_capable_operation` and deletion-confirmed paths remain fixture-verified (no safe real producer); recorded as such.
+- **Implementation Notes**:
+  - Every Azure change is made by the user. Claude only reads (Activity Log, artifacts, public job data).
+- **Completion Notes**:
+  - None.
+
+---
+
 ### PHASE 10 — FinOps / Cost Analysis
-**Status**: 🟡 WORK IN PROGRESS (Task 10.1 complete; Task 10.2 next)
+**Status**: 🔴 BLOCKED — on hold until Phase 9B is completed and verified (user decision 2026-10-04). Task 10.1 is complete; Task 10.2 resumes after Task 9B.6.
 
 Phase 10 integrates Infracost to provide deterministic cost estimates for configuration drift and infrastructure changes.
 
@@ -3013,9 +3666,9 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
     - The existing Terraform steps' own Checkpoint behaviour, the Node.js 20 action deprecation and the `ubuntu-latest` migration notices remain Phase 12 items.
 
 #### Task 10.2 — Terraform Plan Cost Delta Calculation
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🔴 BLOCKED — on hold until Phase 9B is completed and verified (user decision 2026-10-04); not started
 - **Objective**: Extract cost differences (`monthly_cost_delta`) between current state and drifted state.
-- **Dependencies**: Task 10.1
+- **Dependencies**: Task 10.1; Phase 9B (hold; resumes after Task 9B.6)
 - **Files/Areas**: `src/drift_engine/cost.py`
 - **Acceptance Criteria**:
   - [ ] Parses `infracost.json` and correlates cost changes with specific resource drifts.
@@ -3031,7 +3684,7 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
 #### Task 10.3 — AI Cost Impact Explanation Engine
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Pass Infracost cost delta data into LangGraph node `analyze_cost` to generate human-readable financial explanations.
-- **Dependencies**: Task 10.2, Task 6.4, Task 9A.1
+- **Dependencies**: Task 10.2, Task 6.4, Task 9A.1, Task 9B.4 (AI report v2 contract)
 - **Files/Areas**: `src/ai_engine/nodes/cost_analysis.py`
 - **Acceptance Criteria**:
   - [ ] AI output explains exact monthly cost increase/decrease using Infracost numbers.
@@ -3174,7 +3827,7 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 #### Task 13.1 — Dashboard Data API & State Engine
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Build lightweight Python backend API (FastAPI) to serve live drift reports, history, and status metrics.
-- **Dependencies**: Tasks 4.6, 8.3, 9A.1
+- **Dependencies**: Tasks 4.6, 8.3, 9A.1, 9B.5 (investigation and AI report v2 artifacts)
 - **Files/Areas**: `src/dashboard_api/`
 - **Acceptance Criteria**:
   - [ ] Endpoints for `/api/summary`, `/api/drifts`, `/api/reports/{id}`, `/api/remediations`.

@@ -1,4 +1,4 @@
-"""Azure Activity Log evidence collector (Task 7.1).
+"""Azure Activity Log evidence collector (Task 7.1; evidence v2, Task 9B.1).
 
 Collects, validates, normalizes and scopes Azure Activity Log events for the
 resources a drift report found drifted, and writes them as a separate document,
@@ -27,17 +27,37 @@ Pipeline (deterministic except for the Azure call itself):
 
 Query: `eventTimestamp ge '<start>' and eventTimestamp le '<end>' and
 resourceGroupName eq '<rg>'`, without `$select` (`caller` is not a documented
-`$select` property). The window ends at the query time and starts `lookback_days`
-(1-89, default 30) earlier; `settled_until` marks where Azure's 3-20 minute ingestion
-delay may still hide events. Pages, events and wall time per run are bounded
-(`Limits`); hitting a bound marks the scope `truncated`, never silently complete.
+`$select` property). The window ends at the query time (`queried_at`, whole
+seconds). It starts `lookback_days` (1-89, default 30) earlier (`basis: lookback`)
+or at an explicit run-level `window_start` chosen by the caller (`basis: explicit`;
+Task 9B.2 passes the earliest per-resource anchor or lookback start), never more than
+89 days back. A caller may also give `not_before`: a collection whose query time is
+earlier issues no query and fails with `query_before_not_before`. This module never
+sleeps or polls; waiting, polling and completeness are Task 9B.2's. The evidence
+records `queried_at`, `not_before` and the largest observed ingestion delay
+(`submissionTimestamp - eventTimestamp`); whether that is settled enough for a
+detection run is decided by the consumers (Task 9B.2: `queried_at >= finished_at + 10
+minutes`). Pages, events and wall time per run are bounded (`Limits`); hitting a
+bound marks the scope `truncated`, never silently complete.
 
-Kept event fields (everything else, including `claims`, `authorization`,
+Kept event fields (everything else, including the raw `claims`, `authorization`,
 `httpRequest` with the client IP, `properties`, `description` and `tenantId`, is
 never stored): event_data_id, correlation_id, operation_id, event_timestamp,
 submission_timestamp, operation_name, status, sub_status, category, level,
-resource_id, caller. Each kept event also records which target addresses it falls
-under (`exact` or `descendant`, most specific target only).
+resource_id, caller. Evidence v2 adds values derived on the spot, never the claims
+themselves: `event_phase` (from eventName), `caller_type` (from the `idtyp` claim and
+the presence of `xms_mirid`), `client_app` (the `appid` claim mapped through an
+allowlist of verified first-party applications) and `pipeline_identity` (whether
+`appid` equals the pipeline's client ID, given by the caller and never written).
+Each kept event also records which target addresses it falls under, most specific
+target only: `exact`, `extension` (only a verified extension type, currently
+`<id>/providers/Microsoft.Resources/tags/default`) or `descendant` (anything else
+below the target, including the resources a resource group contains).
+
+The verified shape of a portal tag edit (real Azure, 2026-10-04): operation
+`Microsoft.Resources/tags/write`, two rows with one correlationId, BeginRequest /
+Started on `<rg-id>/providers/Microsoft.Resources/tags/default` (`extension`) and
+EndRequest / Succeeded on `<rg-id>` itself (`exact`).
 
 Failures are recorded, not raised: an input problem gives `outcome: failed` with
 `failure.stage = "input"`; a query problem gives the scope a fixed error code
@@ -64,7 +84,7 @@ import re
 import time
 import unicodedata
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
@@ -78,7 +98,7 @@ from drift_engine.models import DriftReport
 
 logger = logging.getLogger(__name__)
 
-EVIDENCE_VERSION = "1"
+EVIDENCE_VERSION = "2"
 EVIDENCE_FILE = "activity_log_evidence.json"
 SOURCE = "azure_activity_log"
 TRUST = "untrusted_external"
@@ -87,8 +107,24 @@ DEFAULT_LOOKBACK_DAYS = 30
 # Azure keeps Activity Log events for 90 days and both ends of a query must fall
 # inside them; 89 keeps the start clear of that edge while the query runs.
 MAX_LOOKBACK_DAYS = 89
-# Activity Log events are usually queryable 3-20 minutes after they happen.
-INGESTION_LAG = timedelta(minutes=20)
+# Verified extension types (Phase 9B, G6): the suffix after a target's ID that makes
+# an event an `extension` of that target. Anything else below a target, including
+# the resources a resource group contains (same path shape), is `descendant`. A new
+# entry needs a recorded real-Azure shape check.
+VERIFIED_EXTENSIONS = ("/providers/microsoft.resources/tags/default",)
+
+# Verified first-party client applications (claims.appid, 2026-10-03/04 real events).
+# Any other application ID is `other_application`; a new entry needs recorded evidence.
+CLIENT_APPS = {
+    "c44b4083-3bb0-49c1-b47d-974e53cbdf3c": "azure_portal",
+    "04b07795-8ddb-461a-bbee-02f9e1bf7b46": "azure_cli",
+}
+CLIENT_APP_VALUES = ("azure_cli", "azure_portal", "other_application", "unknown")
+CALLER_TYPES = ("managed_identity", "service_principal", "unknown", "user")
+EVENT_PHASES = ("begin", "end", "unknown")
+RELATIONS = ("descendant", "exact", "extension")
+# The pipeline's client ID for `pipeline_identity`; read by the CLI, never written.
+PIPELINE_PRINCIPAL_ENV = "DRIFT_ENGINE_PIPELINE_PRINCIPAL"
 
 # Categories that record operations changing resource state. Everything else
 # (ServiceHealth, ResourceHealth, Alert, Recommendation, Security, ...) is dropped.
@@ -133,12 +169,15 @@ DROP_REASONS = (
 ANOMALIES = (
     "caller_missing",
     "caller_rejected",
+    "claims_missing",  # no claims: caller_type/client_app unknown, pipeline_identity null
+    "claims_rejected",  # claims not an object
     "correlation_id_rejected",
     "level_rejected",
     "operation_id_rejected",
     "status_missing",
     "status_rejected",
     "sub_status_rejected",
+    "submission_before_event",  # excluded from the ingestion delay
     "submission_timestamp_rejected",
 )
 TARGET_STATUSES = (
@@ -149,7 +188,15 @@ TARGET_STATUSES = (
     "query_incomplete",  # its scope stopped at a bound
     "unsupported_scope",  # valid ID outside a resource group: not queried
 )
-INPUT_FAILURES = ("evidence_failed", "invalid_lookback", "invalid_query_time")
+INPUT_FAILURES = (
+    "evidence_failed",
+    "invalid_lookback",
+    "invalid_not_before",
+    "invalid_pipeline_principal",
+    "invalid_query_time",
+    "invalid_window_start",
+    "query_before_not_before",  # queried_at is earlier than not_before: no query issued
+)
 
 QueryFailureCode = Literal[QUERY_FAILURE_CODES]
 LimitCode = Literal[LIMIT_CODES]
@@ -158,6 +205,10 @@ Anomaly = Literal[ANOMALIES]
 TargetStatus = Literal[TARGET_STATUSES]
 Category = Literal[KEPT_CATEGORIES]
 Level = Literal[LEVELS]
+CallerType = Literal[CALLER_TYPES]
+ClientApp = Literal[CLIENT_APP_VALUES]
+EventPhase = Literal[EVENT_PHASES]
+Relation = Literal[RELATIONS]
 
 MAX_RESOURCE_ID_LENGTH = 2048
 MAX_CALLER_LENGTH = 256
@@ -312,20 +363,53 @@ Address = Annotated[str, Field(min_length=1)]
 
 
 class Window(_Model):
-    """The queried interval (inclusive) and the ingestion horizon. All times UTC."""
+    """The queried interval (inclusive), on whole seconds, UTC. `end` is the query time.
 
+    `basis` says where `start` came from: `lookback` (end minus `lookback_days`) or
+    `explicit` (a run-level `window_start` given by the caller; `lookback_days` null).
+    Whether the evidence is settled for a detection run is decided by its consumers
+    from `collection.queried_at` (Phase 9B, G8), not here.
+    """
+
+    basis: Literal["lookback", "explicit"]
     start: Timestamp
     end: Timestamp
-    lookback_days: Annotated[int, Field(ge=1, le=MAX_LOOKBACK_DAYS)]
-    settled_until: Timestamp  # events after this may not have been ingested yet
+    lookback_days: Annotated[int, Field(ge=1, le=MAX_LOOKBACK_DAYS)] | None
 
     @model_validator(mode="after")
     def _consistent(self) -> Window:
         start, end = parse_timestamp(self.start), parse_timestamp(self.end)
-        if end - start != timedelta(days=self.lookback_days) or end.microsecond:
-            raise ValueError("window start/end do not match lookback_days on whole seconds")
-        if parse_timestamp(self.settled_until) != end - INGESTION_LAG:
-            raise ValueError("settled_until must be end minus the ingestion lag")
+        if start.microsecond or end.microsecond:
+            raise ValueError("window start and end must be whole seconds")
+        if self.basis == "lookback":
+            if self.lookback_days is None or end - start != timedelta(days=self.lookback_days):
+                raise ValueError("a lookback window must span exactly lookback_days")
+        elif self.lookback_days is not None or not timedelta(0) < end - start <= timedelta(days=MAX_LOOKBACK_DAYS):
+            raise ValueError("an explicit window has no lookback_days and spans more than 0 and at most "
+                             f"{MAX_LOOKBACK_DAYS} days")
+        return self
+
+
+class Collection(_Model):
+    """When this collection ran and what it saw of Azure's ingestion delay.
+
+    `queried_at` is the query time (microseconds; the window ends at it, on whole
+    seconds); `not_before` the earliest query time the caller allowed. The ingestion
+    delay is `submission_timestamp - event_timestamp` over the kept events that have
+    a usable, not earlier, submission time (`ingestion_delay_samples`); null without one.
+    """
+
+    queried_at: Timestamp
+    not_before: Timestamp | None
+    max_ingestion_delay_ms: Count | None
+    ingestion_delay_samples: Count
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Collection:
+        if self.not_before is not None and parse_timestamp(self.not_before) > parse_timestamp(self.queried_at):
+            raise ValueError("queried_at must not be earlier than not_before")
+        if (self.max_ingestion_delay_ms is None) != (self.ingestion_delay_samples == 0):
+            raise ValueError("max_ingestion_delay_ms is null exactly when there is no sample")
         return self
 
 
@@ -402,7 +486,7 @@ class Target(_Model):
 
 class Match(_Model):
     address: Address
-    relation: Literal["exact", "descendant"]
+    relation: Relation
 
 
 class Event(_Model):
@@ -420,6 +504,10 @@ class Event(_Model):
     level: Level | None
     resource_id: EventResourceId
     caller: Caller | None
+    event_phase: EventPhase
+    caller_type: CallerType
+    client_app: ClientApp
+    pipeline_identity: bool | None
     anomalies: list[Anomaly]
     matches: Annotated[list[Match], Field(min_length=1)]
 
@@ -427,6 +515,14 @@ class Event(_Model):
     def _consistent(self) -> Event:
         if self.anomalies != sorted(set(self.anomalies)):
             raise ValueError("anomalies must be sorted and unique")
+        if {"claims_missing", "claims_rejected"} & set(self.anomalies) and (
+                self.caller_type != "unknown" or self.client_app != "unknown" or self.pipeline_identity is not None):
+            raise ValueError("without usable claims, caller_type and client_app are unknown and "
+                             "pipeline_identity is null")
+        early = (self.submission_timestamp is not None
+                 and parse_timestamp(self.submission_timestamp) < parse_timestamp(self.event_timestamp))
+        if early != ("submission_before_event" in self.anomalies):
+            raise ValueError("submission_before_event is set exactly when the submission time is earlier")
         addresses = [m.address for m in self.matches]
         if addresses != sorted(set(addresses)) or len({m.relation for m in self.matches}) != 1:
             raise ValueError("matches must be sorted, unique and share one relation")
@@ -440,15 +536,16 @@ class Event(_Model):
 
 
 class ActivityLogEvidence(_Model):
-    """The whole `activity_log_evidence.json` document (evidence_version 1)."""
+    """The whole `activity_log_evidence.json` document (evidence_version 2)."""
 
-    evidence_version: Literal["1"]
+    evidence_version: Literal["2"]
     source: Literal["azure_activity_log"]
     trust: Literal["untrusted_external"]
     outcome: Literal["complete", "incomplete", "failed"]
     failure: Failure | None
     subject: Subject
     window: Window | None
+    collection: Collection | None
     scopes: list[Scope]
     targets: list[Target]
     events: list[Event]
@@ -478,12 +575,18 @@ def _evidence_problems(doc: ActivityLogEvidence) -> list[str]:
     if (doc.outcome == "failed") != (doc.failure is not None):
         problems.append("failure is set exactly when the outcome is failed")
     if doc.failure is not None and doc.failure.stage == "input":
-        if doc.window is not None or doc.scopes or doc.targets or doc.events:
-            problems.append("an input failure has no window, scopes, targets or events")
+        if doc.window is not None or doc.collection is not None or doc.scopes or doc.targets or doc.events:
+            problems.append("an input failure has no window, collection, scopes, targets or events")
         return problems
-    if doc.window is None:
-        problems.append("window is required unless the input failed")
+    if doc.window is None or doc.collection is None:
+        problems.append("window and collection are required unless the input failed")
         return problems
+    if parse_timestamp(doc.window.end) != parse_timestamp(doc.collection.queried_at).replace(microsecond=0):
+        problems.append("the window must end at queried_at (whole seconds)")
+    delays = ingestion_delays_ms((e.event_timestamp, e.submission_timestamp) for e in doc.events)
+    if (doc.collection.ingestion_delay_samples != len(delays)
+            or doc.collection.max_ingestion_delay_ms != (max(delays) if delays else None)):
+        problems.append("the ingestion delay does not match the events")
 
     scope_keys = [(s.subscription_id, s.resource_group.lower()) for s in doc.scopes]
     if scope_keys != sorted(set(scope_keys)):
@@ -534,9 +637,7 @@ def _evidence_problems(doc: ActivityLogEvidence) -> list[str]:
             if target is None or target.status not in _QUERIED_STATUSES:
                 problems.append(f"event {event.event_data_id} matches an unknown or unqueried target")
                 continue
-            target_key = parse_resource_id(target.resource_id).key
-            relation = "exact" if arm.key == target_key else (
-                "descendant" if arm.key.startswith(target_key + "/") else None)
+            relation = relation_to(arm.key, parse_resource_id(target.resource_id).key)
             if relation != match.relation:
                 problems.append(f"event {event.event_data_id}: relation to {match.address} is wrong")
             matched[match.address] += 1
@@ -547,6 +648,30 @@ def _evidence_problems(doc: ActivityLogEvidence) -> list[str]:
         if scope.events_kept != kept[key]:
             problems.append(f"scope {scope.resource_group}: events_kept does not match the events")
     return problems
+
+
+def relation_to(event_key: str, target_key: str) -> str | None:
+    """How a (case-folded) event resource ID relates to a target's: `exact`, `extension`
+    (only a verified extension type, G6), `descendant` (anything else below it) or None."""
+    if event_key == target_key:
+        return "exact"
+    if event_key.startswith(target_key + "/"):
+        return "extension" if event_key[len(target_key):] in VERIFIED_EXTENSIONS else "descendant"
+    return None
+
+
+def ingestion_delays_ms(times: Iterable[tuple[str, str | None]]) -> list[int]:
+    """`submission - event` in whole milliseconds (rounded down) for each (event
+    timestamp, submission timestamp) pair whose submission time exists and is not
+    earlier than the event time."""
+    delays = []
+    for moment, submission in times:
+        if submission is None:
+            continue
+        delta = parse_timestamp(submission) - parse_timestamp(moment)
+        if delta >= timedelta(0):
+            delays.append(delta // timedelta(milliseconds=1))
+    return delays
 
 
 def render_evidence(evidence: ActivityLogEvidence) -> str:
@@ -620,20 +745,60 @@ class _InputError(Exception):
         self.reason = reason
 
 
-def build_window(queried_at: datetime, lookback_days: int) -> Window:
-    """[queried_at - lookback_days, queried_at], on whole seconds, UTC."""
+def _aware(moment: Any) -> bool:
+    return isinstance(moment, datetime) and moment.utcoffset() is not None
+
+
+def build_window(queried_at: datetime, lookback_days: int, window_start: datetime | None = None) -> Window:
+    """The query window on whole seconds, UTC, ending at `queried_at`.
+
+    Without `window_start`: [queried_at - lookback_days, queried_at] (`lookback`).
+    With it: [window_start rounded down to the second, queried_at] (`explicit`); it
+    must be earlier than the end and at most MAX_LOOKBACK_DAYS before it.
+    """
     if type(lookback_days) is not int or not 1 <= lookback_days <= MAX_LOOKBACK_DAYS:
         raise _InputError("invalid_lookback")
-    if not isinstance(queried_at, datetime) or queried_at.utcoffset() is None:
+    if not _aware(queried_at):
         raise _InputError("invalid_query_time")
     end = queried_at.astimezone(timezone.utc).replace(microsecond=0)
-    start = end - timedelta(days=lookback_days)
+    if window_start is None:
+        return Window(
+            basis="lookback",
+            start=format_timestamp(end - timedelta(days=lookback_days)),
+            end=format_timestamp(end),
+            lookback_days=lookback_days,
+        )
+    if not _aware(window_start):
+        raise _InputError("invalid_window_start")
+    start = window_start.astimezone(timezone.utc).replace(microsecond=0)
+    if not end - timedelta(days=MAX_LOOKBACK_DAYS) <= start < end:
+        raise _InputError("invalid_window_start")
     return Window(
+        basis="explicit",
         start=format_timestamp(start),
         end=format_timestamp(end),
-        lookback_days=lookback_days,
-        settled_until=format_timestamp(end - INGESTION_LAG),
+        lookback_days=None,
     )
+
+
+def check_not_before(queried_at: datetime, not_before: datetime | None) -> None:
+    """A collection may not query before `not_before` (Phase 9B, G8). The collector
+    never waits: the caller schedules the collection."""
+    if not_before is None:
+        return
+    if not _aware(not_before):
+        raise _InputError("invalid_not_before")
+    if queried_at < not_before:
+        raise _InputError("query_before_not_before")
+
+
+def check_pipeline_principal(value: str | None) -> str | None:
+    """The pipeline's client ID (a GUID), lower case; None when not given."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _GUID.fullmatch(value):
+        raise _InputError("invalid_pipeline_principal")
+    return value.lower()
 
 
 def query_filter(window: Window, resource_group: str) -> str:
@@ -734,18 +899,49 @@ def _canonical(value: Any, allowed: tuple[str, ...]) -> str | None:
 
 
 def _match(arm: ArmId, scope: _ScopePlan) -> list[dict] | None:
-    """Most specific target the event's resource is, or is under."""
-    if arm.key in scope.index:
-        return [{"address": a, "relation": "exact"} for a in scope.index[arm.key]]
+    """Most specific target the event's resource is, or is under (`relation_to`)."""
     parts = arm.key.split("/")
-    for end in range(len(parts) - 1, 0, -1):
+    for end in range(len(parts), 0, -1):
         prefix = "/".join(parts[:end])
         if prefix in scope.index:
-            return [{"address": a, "relation": "descendant"} for a in scope.index[prefix]]
+            relation = relation_to(arm.key, prefix)
+            return [{"address": a, "relation": relation} for a in scope.index[prefix]]
     return None
 
 
-def normalize_event(raw: Any, window: Window, scope: _ScopePlan) -> tuple[dict | None, str | None]:
+_EVENT_PHASES = {"beginrequest": "begin", "endrequest": "end"}
+
+
+def derive_identity(claims: Any, pipeline_principal: str | None) -> tuple[dict, str | None]:
+    """(caller_type, client_app, pipeline_identity) from the raw claims, and an anomaly.
+
+    Only `idtyp`, `appid` and the presence of `xms_mirid` are read; no claim value is
+    returned or stored. `pipeline_identity` is True/False only when both `appid` and the
+    pipeline principal are known (a user's token carries the client application,
+    e.g. the Azure Portal, as `appid`, never the pipeline's ID).
+    """
+    unknown = {"caller_type": "unknown", "client_app": "unknown", "pipeline_identity": None}
+    if claims is None:  # absent; an object without the claims read is present but uninformative
+        return unknown, "claims_missing"
+    if not isinstance(claims, dict):
+        return unknown, "claims_rejected"
+    idtyp = claims.get("idtyp")
+    idtyp = idtyp.lower() if isinstance(idtyp, str) else None
+    if idtyp == "user":
+        caller_type = "user"
+    elif idtyp == "app":
+        caller_type = "managed_identity" if claims.get("xms_mirid") else "service_principal"
+    else:
+        caller_type = "unknown"
+    appid = claims.get("appid")
+    appid = appid.lower() if isinstance(appid, str) and _GUID.fullmatch(appid) else None
+    client_app = "unknown" if appid is None else CLIENT_APPS.get(appid, "other_application")
+    pipeline_identity = None if appid is None or pipeline_principal is None else appid == pipeline_principal
+    return {"caller_type": caller_type, "client_app": client_app, "pipeline_identity": pipeline_identity}, None
+
+
+def normalize_event(raw: Any, window: Window, scope: _ScopePlan,
+                    pipeline_principal: str | None = None) -> tuple[dict | None, str | None]:
     """(event, None) for a kept event or (None, drop reason). Never raises for bad data."""
     if not isinstance(raw, dict):
         return None, "malformed_event"
@@ -777,6 +973,8 @@ def normalize_event(raw: Any, window: Window, scope: _ScopePlan) -> tuple[dict |
     submission_moment = parse_timestamp(submission)
     if submission is not None and submission_moment is None:
         anomalies.append("submission_timestamp_rejected")
+    elif submission_moment is not None and submission_moment < moment:
+        anomalies.append("submission_before_event")
 
     present, status = _localizable(raw, "status")
     if not present:
@@ -810,6 +1008,12 @@ def normalize_event(raw: Any, window: Window, scope: _ScopePlan) -> tuple[dict |
         anomalies.append("caller_rejected")
         caller = None
 
+    _, event_name = _localizable(raw, "eventName")
+    event_phase = _EVENT_PHASES.get(event_name.lower(), "unknown") if isinstance(event_name, str) else "unknown"
+    identity, claims_anomaly = derive_identity(raw.get("claims"), pipeline_principal)
+    if claims_anomaly is not None:
+        anomalies.append(claims_anomaly)
+
     event = {
         "event_data_id": event_data_id,
         "correlation_id": _optional_token(raw, "correlationId", "correlation_id_rejected", anomalies),
@@ -823,6 +1027,8 @@ def normalize_event(raw: Any, window: Window, scope: _ScopePlan) -> tuple[dict |
         "level": level,
         "resource_id": arm.text,
         "caller": caller,
+        "event_phase": event_phase,
+        **identity,
         "anomalies": sorted(set(anomalies)),
         "matches": sorted(matches, key=lambda m: m["address"]),
     }
@@ -855,7 +1061,8 @@ def _scope_plans(targets: list[TargetSpec]) -> list[_ScopePlan]:
 
 def _run_scope(plan: _ScopePlan, source: ActivityLogSource, window: Window, limits: Limits,
                monotonic: Callable[[], float], deadline: float,
-               occurrences: list[tuple[int, dict]], dropped: list[Counter], index: int) -> _ScopeResult:
+               occurrences: list[tuple[int, dict]], dropped: list[Counter], index: int,
+               pipeline_principal: str | None = None) -> _ScopeResult:
     result = _ScopeResult(plan)
     if monotonic() >= deadline:
         result.status, result.error = "truncated", {"code": "deadline_exceeded", "http_status": None}
@@ -869,7 +1076,7 @@ def _run_scope(plan: _ScopePlan, source: ActivityLogSource, window: Window, limi
                     result.status, result.error = "truncated", {"code": "event_limit_exceeded", "http_status": None}
                     return result
                 result.returned += 1
-                event, reason = normalize_event(raw, window, plan)
+                event, reason = normalize_event(raw, window, plan, pipeline_principal)
                 if event is None:
                     dropped[index][reason] += 1
                 else:
@@ -928,7 +1135,7 @@ def _failed_input(subject: dict, reason: str) -> ActivityLogEvidence:
     return ActivityLogEvidence.model_validate({
         "evidence_version": EVIDENCE_VERSION, "source": SOURCE, "trust": TRUST,
         "outcome": "failed", "failure": {"stage": "input", "reason": reason},
-        "subject": subject, "window": None, "scopes": [], "targets": [], "events": [],
+        "subject": subject, "window": None, "collection": None, "scopes": [], "targets": [], "events": [],
     })
 
 
@@ -939,6 +1146,9 @@ def collect_evidence(
     source: ActivityLogSource,
     queried_at: datetime,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    window_start: datetime | None = None,
+    not_before: datetime | None = None,
+    pipeline_principal: str | None = None,
     limits: Limits = DEFAULT_LIMITS,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> ActivityLogEvidence:
@@ -950,6 +1160,13 @@ def collect_evidence(
     (including configuration-only changes), or drift without a usable resource ID,
     never reaches Azure. Bad input and failed queries are recorded in the result,
     never raised.
+
+    `window_start` (optional) is the run-level start chosen by the caller (Task 9B.2:
+    the earliest per-resource anchor or lookback start); without it the window is the
+    lookback. `not_before` (optional) is the earliest allowed query time: an earlier
+    `queried_at` fails with `query_before_not_before` before any query. One call is
+    one collection; this function never waits or polls. `pipeline_principal` is the
+    pipeline's client ID (GUID) for `pipeline_identity`; it is never written or logged.
     """
     evaluation = evaluate(plan_path, manifest_path)
     try:
@@ -961,7 +1178,9 @@ def collect_evidence(
     if evaluation.report["outcome"] != "succeeded":
         return _failed_input(subject, "evidence_failed")
     try:
-        window = build_window(queried_at, lookback_days)
+        window = build_window(queried_at, lookback_days, window_start)
+        check_not_before(queried_at, not_before)
+        principal = check_pipeline_principal(pipeline_principal)
     except _InputError as exc:
         return _failed_input(subject, exc.reason)
 
@@ -970,14 +1189,15 @@ def collect_evidence(
     log_event(logger, logging.INFO, "activity_log_targets_selected", "Activity Log targets selected",
               targets=len(targets), scopes=len(plans),
               target_statuses=dict(sorted(Counter(t.status for t in targets).items())),
-              lookback_days=lookback_days)
+              window_basis=window.basis, lookback_days=window.lookback_days)
 
     deadline = monotonic() + limits.deadline_seconds
     occurrences: list[tuple[int, dict]] = []
     dropped = [Counter() for _ in plans]
     results = []
     for index, plan in enumerate(plans):
-        result = _run_scope(plan, source, window, limits, monotonic, deadline, occurrences, dropped, index)
+        result = _run_scope(plan, source, window, limits, monotonic, deadline, occurrences, dropped, index,
+                            principal)
         results.append(result)
     kept = _deduplicate(occurrences, dropped)
 
@@ -1019,20 +1239,90 @@ def collect_evidence(
                   dropped=dict(sorted(dropped[index].items())))
 
     outcome = _expected_outcome([r.status for r in results], [t["status"] for t in target_docs])
+    delays = ingestion_delays_ms((e["event_timestamp"], e["submission_timestamp"]) for e in events)
+    collection = {
+        "queried_at": format_timestamp(queried_at),
+        "not_before": format_timestamp(not_before) if not_before is not None else None,
+        "max_ingestion_delay_ms": max(delays) if delays else None,
+        "ingestion_delay_samples": len(delays),
+    }
     evidence = ActivityLogEvidence.model_validate({
         "evidence_version": EVIDENCE_VERSION, "source": SOURCE, "trust": TRUST,
         "outcome": outcome,
         "failure": {"stage": "query", "reason": "all_queries_failed"} if outcome == "failed" else None,
         "subject": subject,
         "window": window.model_dump(),
+        "collection": collection,
         "scopes": scope_docs,
         "targets": target_docs,
         "events": events,
     })
     log_event(logger, logging.INFO if outcome == "complete" else logging.WARNING,
               "activity_log_collection_finished", "Activity Log evidence collected",
-              outcome=outcome, targets=len(target_docs), scopes=len(scope_docs), events=len(events))
+              outcome=outcome, targets=len(target_docs), scopes=len(scope_docs), events=len(events),
+              max_ingestion_delay_ms=collection["max_ingestion_delay_ms"])
     return evidence
+
+
+@dataclass(frozen=True)
+class WindowCollection:
+    """Events of one bounded historic window (`collect_window`). `scopes` hold the
+    per-scope status, error code and drop counts; never a caller or an ID."""
+
+    window: Window
+    events: tuple
+    scopes: tuple
+
+
+def collect_window(
+    source: ActivityLogSource,
+    targets: Iterable[tuple[str, ArmId]],
+    start: datetime,
+    end: datetime,
+    *,
+    pipeline_principal: str | None = None,
+    limits: Limits = DEFAULT_LIMITS,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> WindowCollection:
+    """Collect one bounded window [start, end] for explicit (address, ARM ID) targets
+    (Task 9B.3, the local WHO path; Phase 9B G12). Unlike `collect_evidence` it needs
+    no drift plan and its window need not end now. Start is rounded down and end up to
+    whole seconds; the span must be positive and at most MAX_LOOKBACK_DAYS. The same
+    scope query, normalization, limits and Azure safeguards apply. Raises ValueError
+    for unusable input; query problems are reported per scope, never raised."""
+    if not (_aware(start) and _aware(end)):
+        raise ValueError("start and end must be timezone-aware")
+    low = start.astimezone(timezone.utc).replace(microsecond=0)
+    high = end.astimezone(timezone.utc)
+    if high.microsecond:
+        high = high.replace(microsecond=0) + timedelta(seconds=1)
+    if not timedelta(0) < high - low <= timedelta(days=MAX_LOOKBACK_DAYS):
+        raise ValueError(f"the window must span more than 0 and at most {MAX_LOOKBACK_DAYS} days")
+    try:
+        principal = check_pipeline_principal(pipeline_principal)
+    except _InputError:
+        raise ValueError("invalid pipeline principal") from None
+    specs = []
+    for address, arm in targets:
+        if arm is None or arm.resource_group is None:
+            raise ValueError("every target needs a resource-group-scoped ARM ID")
+        specs.append(TargetSpec(address, arm, "pending"))
+    window = Window(basis="explicit", start=format_timestamp(low), end=format_timestamp(high), lookback_days=None)
+    plans = _scope_plans(sorted(specs, key=lambda spec: spec.address))
+    deadline = monotonic() + limits.deadline_seconds
+    occurrences: list[tuple[int, dict]] = []
+    dropped = [Counter() for _ in plans]
+    results = [_run_scope(plan, source, window, limits, monotonic, deadline, occurrences, dropped, index, principal)
+               for index, plan in enumerate(plans)]
+    kept = _deduplicate(occurrences, dropped)
+    events = sorted((event for _, event in kept), key=lambda e: (e["event_timestamp"], e["event_data_id"].lower()))
+    scopes = tuple({"resource_group": r.plan.resource_group, "status": r.status,
+                    "error": r.error["code"] if r.error else None, "dropped": dict(sorted(dropped[i].items()))}
+                   for i, r in enumerate(results))
+    log_event(logger, logging.INFO, "activity_log_window_collected", "Activity Log window collected",
+              scopes=len(scopes), events=len(events),
+              statuses=dict(sorted(Counter(scope["status"] for scope in scopes).items())))
+    return WindowCollection(window, tuple(Event.model_validate(e) for e in events), scopes)
 
 
 # ---------------------------------------------------------------------------
@@ -1095,8 +1385,8 @@ def _timestamp_record(value: Any) -> Any:
 
 def _event_record(event: Any) -> dict:
     """The allowlisted fields of an SDK EventData, in REST shape. Read attribute by
-    attribute, so claims, authorization, httpRequest, properties, description and
-    tenantId never leave the SDK object."""
+    attribute, so authorization, httpRequest, properties, description, tenantId and
+    every claim except `idtyp`, `appid` and `xms_mirid` never leave the SDK object."""
     return {
         "eventDataId": getattr(event, "event_data_id", None),
         "correlationId": getattr(event, "correlation_id", None),
@@ -1110,7 +1400,24 @@ def _event_record(event: Any) -> dict:
         "level": getattr(event, "level", None),
         "resourceId": getattr(event, "resource_id", None),
         "caller": getattr(event, "caller", None),
+        "eventName": _localizable_record(getattr(event, "event_name", None)),
+        "claims": _claims_record(getattr(event, "claims", None)),
     }
+
+
+# The only claims read (Task 9B.1, G13): `appid`, `idtyp` and whether `xms_mirid` is
+# present. Every other claim (names, UPN, object IDs, IP address, ...) stays in the
+# SDK object.
+def _claims_record(claims: Any) -> Any:
+    """The claims `derive_identity` reads, or the non-object marker for invalid claims."""
+    if claims is None:
+        return None
+    if not isinstance(claims, dict):
+        return []
+    record = {key: claims[key] for key in ("appid", "idtyp") if key in claims}
+    if claims.get("xms_mirid"):
+        record["xms_mirid"] = True  # presence only: the value is a managed identity's resource ID
+    return record
 
 
 def _error_code(exc: BaseException) -> tuple[str, int | None]:
