@@ -1,0 +1,399 @@
+{
+  "applyable": true,
+  "complete": true,
+  "configuration": {
+    "provider_config": {
+      "azurerm": {
+        "expressions": {
+          "features": [
+            {}
+          ]
+        },
+        "full_name": "registry.terraform.io/hashicorp/azurerm",
+        "name": "azurerm",
+        "version_constraint": "~> 5.0"
+      }
+    },
+    "root_module": {
+      "resources": [
+        {
+          "address": "azurerm_resource_group.this",
+          "expressions": {
+            "location": {
+              "constant_value": "centralindia"
+            },
+            "name": {
+              "constant_value": "aitdd-fixture-rg"
+            },
+            "tags": {
+              "constant_value": {
+                "environment": "dev",
+                "managed_by": "terraform",
+                "project": "ai-terraform-drift-detector"
+              }
+            }
+          },
+          "mode": "managed",
+          "name": "this",
+          "provider_config_key": "azurerm",
+          "schema_version": 0,
+          "type": "azurerm_resource_group"
+        },
+        {
+          "address": "azurerm_service_plan.this",
+          "expressions": {
+            "location": {
+              "references": [
+                "azurerm_resource_group.this.location",
+                "azurerm_resource_group.this"
+              ]
+            },
+            "name": {
+              "constant_value": "aitdd-fixture-plan"
+            },
+            "os_type": {
+              "constant_value": "Linux"
+            },
+            "resource_group_name": {
+              "references": [
+                "azurerm_resource_group.this.name",
+                "azurerm_resource_group.this"
+              ]
+            },
+            "sku_name": {
+              "constant_value": "B1"
+            },
+            "tags": {
+              "constant_value": {
+                "environment": "dev",
+                "managed_by": "terraform",
+                "project": "ai-terraform-drift-detector"
+              }
+            },
+            "worker_count": {
+              "constant_value": 1
+            }
+          },
+          "mode": "managed",
+          "name": "this",
+          "provider_config_key": "azurerm",
+          "schema_version": 1,
+          "type": "azurerm_service_plan"
+        }
+      ]
+    }
+  },
+  "errored": false,
+  "format_version": "1.2",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "azurerm_resource_group.this",
+          "mode": "managed",
+          "name": "this",
+          "provider_name": "registry.terraform.io/hashicorp/azurerm",
+          "schema_version": 0,
+          "sensitive_values": {
+            "tags": {}
+          },
+          "type": "azurerm_resource_group",
+          "values": {
+            "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg",
+            "location": "centralindia",
+            "managed_by": null,
+            "name": "aitdd-fixture-rg",
+            "tags": {
+              "environment": "dev",
+              "managed_by": "terraform",
+              "project": "ai-terraform-drift-detector"
+            },
+            "timeouts": null
+          }
+        },
+        {
+          "address": "azurerm_service_plan.this",
+          "mode": "managed",
+          "name": "this",
+          "provider_name": "registry.terraform.io/hashicorp/azurerm",
+          "schema_version": 1,
+          "sensitive_values": {
+            "tags": {}
+          },
+          "type": "azurerm_service_plan",
+          "values": {
+            "app_service_environment_id": null,
+            "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg/providers/Microsoft.Web/serverFarms/aitdd-fixture-plan",
+            "kind": "linux",
+            "location": "centralindia",
+            "maximum_elastic_worker_count": 1,
+            "name": "aitdd-fixture-plan",
+            "os_type": "Linux",
+            "per_site_scaling_enabled": false,
+            "premium_plan_auto_scale_enabled": false,
+            "reserved": true,
+            "resource_group_name": "aitdd-fixture-rg",
+            "sku_name": "B1",
+            "tags": {
+              "environment": "dev",
+              "managed_by": "terraform",
+              "project": "ai-terraform-drift-detector"
+            },
+            "timeouts": null,
+            "worker_count": 1,
+            "zone_balancing_enabled": false
+          }
+        }
+      ]
+    }
+  },
+  "prior_state": {
+    "format_version": "1.0",
+    "terraform_version": "1.14.7",
+    "values": {
+      "root_module": {
+        "resources": [
+          {
+            "address": "azurerm_resource_group.this",
+            "mode": "managed",
+            "name": "this",
+            "provider_name": "registry.terraform.io/hashicorp/azurerm",
+            "schema_version": 0,
+            "sensitive_values": {
+              "tags": {}
+            },
+            "type": "azurerm_resource_group",
+            "values": {
+              "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg",
+              "location": "centralindia",
+              "managed_by": null,
+              "name": "aitdd-fixture-rg",
+              "tags": {
+                "environment": "dev",
+                "managed_by": "terraform",
+                "project": "ai-terraform-drift-detector"
+              },
+              "timeouts": null
+            }
+          },
+          {
+            "address": "azurerm_service_plan.this",
+            "mode": "managed",
+            "name": "this",
+            "provider_name": "registry.terraform.io/hashicorp/azurerm",
+            "schema_version": 1,
+            "sensitive_values": {
+              "tags": {}
+            },
+            "type": "azurerm_service_plan",
+            "values": {
+              "app_service_environment_id": null,
+              "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg/providers/Microsoft.Web/serverFarms/aitdd-fixture-plan",
+              "kind": "linux",
+              "location": "centralindia",
+              "maximum_elastic_worker_count": 1,
+              "name": "aitdd-fixture-plan",
+              "os_type": "Linux",
+              "per_site_scaling_enabled": false,
+              "premium_plan_auto_scale_enabled": false,
+              "reserved": true,
+              "resource_group_name": "aitdd-fixture-rg",
+              "sku_name": "P1v3",
+              "tags": {
+                "environment": "dev",
+                "managed_by": "terraform",
+                "project": "ai-terraform-drift-detector"
+              },
+              "timeouts": null,
+              "worker_count": 1,
+              "zone_balancing_enabled": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "relevant_attributes": [
+    {
+      "attribute": [
+        "sku_name"
+      ],
+      "resource": "azurerm_service_plan.this"
+    }
+  ],
+  "resource_changes": [
+    {
+      "address": "azurerm_resource_group.this",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "after": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg",
+          "location": "centralindia",
+          "managed_by": null,
+          "name": "aitdd-fixture-rg",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg",
+          "location": "centralindia",
+          "managed_by": null,
+          "name": "aitdd-fixture-rg",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "mode": "managed",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_resource_group"
+    },
+    {
+      "address": "azurerm_service_plan.this",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "app_service_environment_id": null,
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg/providers/Microsoft.Web/serverFarms/aitdd-fixture-plan",
+          "kind": "linux",
+          "location": "centralindia",
+          "maximum_elastic_worker_count": 1,
+          "name": "aitdd-fixture-plan",
+          "os_type": "Linux",
+          "per_site_scaling_enabled": false,
+          "premium_plan_auto_scale_enabled": false,
+          "reserved": true,
+          "resource_group_name": "aitdd-fixture-rg",
+          "sku_name": "B1",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null,
+          "worker_count": 1,
+          "zone_balancing_enabled": false
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "app_service_environment_id": null,
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg/providers/Microsoft.Web/serverFarms/aitdd-fixture-plan",
+          "kind": "linux",
+          "location": "centralindia",
+          "maximum_elastic_worker_count": 1,
+          "name": "aitdd-fixture-plan",
+          "os_type": "Linux",
+          "per_site_scaling_enabled": false,
+          "premium_plan_auto_scale_enabled": false,
+          "reserved": true,
+          "resource_group_name": "aitdd-fixture-rg",
+          "sku_name": "P1v3",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null,
+          "worker_count": 1,
+          "zone_balancing_enabled": false
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "mode": "managed",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_service_plan"
+    }
+  ],
+  "resource_drift": [
+    {
+      "address": "azurerm_service_plan.this",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "after": {
+          "app_service_environment_id": null,
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg/providers/Microsoft.Web/serverFarms/aitdd-fixture-plan",
+          "kind": "linux",
+          "location": "centralindia",
+          "maximum_elastic_worker_count": 1,
+          "name": "aitdd-fixture-plan",
+          "os_type": "Linux",
+          "per_site_scaling_enabled": false,
+          "premium_plan_auto_scale_enabled": false,
+          "reserved": true,
+          "resource_group_name": "aitdd-fixture-rg",
+          "sku_name": "P1v3",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null,
+          "worker_count": 1,
+          "zone_balancing_enabled": false
+        },
+        "after_sensitive": {
+          "tags": {}
+        },
+        "after_unknown": {},
+        "before": {
+          "app_service_environment_id": null,
+          "id": "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/aitdd-fixture-rg/providers/Microsoft.Web/serverFarms/aitdd-fixture-plan",
+          "kind": "linux",
+          "location": "centralindia",
+          "maximum_elastic_worker_count": 1,
+          "name": "aitdd-fixture-plan",
+          "os_type": "Linux",
+          "per_site_scaling_enabled": false,
+          "premium_plan_auto_scale_enabled": false,
+          "reserved": true,
+          "resource_group_name": "aitdd-fixture-rg",
+          "sku_name": "B1",
+          "tags": {
+            "environment": "dev",
+            "managed_by": "terraform",
+            "project": "ai-terraform-drift-detector"
+          },
+          "timeouts": null,
+          "worker_count": 1,
+          "zone_balancing_enabled": false
+        },
+        "before_sensitive": {
+          "tags": {}
+        }
+      },
+      "mode": "managed",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "type": "azurerm_service_plan"
+    }
+  ],
+  "terraform_version": "1.14.7",
+  "timestamp": "2026-10-04T00:00:00Z"
+}
