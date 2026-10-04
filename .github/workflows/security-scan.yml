@@ -1,15 +1,16 @@
 name: "Phase 9 - Security Scan"
 
 # Phase 9 static analysis of the repository's code. Task 9.1: TFLint.
-# Task 9.2: Trivy config.
+# Task 9.2: Trivy config. Task 9.3: TruffleHog secret scan.
 #
 # This is NOT drift detection: a finding here is a static lint/security failure,
 # never a drift result. Drift is owned by drift-detection.yml (Phase 5); this
 # workflow publishes no drift outputs, artifacts, issues or labels.
 #
 # Credential-free: no Azure login, no OIDC (`id-token`), no ARM_* / TF_VAR_*
-# variables. Both tools read the committed Terraform files only (no terraform
-# init, no backend, no provider download).
+# variables. TFLint and Trivy read the committed Terraform files only (no
+# terraform init, no backend, no provider download); TruffleHog reads the local
+# Git history only (no token, no provider verification).
 #
 # Jobs (independent of each other):
 #   tflint        Task 9.1. Runs scripts/run_tflint.sh, the same command used
@@ -21,6 +22,11 @@ name: "Phase 9 - Security Scan"
 #                 tag), then runs scripts/run_trivy_config.sh. HIGH/CRITICAL
 #                 findings fail, except the single exact risk acceptance in
 #                 security/trivy-risk-acceptance.json; MEDIUM/LOW are reported.
+#   trufflehog    Task 9.3. Installs the TruffleHog 3.97.9 release binary after
+#                 verifying its committed SHA-256 (no TruffleHog action, no
+#                 image), then runs scripts/run_trufflehog.sh over the full Git
+#                 history (fetch-depth: 0). Every result fails the job (exit 183);
+#                 secret values are never printed.
 
 on:
   push:
@@ -100,3 +106,38 @@ jobs:
 
       - name: Run Trivy config
         run: ./scripts/run_trivy_config.sh
+
+  trufflehog:
+    name: "TruffleHog (secret scan, not drift detection)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Full history: every commit is scanned, not only the latest one.
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Pinned release binary, verified against the SHA-256 committed here before
+      # it is unpacked (established from the cosign-verified official checksums).
+      # Never the TruffleHog action, whose default runs the mutable
+      # ghcr.io/trufflesecurity/trufflehog:latest image. Public download: no token.
+      - name: Install TruffleHog (pinned binary, SHA-256 verified)
+        env:
+          PINNED_TRUFFLEHOG_VERSION: "3.97.9"
+          PINNED_TRUFFLEHOG_LINUX_SHA256: "40377e6572495412fb9ba0bc21c9401f73b72f1d2afd11b9931bc4a5ed622866"
+        run: |
+          set -euo pipefail
+          archive="trufflehog_${PINNED_TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/trufflesecurity/trufflehog/releases/download/v${PINNED_TRUFFLEHOG_VERSION}/${archive}"
+          echo "${PINNED_TRUFFLEHOG_LINUX_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          echo "Verified SHA-256 ${PINNED_TRUFFLEHOG_LINUX_SHA256} for ${archive}"
+          mkdir "${RUNNER_TEMP}/trufflehog-bin"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/trufflehog-bin" trufflehog
+          echo "${RUNNER_TEMP}/trufflehog-bin" >> "${GITHUB_PATH}"
+
+      - name: Run TruffleHog
+        run: ./scripts/run_trufflehog.sh

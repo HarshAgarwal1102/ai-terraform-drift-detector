@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.3 — TruffleHog Secret Scanning (design locked 2026-10-04; implementation next)
+- **Current Active Task**: Task 9.3 — TruffleHog Secret Scanning (implemented and validated locally; CI proof pending)
 - **Phases Completed**: 8 of 14
 
 ---
@@ -2362,7 +2362,8 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - Cleanup: PR #3 closed unmerged (2026-10-03T15:35:41Z, `merged=false`); the remote and local branches were deleted; `main` = `origin/main` = `49eea22`, and the probe is absent from `main`.
 
 #### Task 9.3 — TruffleHog Secret Scanning
-- **Status**: ⬜ NOT STARTED — design locked 2026-10-04 (Task 9.3 design review + user decisions D1–D7)
+- **Status**: 🟡 WORK IN PROGRESS — implemented and validated locally; only the approval-gated CI proof is pending
+- **Started**: 2026-10-04
 - **Objective**: Configure TruffleHog in GitHub Actions to scan the repository's Git history for exposed credentials or keys, failing on every detected result. It **detects** committed secrets; it does not prevent a commit. *(Reworded 2026-10-04; previously "Credentials leakage prevention".)*
 - **Dependencies**: Task 9.2
 - **Locked version and flags (D1, D2)**:
@@ -2404,30 +2405,30 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 - **False positives (D3)**: only if a baseline needs it, via an exact, expiring, script-enforced acceptance record (detector, commit, file, line; never the value), the same mechanism as Task 9.2's AZU-0012. The 2026-10-04 baseline found **no results**, so the mechanism is **not** part of Task 9.3. Adding one later needs a plan change.
 - **Real historical secrets (D4)**: rotate the secret first (user action). History rewriting is outside Task 9.3, needs explicit approval, and is never automatic.
 - **Acceptance Criteria**:
-  - [ ] **Pinned install**:
+  - [x] **Pinned install**:
     - CI downloads the exact v3.97.9 Linux amd64 archive and verifies the committed SHA-256 before unpacking; a mismatch fails before any scan;
     - the script fails unless `trufflehog --version` reports exactly 3.97.9 (locally too);
     - `--no-update` is always passed.
-  - [ ] **Invocation and scope**: the locked command over the full history from the repository root after a `fetch-depth: 0` checkout; no forbidden flag or mechanism.
-  - [ ] **Failure policy**: exit 183 (finding) and exit 1 (error) both fail the job, and the log says which; exit 0 with results present fails; no remapping, `continue-on-error` or `|| true`.
-  - [ ] **No secret exposure**: no output, log, step summary or artifact contains a secret value; only the safe metadata fields are printed.
-  - [ ] **Clean baseline**: the real scan of the repository history reports 0 results (matching the 2026-10-04 baseline). Any new result means stop and decide per D3/D4; never suppress.
-  - [ ] **Workflow job `trufflehog`**:
+  - [x] **Invocation and scope**: the locked command over the full history from the repository root after a `fetch-depth: 0` checkout; no forbidden flag or mechanism.
+  - [x] **Failure policy**: exit 183 (finding) and exit 1 (error) both fail the job, and the log says which; exit 0 with results present fails; no remapping, `continue-on-error` or `|| true`.
+  - [x] **No secret exposure**: no output, log, step summary or artifact contains a secret value; only the safe metadata fields are printed.
+  - [x] **Clean baseline**: the real scan of the repository history reports 0 results (matching the 2026-10-04 baseline). Any new result means stop and decide per D3/D4; never suppress.
+  - [x] **Workflow job `trufflehog`**:
     - triggers inherited (`push`/`pull_request` to `main`, `workflow_dispatch`);
     - permissions exactly `contents: read`, inherited;
     - no `GITHUB_TOKEN`;
     - checkout with `fetch-depth: 0` and `persist-credentials: false`;
     - no `needs`;
     - not allowed: `azure/login`, `id-token`, `ARM_*`/`TF_VAR_*`/secrets, cache, SARIF/`security-events`, artifacts.
-  - [ ] **No drift semantics**: no drift outputs, issues, labels or remediation. The log states "secret scan, not drift detection".
-  - [ ] **Existing jobs and workflows protected**:
+  - [x] **No drift semantics**: no drift outputs, issues, labels or remediation. The log states "secret scan, not drift detection".
+  - [x] **Existing jobs and workflows protected**:
     - `tflint` and `trivy-config` jobs unchanged (YAML-identical);
     - `drift-detection.yml` and `terraform-auth-test.yml` unchanged (`git diff --exit-code` against the pre-implementation commit);
     - the existing test suites still pass.
-  - [ ] **README**: documents the local command, pinned version and hash, upgrade procedure, failure policy, scope and limitations, the no-output-of-secrets rule, the D3/D4 policy, and that no Azure access is needed.
+  - [x] **README**: documents the local command, pinned version and hash, upgrade procedure, failure policy, scope and limitations, the no-output-of-secrets rule, the D3/D4 policy, and that no Azure access is needed.
 - **Validation**:
-  - [ ] Static pytest (`tests/test_trufflehog.py`): version, hash and flag pins (including `--no-update`, `--no-verification`, `--json`, `--fail`); no forbidden flags or annotations; job permissions, checkout options and absence of Azure/OIDC/drift elements; the script prints no secret fields.
-  - [ ] Gate tests with a fake `trufflehog` emitting v3.97.9-shaped JSON whose `Raw`/`RawV2` hold a sentinel value. They prove the sentinel never appears in stdout/stderr, and cover:
+  - [x] Static pytest (`tests/test_trufflehog.py`): version, hash and flag pins (including `--no-update`, `--no-verification`, `--json`, `--fail`); no forbidden flags or annotations; job permissions, checkout options and absence of Azure/OIDC/drift elements; the script prints no secret fields.
+  - [x] Gate tests with a fake `trufflehog` emitting v3.97.9-shaped JSON whose `Raw`/`RawV2` hold a sentinel value. They prove the sentinel never appears in stdout/stderr, and cover:
     - exit 0 clean;
     - exit 183 findings;
     - exit 1 error;
@@ -2436,14 +2437,14 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - missing `jq` or binary;
     - wrong version;
     - the exact argument list, run from the repository root.
-  - [ ] Install step: correct hash passes; tampered hash and tampered archive fail at `sha256sum -c` (with `curl` stubbed).
-  - [ ] **Real local scratch-repository proof (D6)** with the verified binary and a randomly generated synthetic secret that is never committed to this repository and never published. It must show:
+  - [x] Install step: correct hash passes; tampered hash and tampered archive fail at `sha256sum -c` (with `curl` stubbed).
+  - [x] **Real local scratch-repository proof (D6)** with the verified binary and a randomly generated synthetic secret that is never committed to this repository and never published. It must show:
     - detection with exit 183;
     - detection of a secret deleted in a later commit (historical);
     - the value absent from the script's stdout/stderr;
     - a clean scratch repository exits 0;
     - a no-op control passes.
-  - [ ] Real local baseline over this repository's history: 0 results.
+  - [x] Real local baseline over this repository's history: 0 results.
   - [ ] **CI proof** (approval-gated):
     - a green `main` push whose `trufflehog` job scans the full history with 0 results (`tflint` and `trivy-config` stay green);
     - **D7(a), decided 2026-10-04:** a temporary draft PR that **only** changes the committed TruffleHog SHA-256 in `security-scan.yml`. The `trufflehog` job must fail at the integrity check (`sha256sum -c`), before unpacking or scanning. The PR is closed unmerged, its branch deleted, and `main` confirmed unchanged. The approval acknowledges that the PR also triggers `terraform-auth-test.yml` (its Azure login fails on a PR, existing behaviour).
@@ -2480,8 +2481,40 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 - **Implementation Notes**:
   - Secret **detection** in committed history.
   - Runs on code changes in `security-scan.yml`; it never runs inside or gates the drift-detection workflow.
-- **Completion Notes**:
-  - None.
+- **Completion Notes** *(2026-10-04, local validation; Task 9.3 stays 🟡 until the CI proof)*:
+  - **Implemented**:
+    - new `scripts/run_trufflehog.sh` (executable) and `tests/test_trufflehog.py` (17 tests);
+    - new `trufflehog` job in `security-scan.yml`: checkout (`fetch-depth: 0`, `persist-credentials: false`), install of the pinned Linux binary with `sha256sum -c` before unpacking, then the script;
+    - README "Secret scanning" section, security row, tech-stack row, repository tree, status lines.
+
+    The `tflint` and `trivy-config` jobs, workflow-level keys, both protected workflows (`git diff --exit-code 0cd0f4e`), Terraform, `src/`, the TFLint/Trivy files and their tests are unchanged. The 9.1/9.2 test suites needed no change.
+  - **Script behaviour**:
+    - checks `jq` first, then `git`/`trufflehog`, then `trufflehog --no-update --version` = `trufflehog 3.97.9`;
+    - runs the locked command from the repository root, with stdout JSON written to a private file under `RUNNER_TEMP`/`TMPDIR` (outside the repository, removed on exit);
+    - prints TruffleHog's log as level, message and error only, and findings as detector, verified, file, line and commit only;
+    - passes exit codes 0/183/other through unchanged, and fails on exit 0 with results or unreadable output.
+  - **Ignore-annotation enforcement**: TruffleHog honours its inline ignore annotation per line, so any exemption would be a loophole. The script therefore fails if the annotation appears in any tracked file (`git grep`) or anywhere in the history (`git log --all -G`). The script, tests and README build the string by concatenation. The one plan line that named it literally was reworded (meaning unchanged).
+  - **Real local proofs** (verified v3.97.9 darwin arm64 binary, the real script, scratch repositories; random synthetic value never printed, never committed here, deleted afterwards):
+    - clean repository → exit 0;
+    - secret at HEAD → exit 183;
+    - secret deleted in a later commit → exit 183;
+    - secret only on another local branch → exit 183 (`--all` covers local branches);
+    - no-op control → exit 0.
+
+    In every case the value appeared 0 times in the script's stdout and stderr. The real baseline of this repository via the script: no secrets, exit 0.
+  - **Install step** (run with a stubbed `curl` serving the verified Linux archive): the correct hash passes; a tampered hash or a tampered archive fails at `sha256sum -c` before unpacking or `GITHUB_PATH`.
+  - **Tests**:
+    - `tests/test_trufflehog.py`: 17 passed (fake `trufflehog`, sentinel in `Raw`/`RawV2`/`Redacted`/`ExtraData` never printed);
+    - TFLint + Trivy + TruffleHog suites: 56 passed;
+    - sensitivity: 16/16 regression mutations caught on a scratch copy, control passed;
+    - full suite: 1154 passed, 679 skipped (optional `ai`/`azure` extras absent); coverage 96.05%; `./scripts/validate.sh` passes.
+
+    No Azure call.
+  - **Pending (approval-gated CI proof)**:
+    - a green `main` push (`trufflehog` full history, 0 results);
+    - the D7(a) draft PR that only changes the committed SHA-256 and must fail at `sha256sum -c` before any scan.
+
+    Both also trigger `terraform-auth-test.yml`.
 
 #### Task 9.4 — Super-Linter Code Quality Enforcement
 - **Status**: ⬜ NOT STARTED — dedicated design review required before implementation

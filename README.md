@@ -29,8 +29,8 @@ built (Phase 11). See [What works today](#-what-works-today) and
   Phase 11 in the 2026-10-03 design review.
 - **Phase 9 — DevSecOps Integration** is in progress. Done: Task 9.1 (TFLint) and
   Task 9.2 (Trivy config security scan), both validated in real CI runs. **Current active
-  task: Task 9.3 — TruffleHog Secret Scanning**, which starts with its dedicated design
-  review. Task 9.4 (Super-Linter) also needs a design review.
+  task: Task 9.3 — TruffleHog Secret Scanning**: implemented and validated locally, CI
+  proof pending. Task 9.4 (Super-Linter) needs a design review.
 
 | Phase | Status |
 |---|---|
@@ -43,7 +43,7 @@ built (Phase 11). See [What works today](#-what-works-today) and
 | 6 — LangGraph AI analysis engine (library; no CLI/CI integration yet) | ✅ Complete |
 | 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
-| 9 — DevSecOps integration | 🟡 In progress (9.1 ✅, 9.2 ✅, 9.3 next, 9.4 pending) |
+| 9 — DevSecOps integration | 🟡 In progress (9.1 ✅, 9.2 ✅, 9.3 in progress, 9.4 pending) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -105,8 +105,7 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Secret scanning with TruffleHog (Task 9.3) and Super-Linter code-quality checks (Task 9.4);
-  both need their own design review first.
+- Super-Linter code-quality checks (Task 9.4), after its own design review.
 - An AI analysis CLI and no-LLM CI integration (Phase 9A).
 - FinOps cost analysis with Infracost (Phase 10).
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
@@ -184,6 +183,7 @@ design: backend, security controls, OIDC flow, and the CI workflows' access mode
 | azure-mgmt-monitor, azure-identity | `azure` extra | Activity Log collector (Phase 7) |
 | TFLint + `tflint-ruleset-azurerm` | `0.64.0` + `0.32.0` | Static Terraform linting (Task 9.1) |
 | Trivy (`trivy config`) | `0.75.0`, SHA-256-pinned Linux binary in CI | Terraform security scan (Task 9.2) |
+| TruffleHog | `3.97.9`, SHA-256-pinned Linux binary in CI | Secret scan of the Git history (Task 9.3) |
 | GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3`, `actions/setup-python@v5`, `actions/upload-artifact@v4` / `download-artifact@v4`, `terraform-linters/setup-tflint@v6` | Plan-only CI with OIDC, drift detection, security scans |
 
 `scripts/detect_drift.py` and the engine modules it imports use only the Python standard
@@ -233,7 +233,7 @@ each network inherits its resource group's name and location.
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
 ├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze → issues / report (Phases 5, 8)
-└── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2)
+└── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2), TruffleHog (9.3)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
@@ -250,6 +250,7 @@ scripts/
 ├── run_mutation_checks.py        # AI-engine safeguard mutation harness (Task 6.7)
 ├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
 ├── run_trivy_config.sh           # Trivy config security scan + risk-acceptance gate (local and CI; Task 9.2)
+├── run_trufflehog.sh             # TruffleHog secret scan of the full Git history (local and CI; Task 9.3)
 └── validate.sh                   # terraform fmt -check + validate (no Azure auth)
 
 src/drift_engine/                 # Python drift engine (Phase 4)
@@ -635,6 +636,68 @@ The known MEDIUM/LOW findings, all on the state storage account, are reported an
 - AZU-0061: infrastructure encryption, which would force replacing the account;
 - AZU-0058: geo-redundant replication.
 
+### Secret scanning (TruffleHog, Task 9.3)
+
+TruffleHog scans the repository's **Git history** for committed credentials and keys. It is a
+**secret scan, not drift detection**: a finding fails the scan job and never changes a drift
+result. It needs no Azure access, no token and no `terraform init`. It *detects* secrets that
+were committed; it doesn't stop a commit (GitHub's own secret scanning is separate).
+
+```bash
+# Requires TruffleHog 3.97.9, git and jq on PATH. Scans the full history of the repository.
+./scripts/run_trufflehog.sh
+```
+
+`scripts/run_trufflehog.sh` is the same command the `trufflehog` job runs in
+[`security-scan.yml`](.github/workflows/security-scan.yml) on every push and pull request to
+`main`. The job checks out with `fetch-depth: 0`, so every commit is scanned; there are no
+permissions beyond `contents: read` and no token. The script runs:
+
+```bash
+trufflehog git file://<repository root> --no-update --no-verification --json --fail
+```
+
+- **Full history:** every commit reachable from the checkout's refs (`git log --all
+  --diff-filter=AM`). A secret that was later deleted is still found in the commit that
+  added it.
+- **Not covered:**
+  - combined diffs of merge commits (the repository has none);
+  - GitHub's `refs/pull/*` refs on `main` runs;
+  - untracked or ignored files.
+- **`--no-update`:** TruffleHog would otherwise update itself at runtime, which defeats the pin.
+- **`--no-verification`:** no candidate secret is ever sent to a provider API, and **every**
+  result fails the job, verified or not.
+- **Exit codes, passed through unchanged:**
+  - `183`: secret found;
+  - `1` or another non-zero code: TruffleHog failed to run (a scanner error, not a finding);
+  - `0`: clean.
+
+  A wrong version, a missing `jq` or unreadable output also fail.
+- **No secret values in logs:** TruffleHog's JSON contains the raw secret, so it is written
+  to a private temporary file outside the repository and deleted afterwards. Only detector,
+  verification status, file, line and commit are printed. Nothing is uploaded.
+- **No suppression:**
+  - TruffleHog's inline ignore annotations are rejected anywhere in the files or the history;
+  - no exclude, include, result-narrowing, range or depth flags.
+
+| Component | Pinned | Where |
+|---|---|---|
+| TruffleHog | `3.97.9` | `scripts/run_trufflehog.sh` (required version) and `security-scan.yml` |
+| TruffleHog Linux binary SHA-256 | `40377e6572495412fb9ba0bc21c9401f73b72f1d2afd11b9931bc4a5ed622866` | `security-scan.yml`, verified before unpacking |
+
+The hash was taken from TruffleHog's official checksums file after its cosign signature was
+verified (identity: the `trufflesecurity/trufflehog` release workflow). The workflow uses no
+TruffleHog GitHub Action and no Docker image: the action's default runs the mutable
+`ghcr.io/trufflesecurity/trufflehog:latest` image. To upgrade, make one reviewed change that
+updates the version and hash in `security-scan.yml`, the version in the script,
+`tests/test_trufflehog.py` and this section together.
+
+**If a secret is found:** treat a real secret as compromised and **rotate it first**.
+Rewriting Git history is a separate decision that needs explicit approval; it never happens
+automatically. A false positive is not suppressed; it needs a reviewed `PROJECT_PLAN.md`
+decision (an exact, expiring acceptance, as for Trivy's AZU-0012). The 2026-10-04 baseline
+over the full history, including everything published on GitHub, found **no results**.
+
 ---
 
 ## 🚀 Deployment & Operations Guide
@@ -748,6 +811,7 @@ registration holds zero credentials.
 | No Storage Account Keys | `listkeys` is denied to the CI identity, so state access uses Entra ID on the data plane (`ARM_USE_AZUREAD=true`) instead of account keys. |
 | Sensitive Values Redacted | Values Terraform marks sensitive are never emitted in drift reports. |
 | Static Security Scanning | TFLint and Trivy config check `terraform/` on every push and PR (`security-scan.yml`, `contents: read`, no Azure, no OIDC). HIGH/CRITICAL Trivy findings fail the job except one documented, expiring risk acceptance (AZU-0012, until 2027-03-31). |
+| Secret Scanning | TruffleHog scans the full Git history on every push and PR. Every result fails the job; secret values are never printed or uploaded; candidates are never sent to provider APIs (Task 9.3). |
 | State Destroy Protection | `prevent_destroy` on the remote-state storage account and container (Task 9.1). |
 | Public Issue Profile | Drift issues carry structure only: no values, HCL, AI output, Activity Log data or caller identity (Task 8.1). |
 
@@ -766,7 +830,7 @@ registration holds zero credentials.
 | 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI in 9A) |
 | 7 | Azure Activity Log investigation | ✅ Complete |
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
-| **9** | **DevSecOps scanning** | 🟡 In progress: 9.1 TFLint ✅, 9.2 Trivy config ✅, **9.3 TruffleHog next** (design review), 9.4 Super-Linter |
+| **9** | **DevSecOps scanning** | 🟡 In progress: 9.1 TFLint ✅, 9.2 Trivy config ✅, **9.3 TruffleHog in progress** (CI proof pending), 9.4 Super-Linter |
 | 9A | AI analysis CLI & no-LLM CI integration | ⬜ Planned |
 | 10 | FinOps / Infracost | ⬜ Planned |
 | 11 | Human-approved remediation | ⬜ Planned |
