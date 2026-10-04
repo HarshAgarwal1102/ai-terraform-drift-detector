@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9 — DevSecOps Integration
-- **Current Active Task**: Task 9.4 — Super-Linter Code Quality Enforcement (dedicated design review required before implementation)
+- **Current Active Task**: Task 9.4 — Super-Linter Code Quality Enforcement (design locked 2026-10-04; implementation next)
 - **Phases Completed**: 8 of 14
 
 ---
@@ -2523,24 +2523,147 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
     - **Cleanup:** PR #4 closed unmerged (2026-10-04T02:21:05Z, `merged=false`; closed by GitHub when the head branch was deleted). The remote and local branches were deleted, and no branch contains `28ea13f`. `main` = `origin/main` = `3e86419`, carrying the correct SHA-256.
     - The browser session was signed out of GitHub, so the user opened PR #4 and confirmed the failing step in the log. The step results above come from the public Actions API.
 #### Task 9.4 — Super-Linter Code Quality Enforcement
-- **Status**: ⬜ NOT STARTED — dedicated design review required before implementation
-- **Objective**: Add GitHub Super-Linter to validate Python, YAML, Shell, and Markdown standards across repository.
+- **Status**: ⬜ NOT STARTED — design locked 2026-10-04 (Task 9.4 design review + user decisions D1–D10)
+- **Objective**: Run Super-Linter, from a digest-pinned image, as a code-quality gate in its own workflow. The scope is Python (Ruff, lint only), shell (ShellCheck), non-workflow YAML (yamllint) and Markdown (markdownlint, including `PROJECT_PLAN.md`). A finding is a code-quality failure: never a security result, never a drift result. *(Reworded 2026-10-04 per the Task 9.4 design review.)*
 - **Dependencies**: Task 9.3
-- **Files/Areas**: `.github/workflows/super-linter.yml`; the required linter configuration files must be listed here by the Task 9.4 design review.
-- **Design issues (to be resolved in the Task 9.4 design review)** *(recorded 2026-10-03, Phase 9 re-evaluation)*:
-  - **Markdown**: the objective includes Markdown, but the acceptance criteria below do not. The repository's Markdown includes `PROJECT_PLAN.md` (2,477 lines).
-  - **Python baseline**: 3,406 lines exceed 88 characters, in 54 of 56 tracked Python files; 5,003 exceed 79 characters. No black/flake8 configuration exists. Completed phases must not be silently reformatted; the Python formatting/linting strategy is a decision for the design review.
-  - **Overlap with Tasks 9.1–9.3**: Super-Linter bundles TFLint, Checkov, Trivy, `terraform fmt` and GitLeaks. An explicit allowlist/exclusion strategy is required. It must prevent duplicate or conflicting runs of TFLint (whose locked `.tflint.hcl` requires `= 0.64.0`) and of the scanners owned by Tasks 9.2/9.3.
-  - **Version**: the exact Super-Linter version must be pinned before implementation (latest at review time: v9.0.0, 2026-10-01).
-  - **Permissions** must be designed explicitly. The upstream example uses `pull-requests: write` (and optionally `statuses: write`); write permissions are not assumed acceptable.
-  - **Shell and YAML baselines** (6 tracked shell scripts, 2 workflow files) have not been established yet.
-- **Acceptance Criteria** *(provisional; the vague criteria are replaced with objective ones by the Task 9.4 design review)*:
-  - [ ] Super-Linter validates Python (flake8/black), Bash (shellcheck), and YAML. The Python linters and formatter are subject to the Python baseline decision above.
-  - [ ] Enforces unified coding standards. *(Vague; to be replaced.)*
+- **Locked version and execution (D1)**:
+  - Image `ghcr.io/super-linter/super-linter@sha256:7620fb6f07a1908b0642d9ddc4f49da7d9f2b9497bcafee4d3d151d1e5567c0b`: the OCI index of tag `v9.0.0`, the standard image the v9.0.0 action references. It contains only linux/amd64 plus a build attestation.
+  - Run directly with `docker run --rm --platform linux/amd64 … <image>@sha256:…`. The Super-Linter action is not used, because it references the **mutable** tag `docker://ghcr.io/super-linter/super-linter:v9.0.0`. A pull or run failure fails the job.
+  - Environment (each name and value must be confirmed against the v9.0.0 configuration table during implementation; stop if one differs):
+    - `RUN_LOCAL=true`, repository mounted at `/tmp/lint` (Super-Linter's documented local mode);
+    - `VALIDATE_ALL_CODEBASE=true` (the whole codebase, deterministic, no changed-file mode);
+    - `IGNORE_GITIGNORED_FILES=true` (ignored local files such as `.artifacts/` are never linted);
+    - `LINTER_RULES_PATH=.github/linters`;
+    - `FILTER_REGEX_EXCLUDE` matching only `.github/workflows/` (D5);
+    - `MULTI_STATUS=false`, `ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT=false`, `SAVE_SUPER_LINTER_OUTPUT=false`;
+    - `DISABLE_ERRORS` not set.
+- **Linter allowlist (D2)**: exactly `VALIDATE_PYTHON_RUFF=true`, `VALIDATE_BASH=true` (ShellCheck), `VALIDATE_YAML=true` (yamllint) and `VALIDATE_MARKDOWN=true` (markdownlint). No other `VALIDATE_*` variable is set.
+  - Verified in v9.0.0 `lib/functions/validation.sh`: when any `VALIDATE_*` is `true` and none is `false`, every unset one defaults to `false`; mixing `true` and `false` is a fatal error.
+  - So TFLint, `terraform fmt`, Trivy, Checkov, GitLeaks (owned by Tasks 9.1–9.3), formatters (`VALIDATE_PYTHON_RUFF_FORMAT`, black, isort, shfmt, Prettier), GitHub Actions linting (actionlint, zizmor), JSON, copy-paste detection and every other validator stay off.
+- **Configuration**: four committed files under `.github/linters/` (`.ruff.toml`, `.shellcheckrc`, `.yaml-lint.yml`, `.markdown-lint.yml`), each copied **verbatim** from Super-Linter v9.0.0 `TEMPLATES/`.
+  - Without them, v9.0.0 `lib/functions/linterRules.sh` silently falls back to those templates. Committing them keeps the rules visible and fixed before the baseline.
+  - Template content at v9.0.0:
+    - Ruff: `line-length = 120`, `[lint] ignore = ["E203"]`, Ruff's default rule selection, which does not include line length; lint only, no formatter (D3);
+    - ShellCheck: `source-path=SCRIPTDIR`, `external-sources=true`;
+    - yamllint: document start required, line length 80, other rules as in the template;
+    - markdownlint: `MD013` line length 400, `MD004`/`MD029`/`MD033`/`MD036` off, other rules as in the template.
+  - Any change from the templates is a plan decision taken **before** a baseline is measured, never to turn a measured baseline green.
+- **Scope**:
+  - all tracked Python, shell, YAML and Markdown files, except `.github/workflows/**` (D5: no changes to protected workflows; GitHub Actions linting and zizmor are deferred to Phase 12);
+  - **yamllint**: no non-workflow YAML is tracked today, so only the two YAML config files added by this task are linted;
+  - **Markdown**: all tracked `.md` files, including `PROJECT_PLAN.md` (D4).
+- **Suppression policy (D8, strengthened 2026-10-04)**:
+  - **No new inline suppressions** of any kind:
+    - Python: `# noqa`, `# ruff: noqa`;
+    - shell: `# shellcheck disable=`;
+    - Markdown: `<!-- markdownlint-disable… -->`, `<!-- markdownlint-capture -->`/`restore`;
+    - YAML: `# yamllint disable…`.
+  - **No increase in the existing `# noqa` count:** exactly the 19 legacy comments below, and no new ones in any Python file.
+  - **No other suppression mechanism to make the baseline green:**
+    - no extra `FILTER_REGEX_EXCLUDE` or `FILTER_REGEX_INCLUDE`;
+    - no `DISABLE_ERRORS`, no `--fix`;
+    - no `per-file-ignores`, `extend-ignore` or other rule loosening in the configs (they stay byte-identical to the v9.0.0 templates unless a plan decision taken before measuring says otherwise);
+    - no new `.gitignore` entries used to hide tracked files.
+  - **Tests detect any new suppression:**
+    - the static tests compare the exact per-file, per-code `# noqa` inventory below and fail on any addition (new comment, new code or new file);
+    - they also fail on any of the other inline directives in files of the matching type. The four verbatim template config files are checked by SHA-256 instead, because the templates' own comments mention directive syntax.
+    - The test file builds these patterns by concatenation, so it never adds an occurrence itself.
+  - If a legitimate exception is needed, stop and decide it in the plan.
+- **D10 — legacy `# noqa` comments, decided 2026-10-04: option (a), retain.** The repository already contains **19 `# noqa` comments in 11 Python files**. They predate Task 9.4, were not added to make CI green, and are recorded here as **legacy, pre-existing exceptions only**. They are **not** removed or refactored in Task 9.4. Inventory (file:line, rule):
+  - `scripts/detect_drift.py`: 46 `E402`, 71 `E402`
+  - `scripts/github_automation.py`: 503 `D401`
+  - `src/ai_engine/graph.py`: 59 `F401` (re-export)
+  - `tests/test_attribution.py`: 53 `E402`, 201 `N802`, 204 `N802`
+  - `tests/test_attribution_fallback.py`: 32 `E402`, 35 `E402`
+  - `tests/test_classifier.py`: 26 `E402`, 27 `E402`
+  - `tests/test_comparator.py`: 24 `E402`, 25 `E402`
+  - `tests/test_github_automation.py`: 381 `E731`
+  - `tests/test_logging.py`: 26 `E402`
+  - `tests/test_parser.py`: 28 `E402`
+  - `tests/test_severity.py`: 23 `E402`, 24 `E402`, 25 `E402`
+
+  Totals: 14 `E402`, 2 `N802`, 1 `D401`, 1 `F401`, 1 `E731`; one comment per line. Line numbers may shift when unrelated code moves, so tests compare per-file, per-code counts.
+  - Not suppressions in scope: the 2 `# type: ignore` (mypy is not enabled) and the 3 `# shellcheck source=` lines (path directives).
+- **Files/Areas**:
+  - new `.github/workflows/super-linter.yml` (D7)
+  - new `scripts/run_super_linter.sh`: the single local/CI command
+  - new `.github/linters/.ruff.toml`, `.shellcheckrc`, `.yaml-lint.yml`, `.markdown-lint.yml`
+  - new `tests/test_super_linter.py`
+  - `README.md`
+  - files that need baseline fixes, only as decided after the baseline (see Acceptance)
+  - **Unchanged**:
+    - `drift-detection.yml`, `terraform-auth-test.yml`, `security-scan.yml` (its three jobs)
+    - Terraform, `.tflint.hcl`, the 9.1–9.3 scripts and tests, `security/trivy-risk-acceptance.json`
+    - no mass formatting of Python (D3)
+- **Acceptance Criteria** *(objective; the baseline is **not** assumed clean)*:
+  - [ ] **Pinned image**: the workflow and script reference only the v9.0.0 index digest above; no tag, no `latest`, no Super-Linter action. A pull or run failure fails the job.
+  - [ ] **Allowlist**: exactly the four `VALIDATE_*=true` variables of D2; no other `VALIDATE_*`; the environment exactly as locked above.
+  - [ ] **Configuration**: the four `.github/linters/` files byte-identical to Super-Linter v9.0.0 `TEMPLATES/`, unless a later plan decision changes them.
+  - [ ] **Suppression inventory (D8/D10)**: the `# noqa` inventory is exactly the 19 legacy comments above (per file and per code); there are no other inline suppressions in Python, shell, Markdown or YAML files; the configs match the template hashes.
+  - [ ] **Baseline**: the first real run with the pinned image records the findings per linter and per file in the Completion Notes. The gate is green only after every finding is resolved by a reviewed fix or a recorded plan decision. **Stop and report** after the baseline and before any fix, with options per linter. No suppression or config loosening to get green (D8).
+  - [ ] **Workflow `super-linter.yml`**:
+    - triggers `push`/`pull_request` to `main` and `workflow_dispatch`;
+    - permissions exactly `contents: read`;
+    - checkout with `persist-credentials: false`;
+    - no `GITHUB_TOKEN` passed to the container (statuses and PR comments are off);
+    - concurrency group `super-linter-${{ github.ref }}`, cancelling only pull-request runs;
+    - not allowed: `id-token`, `azure/login`, `ARM_*`/`TF_VAR_*`/secrets, cache, artifacts, SARIF, `continue-on-error`.
+  - [ ] **No drift or security semantics**: no drift outputs, issues or labels. The log states "code-quality lint, not drift detection".
+  - [ ] **Protected**:
+    - `drift-detection.yml`, `terraform-auth-test.yml` and `security-scan.yml` unchanged (`git diff --exit-code` against the pre-implementation commit);
+    - `.github/workflows/**` never modified or linted;
+    - the 9.1–9.3 jobs and tests still pass.
+  - [ ] **README**: documents the local command (Docker; on arm64 hosts amd64 emulation via `--platform linux/amd64`), the pinned digest and upgrade procedure, the allowlist and scope, the suppression policy, and D10 (19 retained legacy `# noqa` comments; no new ones).
 - **Validation**:
-  - [ ] Workflow completes cleanly on main branch. *(Vague; to be replaced.)*
+  - [ ] Static pytest (`tests/test_super_linter.py`):
+    - digest pin;
+    - exact allowlist and environment;
+    - no forbidden variables, flags or actions;
+    - configs equal to the recorded template SHA-256s;
+    - the exact D10 `# noqa` inventory (per file, per code; fails on any new comment, new code or new file) and no other inline directives (D8);
+    - job permissions, no token, no Azure/drift elements;
+    - protected workflows contain no Super-Linter.
+  - [ ] Real local baseline with the pinned image (D9 approved the download), recorded per linter.
+  - [ ] Mutation checks on **scratchpad copies** with the real image. Each must fail except the last two:
+    - an unused import (Ruff `F401`);
+    - an unquoted variable expansion (ShellCheck `SC2086`);
+    - a Markdown rule violation;
+    - a YAML rule violation in a non-workflow YAML file;
+    - a wrong digest (pull failure);
+    - a new `# noqa` added in a scratch copy, which must fail the static test (D8).
+
+    Must still pass:
+    - a violation placed under `.github/workflows/` (exclusion works);
+    - a Terraform or secret-like pattern (overlapping validators off).
+
+    Plus a no-op control.
+  - [ ] **CI proof (approval-gated)**:
+    - a green `main` push of `super-linter.yml`;
+    - a draft PR adding one deliberate ShellCheck violation in a scratch shell file (no secret, no protected file), which must fail the job; the PR closed unmerged and its branch deleted.
+
+    The PR also triggers `security-scan.yml` (expected green) and `terraform-auth-test.yml` (Azure login fails on PRs, existing behaviour).
+- **Design Review (2026-10-04)**:
+  - **Verified semantics (v9.0.0 source)**: allowlist rules in `lib/functions/validation.sh`; template fallback in `lib/functions/linterRules.sh`; local mode in `docs/run-linter-locally.md` (`RUN_LOCAL=true`, code mounted at `/tmp/lint`, use a specific version rather than `latest`).
+  - **Image** (manifest metadata only, nothing downloaded):
+    - v9.0.0 index `sha256:7620fb6f…567c0b` → linux/amd64 manifest `sha256:496fe2e1…db73`, 1.89 GB compressed (85 layers);
+    - `slim-v9.0.0` index `sha256:7d0b4d33…d9e4`, 1.37 GB, also contains the four D2 linters (not chosen; a future reviewed change).
+    - The upstream workflow example requests `issues`, `pull-requests` and `statuses` write; all of those features are off here (D6).
+  - **Baseline facts (2026-10-04, measured without Super-Linter)**:
+    - 59 tracked Python files (24,370 lines; no Ruff/black/flake8 configuration);
+    - 9 shell scripts, one of them without a shebang (`tests/scenarios/rg_tag_drift_common.sh`, a sourced library), which ShellCheck may report;
+    - 0 non-workflow YAML files;
+    - 5 Markdown files with **204 lines longer than 400 characters** (longest 2,261), so the template's `MD013` limit is expected to report findings;
+    - 19 pre-existing `# noqa` comments (D10).
+  - **Overlap**: TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3) keep sole ownership of Terraform lint, Terraform security and secret scanning; Super-Linter's copies of those tools are off (D2).
+- **Out of Scope**:
+  - formatters and mass formatting (D3)
+  - GitHub Actions linting and zizmor (Phase 12, D5)
+  - other languages
+  - changing protected workflows
+  - pinning actions by SHA (Phase 12)
+  - any Azure access
 - **Implementation Notes**:
-  - Code hygiene and linting automation.
+  - Code-quality linting only. It never runs inside or gates the drift-detection workflow.
 - **Completion Notes**:
   - None.
 

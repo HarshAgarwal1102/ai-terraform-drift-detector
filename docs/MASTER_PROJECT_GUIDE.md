@@ -7,9 +7,9 @@
 > **Snapshot history:**
 > - **Originally written** against the historical commit `3e2a696` (2026-10-01, during
 >   Phase 3). That commit is *not* the current project HEAD.
-> - **Last updated** against commit `fae5782` (2026-10-03: Phase 9 in progress, Task 9.2
->   complete, Task 9.3 next). Statuses, roadmap, security, testing and open questions
->   reflect that state.
+> - **Last updated** against commit `661ae1e` (2026-10-04: Phase 9 in progress, Tasks
+>   9.1–9.3 complete, Task 9.4 next). Statuses, roadmap, security, testing and open
+>   questions reflect that state.
 > - Sections 5–11 still explain Phases 1–3 the way they were designed, with their final
 >   status. Phases 4–9 are summarized in [Section 4](#what-phases-49-delivered).
 > - For anything newer, `PROJECT_PLAN.md` wins.
@@ -343,8 +343,8 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 | AI analysis engine (library) | 🟢 CURRENT (Phase 6) | `src/ai_engine/` |
 | Activity Log collector + attribution | 🟢 CURRENT (Phase 7, opt-in) | `src/drift_engine/activity_logs.py`, `attribution.py` |
 | Drift issues (create/update/close) | 🟢 CURRENT (Tasks 8.1, 8.3) | `scripts/github_automation.py` |
-| TFLint + Trivy config scanning | 🟢 CURRENT (Tasks 9.1, 9.2) | `.github/workflows/security-scan.yml` |
-| TruffleHog, Super-Linter | ⬜ FUTURE (Tasks 9.3, 9.4) | — |
+| TFLint + Trivy config + TruffleHog scanning | 🟢 CURRENT (Tasks 9.1–9.3) | `.github/workflows/security-scan.yml` |
+| Super-Linter | ⬜ FUTURE (Task 9.4) | — |
 | AI CLI + CI, cost, remediation, hardening, dashboard | ⬜ FUTURE (Phases 9A–14) | — |
 | Remediation PRs (old Task 8.2) | ⬜ FUTURE (moved to Phase 11) | — |
 | Application Storage Account, Key Vault | ⏸️ DEFERRED | Not in the codebase |
@@ -372,7 +372,7 @@ That figure counts the numbered phases 1–14. The lettered phases are planned s
 | 6 | LangGraph AI Analysis Engine | AI explains drift (security, cost, risk, remediation) from evidence | 🟢 COMPLETED |
 | 7 | Azure Activity Log Investigation | Find which Azure operation/caller made the change | 🟢 COMPLETED |
 | 8 | GitHub Issue / PR Automation | Open/close drift issues automatically (remediation PRs moved to Phase 11) | 🟢 COMPLETED |
-| 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog, Super-Linter in CI | 🟡 WORK IN PROGRESS (9.1, 9.2 done; 9.3 next) |
+| 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog, Super-Linter in CI | 🟡 WORK IN PROGRESS (9.1–9.3 done; 9.4 next) |
 | 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | ⬜ NOT STARTED |
 | 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation | ⬜ NOT STARTED |
 | 11 | Human-Approved Remediation | Apply fixes only after human approval | ⬜ NOT STARTED |
@@ -423,7 +423,7 @@ flowchart LR
 | **6 — AI Analysis** | `src/ai_engine/`: a LangGraph pipeline over the drift report (security, cost/configuration, root cause/risk, remediation options, JSON + Markdown report). The LLM is opt-in (`AI_LLM_PROVIDER=none` by default). AI output is checked against the evidence and never changes drift or severity. It is a library only; CLI/CI is Phase 9A. |
 | **7 — Activity Log** | `drift-engine activity-logs` (opt-in `[azure]` extra) and `drift-engine attribute`: a caller is recorded only where exact-resource write/delete events establish it, otherwise "unknown". Tested with fake log sources; not in any workflow. |
 | **8 — Issues** | One public, structure-only issue per drifted resource (8.1), closed only when a newer valid run shows the resource no longer drifted (8.3). Both validated in real runs. Remediation PRs (8.2) were found unsafe for a public repo and moved to Phase 11. |
-| **9 — DevSecOps** (in progress) | `security-scan.yml`, no Azure access. **TFLint** (9.1) checks lint and value validity; **Trivy config** (9.2) checks security policy, with HIGH/CRITICAL blocking except one expiring, script-enforced risk acceptance (AZU-0012 on the state storage account, until 2027-03-31). TruffleHog (9.3) and Super-Linter (9.4) are next, each after a design review. |
+| **9 — DevSecOps** (in progress) | `security-scan.yml`, no Azure access. **TFLint** (9.1) checks lint and value validity; **Trivy config** (9.2) checks security policy, with HIGH/CRITICAL blocking except one expiring, script-enforced risk acceptance (AZU-0012 on the state storage account, until 2027-03-31). **TruffleHog** (9.3) scans the full Git history for secrets, and every result blocks (pinned, SHA-256-verified binary, `--no-verification`, raw values never printed). Super-Linter (9.4) is next, after its design review. |
 
 ---
 
@@ -1220,7 +1220,7 @@ Real end-to-end runs (Azure tag drift, workflow runs, CI proofs)
 | **Mutation checks** | Deliberately broken copies of safeguards (Task 6.7 harness, Phase 8 mutants, Phase 9 scanner mutation matrices on scratch copies) | Tests that pass even when a safeguard is removed |
 | **Fresh-clone validation** | Running tests on a copy containing only files git would commit | Tests that pass only because of an ignored local file |
 | **Terraform checks** | `./scripts/validate.sh` (fmt + validate, offline), `./scripts/run_tflint.sh`, `./scripts/run_trivy_config.sh` | Broken, lint-failing or insecure Terraform code |
-| **Real end-to-end** | Approved real Azure tag drift (Tasks 3.6–3.7); real workflow runs (Phases 5, 8); CI proofs with a green push and a deliberately failing PR (Tasks 9.1, 9.2) | Pieces that work alone but not together |
+| **Real end-to-end** | Approved real Azure tag drift (Tasks 3.6–3.7); real workflow runs (Phases 5, 8); CI proofs with a green push and a deliberately failing PR (Tasks 9.1–9.3; 9.3's PR only tampered with the pinned hash, so no secret was published) | Pieces that work alone but not together |
 
 How to run:
 
@@ -1264,13 +1264,13 @@ pytest --cov=src/drift_engine tests/
 | **AI cannot decide or invent** | AI never changes drift or severity; evidence-vs-inference checks reject invented attributes or blame (Task 6.7); LLM opt-in only |
 | **State destroy protection** | `prevent_destroy` on the state storage account and container (Task 9.1) |
 | **Static security scanning** | TFLint + Trivy config on every push/PR, no Azure access; Trivy is a SHA-256-verified pinned binary with embedded checks; HIGH/CRITICAL block (Tasks 9.1, 9.2) |
+| **Secret scanning** | TruffleHog scans the full Git history on every push/PR; every result blocks; candidates are never sent to provider APIs; secret values are never printed or uploaded; inline ignore annotations are rejected (Task 9.3) |
 | **Accepted risk, enforced** | AZU-0012 (no network rules on the state account) is accepted only by an exact, expiring (2027-03-31) record checked by a script; no `.trivyignore` or Trivy suppression |
 
 ### Planned ⬜ (not implemented yet)
 
 | Control | Phase |
 |---|---|
-| TruffleHog secret scanning (after its design review) | 9.3 |
 | Super-Linter code quality checks (after its design review) | 9.4 |
 | Human approval gates before any remediation apply | 11 |
 | Full RBAC/secret hardening audit | 12.3 |
@@ -1323,7 +1323,8 @@ flowchart TD
 
 *(Historical context only: the first commits. Every later task records its commits in its
 `PROJECT_PLAN.md` completion notes; `git log` has the full history. Recent milestones:
-`b34803f` TFLint gate (9.1), `49eea22` Trivy config scan (9.2), `fae5782` Task 9.2 complete.)*
+`b34803f` TFLint gate (9.1), `49eea22` Trivy config scan (9.2), `fae5782` Task 9.2 complete,
+`3e86419` TruffleHog secret scan (9.3), `661ae1e` Task 9.3 complete.)*
 
 ---
 
@@ -1340,13 +1341,13 @@ flowchart TD
 | **Phase 6** | 🟢 | AI analysis engine (library, LLM opt-in) | CLI + no-LLM CI (Phase 9A) |
 | **Phase 7** | 🟢 | Activity Log collector + attribution (opt-in) | — |
 | **Phase 8** | 🟢 | Drift issues create/update/close (8.1, 8.3) | Remediation PRs moved to Phase 11 |
-| **Phase 9** | 🟡 | TFLint (9.1) and Trivy config (9.2), validated in CI | **Task 9.3 TruffleHog (design review)**, then 9.4 |
+| **Phase 9** | 🟡 | TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3), validated in CI | **Task 9.4 Super-Linter (design review)** |
 | Phases 9A–14 | ⬜ | Task lists drafted in `PROJECT_PLAN.md` | Each after its design review |
 | Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7) | — |
 | Detection running in CI? | ✅ Yes | Daily scheduled + manual runs | — |
 
 **Current phase:** Phase 9 — DevSecOps Integration
-**Current active task:** Task 9.3 — TruffleHog Secret Scanning (dedicated design review required before implementation)
+**Current active task:** Task 9.4 — Super-Linter Code Quality Enforcement (dedicated design review required before implementation)
 
 ---
 

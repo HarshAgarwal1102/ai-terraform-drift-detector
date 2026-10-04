@@ -4,7 +4,7 @@
 
 This platform detects, analyzes, and remediates **infrastructure drift** — the gap between what Terraform expects and what actually exists in Azure. The final product will combine Terraform, Python, LangGraph/LLM analysis, GitHub automation, and a professional dashboard.
 
-**Current Status (2026-10-03):** Phases 1–8 are complete, and so is the lettered expansion Phase 5A (placed after Phase 5 and before Phase 6). `PROJECT_PLAN.md`'s "Phases Completed: 8 of 14" counts only the numbered phases. Phase 9A (AI analysis integration, before Phase 10) is planned and not started. Phase 9 (DevSecOps) is in progress: Task 9.1 TFLint and Task 9.2 Trivy config are complete; Task 9.3 TruffleHog (design review) is next. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
+**Current Status (2026-10-04):** Phases 1–8 are complete, and so is the lettered expansion Phase 5A (placed after Phase 5 and before Phase 6). `PROJECT_PLAN.md`'s "Phases Completed: 8 of 14" counts only the numbered phases. Phase 9A (AI analysis integration, before Phase 10) is planned and not started. Phase 9 (DevSecOps) is in progress: Task 9.1 TFLint, Task 9.2 Trivy config and Task 9.3 TruffleHog are complete; Task 9.4 Super-Linter (design review) is next. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
 
 ---
 
@@ -21,7 +21,7 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 | **6** | **LangGraph AI Analysis** | `src/ai_engine` library; LLM opt-in; no CLI/CI integration yet (Phase 9A) | ✅ Complete |
 | **7** | **Azure Activity Log Investigation** | Activity Log collector and deterministic attribution (opt-in, not in any workflow) | ✅ Complete |
 | **8** | **GitHub Issue / PR Automation** | Drift issues create/update/close (8.1, 8.3); remediation PRs (8.2) superseded by Phase 11 | ✅ Complete |
-| 9 | DevSecOps Integration | `security-scan.yml`: TFLint (9.1 ✅), Trivy config (9.2 ✅); TruffleHog (9.3), Super-Linter (9.4) pending | 🟡 In progress |
+| 9 | DevSecOps Integration | `security-scan.yml`: TFLint (9.1 ✅), Trivy config (9.2 ✅), TruffleHog secret scan (9.3 ✅); Super-Linter (9.4) pending | 🟡 In progress |
 | 9A–14 | AI CI integration, FinOps, human-approved remediation, hardening, dashboard, final docs | See `PROJECT_PLAN.md` | ⬜ Planned |
 
 ---
@@ -152,7 +152,7 @@ pipeline.
 |---|---|---|---|
 | `terraform-auth-test.yml` (Phase 2) | push / PR to `main` (or `master`), manual | OIDC; `terraform fmt`, `validate`, read-only `plan` | `id-token: write`, `contents: read` |
 | `drift-detection.yml` (Phases 5, 8) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only; never `apply` | workflow: `id-token: write`, `contents: read`; `issues` job: `contents: read`, `issues: write`, no Azure |
-| `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC) | `contents: read` only |
+| `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC; TruffleHog uses `--no-verification`, so no candidate secret is sent anywhere) | `contents: read` only; no token |
 
 Only the `main` branch has a federated credential, so `terraform-auth-test.yml` runs on pull
 requests fail at Azure login (`AADSTS700213`); this is known, existing behaviour.
