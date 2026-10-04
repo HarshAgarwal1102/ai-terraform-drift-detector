@@ -127,7 +127,7 @@ jobs:
       - name: Install TruffleHog (pinned binary, SHA-256 verified)
         env:
           PINNED_TRUFFLEHOG_VERSION: "3.97.9"
-          PINNED_TRUFFLEHOG_LINUX_SHA256: "40377e6572495412fb9ba0bc21c9401f73b72f1d2afd11b9931bc4a5ed622866"
+          PINNED_TRUFFLEHOG_LINUX_SHA256: "40377e6572495412fb9ba0bc21c9401f73b72f1d2afd11b9931bc4a5ed622867"
         run: |
           set -euo pipefail
           archive="trufflehog_${PINNED_TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"
