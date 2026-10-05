@@ -7,7 +7,8 @@ and closes automation issues whose resource the run reports as present and no
 longer drifted (Task 8.3).
 
 Public-repository profile (PROJECT_PLAN.md Phase 8):
-  * input is the drift report only: no AI report, no Activity Log evidence or
+  * input is the public drift report only (Task 9B.4A: identifiers withheld; an
+    internal report is rejected as report_invalid): no AI report, no Activity Log evidence or
     attribution, no caller identity and no origin line;
   * bodies are structure only: never real/state/desired values, HCL fragments or
     severity reasons; the paths are withheld (reduced body) unless the resource is
@@ -70,11 +71,13 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 try:
-    from drift_engine.models import DriftItem, DriftReport
+    from drift_engine.report_public import PublicDriftItem as DriftItem
+    from drift_engine.report_public import PublicDriftReport as DriftReport
     from drift_engine.severity import SECURITY_SENSITIVE_TYPES, rank
 except ImportError:  # running from a source tree without installation
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-    from drift_engine.models import DriftItem, DriftReport
+    from drift_engine.report_public import PublicDriftItem as DriftItem
+    from drift_engine.report_public import PublicDriftReport as DriftReport
     from drift_engine.severity import SECURITY_SENSITIVE_TYPES, rank
 
 from pydantic import ValidationError

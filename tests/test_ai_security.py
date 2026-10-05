@@ -38,6 +38,13 @@ from ai_engine.nodes.security_analysis import (
 )
 from drift_engine.classifier import evaluate
 
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
 if HAS_AI_EXTRA:
@@ -59,12 +66,12 @@ AVAILABLE = {"available": True, "provider": "fake", "model": "fake-model", "reas
 
 
 def security_report(name: str) -> dict:
-    return evaluate(str(SECURITY / name / "plan.synthetic.json"), str(SECURITY / name / "detection_run.json")).report
+    return _public(evaluate(str(SECURITY / name / "plan.synthetic.json"), str(SECURITY / name / "detection_run.json")))
 
 
 def real_report(name: str) -> dict:
     base = FIXTURES / "plan_evidence" / name
-    return evaluate(str(base / "plan.sanitized.json"), str(base / "detection_run.json")).report
+    return _public(evaluate(str(base / "plan.sanitized.json"), str(base / "detection_run.json")))
 
 
 def prepared(report: dict) -> dict:
@@ -140,7 +147,8 @@ def envelope(security=(), cost=(), configuration=(), summary="s") -> str:
                        "cost_analysis": {"findings": list(cost), "summary": ""},
                        "configuration_analysis": {"findings": list(configuration), "summary": ""},
                        "root_cause_analysis": {"findings": [], "summary": ""},
-                       "risk_assessment": {"findings": [], "summary": ""}})
+                       "risk_assessment": {"findings": [], "summary": ""},
+                       "investigation_analysis": {"findings": [], "summary": ""}})
 
 
 def reply(*findings, summary="s") -> str:
@@ -544,7 +552,7 @@ def test_graph_with_langchain_fake_model():
     assert state["drift_report"] == report
     assert isinstance(state["security_targets"], FrozenDict)
     assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration",
-                                        "analyze_root_cause", "assess_risk"}
+                                        "analyze_root_cause", "assess_risk", "analyze_investigation"}
     assert state["drift_report"]["resources"][0]["severity"]["level"] == "CRITICAL"
 
 

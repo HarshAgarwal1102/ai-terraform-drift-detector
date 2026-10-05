@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Safeguard mutants (Tasks 6.3-6.7). Each replaces `old` (must occur exactly once in `file`) with `new`; the AI test suite must then fail. Run: python scripts/run_mutation_checks.py",
+  "description": "Safeguard mutants (Tasks 6.3-6.7, 9B.4, 9B.4A). Each replaces `old` (must occur exactly once in `file`) with `new`; the AI test suite must then fail. Run: python scripts/run_mutation_checks.py",
   "tests": [
     "tests/test_ai_config.py",
     "tests/test_ai_parse_drift.py",
@@ -8,7 +8,9 @@
     "tests/test_ai_cost_config.py",
     "tests/test_ai_root_cause.py",
     "tests/test_ai_report.py",
-    "tests/test_ai_engine.py"
+    "tests/test_ai_engine.py",
+    "tests/test_ai_investigation.py",
+    "tests/test_public_report.py"
   ],
   "mutants": [
     {
@@ -80,7 +82,7 @@
     {
       "id": "call-without-routes",
       "file": "src/ai_engine/nodes/analyze_drift.py",
-      "old": "        if not any(routes.values()):",
+      "old": "        if not any(relevant(s) for s in ALL_SECTIONS):",
       "new": "        if False:"
     },
     {
@@ -176,7 +178,7 @@
     {
       "id": "summary-violation-kept",
       "file": "src/ai_engine/nodes/analyze_drift.py",
-      "old": "            violation = free_text_violation(summary)",
+      "old": "            violation = free_text_violation(summary, refs)",
       "new": "            violation = None"
     },
     {
@@ -218,14 +220,14 @@
     {
       "id": "new-actor-not-constant",
       "file": "src/ai_engine/nodes/root_cause.py",
-      "old": "    actor: Literal[\"unknown\"]  # constant",
-      "new": "    actor: str | None  # constant"
+      "old": "    possible_channels: Annotated[list[Channel], Field(min_length=1, max_length=6)]\n    explanation: Explanation",
+      "new": "    possible_channels: Annotated[list[Channel], Field(min_length=1, max_length=6)]\n    actor: str | None = None\n    explanation: Explanation"
     },
     {
       "id": "new-confirmed-not-constant",
-      "file": "src/ai_engine/nodes/root_cause.py",
-      "old": "    confirmed: Literal[False]  # constant",
-      "new": "    confirmed: bool  # constant"
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    identity: Literal[\"withheld\"]\n\n    @model_validator(mode=\"after\")\n    def _consistent(self) -> RecordedCaller:",
+      "new": "    identity: str\n\n    @model_validator(mode=\"after\")\n    def _consistent(self) -> RecordedCaller:"
     },
     {
       "id": "new-hypothesis-check-off",
@@ -290,14 +292,14 @@
     {
       "id": "new-guards-skipped-in-security",
       "file": "src/ai_engine/nodes/security_analysis.py",
-      "old": "        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation",
+      "old": "        violation = free_text_violation(finding.explanation, refs)  # all free-text guards",
       "new": "        violation = None"
     },
     {
       "id": "new-guards-skipped-in-root-cause-risk",
       "file": "src/ai_engine/nodes/root_cause.py",
-      "old": "    violation = free_text_violation(finding.explanation)",
-      "new": "    violation = None"
+      "old": "    violation = free_text_violation(finding.explanation, refs)\n",
+      "new": "    violation = None\n"
     },
     {
       "id": "new-root-cause-citation-unscoped",
@@ -422,8 +424,8 @@
     {
       "id": "r-ranking-added",
       "file": "src/ai_engine/nodes/remediation.py",
-      "old": "    ranking: Literal[\"none\"]",
-      "new": "    ranking: str"
+      "old": "    approval_required: Literal[True]\n    execution_allowed: Literal[False]",
+      "new": "    approval_required: Literal[True]\n    execution_allowed: bool"
     },
     {
       "id": "r-data-not-restored-off",
@@ -530,8 +532,8 @@
     {
       "id": "g-table-pipes-unescaped",
       "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "c.replace(\"|\", \"\\\\|\")",
-      "new": "c"
+      "old": "cell.replace(\"|\", \"\\\\|\")",
+      "new": "cell"
     },
     {
       "id": "g-markdown-not-from-json",
@@ -548,8 +550,8 @@
     {
       "id": "g-attribution-not-constant",
       "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "class Attribution(Strict):\n    actor: Literal[\"unknown\"]",
-      "new": "class Attribution(Strict):\n    actor: str"
+      "old": "        if (self.status == \"confirmed\") != (self.rule is not None and self.claim is not None):",
+      "new": "        if False:"
     },
     {
       "id": "g-cost-not-constant",
@@ -566,8 +568,8 @@
     {
       "id": "g-remediation-from-ai",
       "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "        \"remediation\": state[\"remediation_plan\"],",
-      "new": "        \"remediation\": dict(state[\"remediation_plan\"], options=[o for o in state[\"remediation_plan\"][\"options\"] if not state[\"inferences\"][\"analyze_root_cause\"][\"findings\"]]),"
+      "old": "        recommendation = recommendations[address] | {\"statements\": []}",
+      "new": "        recommendation = (recommendations[address] if not state[\"inferences\"][\"analyze_investigation\"][\"findings\"] else dict(recommendations[address], decision=\"human_decision_required\", policy_rule=\"R1\", rationale=\"ambiguous_intent\", option_id=None, kind=None, notes=[])) | {\"statements\": []}"
     },
     {
       "id": "h-suspicious-check-off",
@@ -728,8 +730,8 @@
     {
       "id": "e-evidence-sent-dropped-from-report",
       "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "        | {\"evidence_sent\": list(call.get(\"evidence_sent\") or [])},",
-      "new": "        | {\"evidence_sent\": []},"
+      "old": "        | {\"evidence_sent\": list(call.get(\"evidence_sent\") or []),",
+      "new": "        | {\"evidence_sent\": [],"
     },
     {
       "id": "f-security-finding-extras-allowed",
@@ -739,9 +741,9 @@
     },
     {
       "id": "f-root-cause-actor-relaxed",
-      "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "    hypothesis: Hypothesis\n    possible_channels: Annotated[list[Channel], Field(min_length=1)]\n    actor: Literal[\"unknown\"]",
-      "new": "    hypothesis: Hypothesis\n    possible_channels: Annotated[list[Channel], Field(min_length=1)]\n    actor: str"
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "            \"actor_attribution\": resource[\"actor_attribution\"],  # deterministic (report wording), authoritative",
+      "new": "            \"actor_attribution\": \"confirmed\" if finding.consistency == \"consistent_with_drift\" else resource[\"actor_attribution\"],"
     },
     {
       "id": "f-report-findings-untyped",
@@ -764,7 +766,7 @@
     {
       "id": "v-resource-fields-unchecked",
       "file": "src/ai_engine/verify.py",
-      "old": "            if entry[field] != expected:\n                add(f\"resource {entry['address']}: {field} differs",
+      "old": "            if what[field] != expected:\n                add(f\"resource {entry['address']}: {field} differs",
       "new": "            if False:\n                add(f\"resource {entry['address']}: {field} differs"
     },
     {
@@ -776,7 +778,7 @@
     {
       "id": "v-resource-factors-unchecked",
       "file": "src/ai_engine/verify.py",
-      "old": "        if entry[\"risk_factors\"] != union:",
+      "old": "        if what[\"risk_factors\"] != union:",
       "new": "        if False:"
     },
     {
@@ -818,7 +820,7 @@
     {
       "id": "v-guards-not-re-run",
       "file": "src/ai_engine/verify.py",
-      "old": "            violation = free_text_violation(text)\n            if violation:",
+      "old": "            violation = free_text_violation(text, all_refs)\n            if violation:",
       "new": "            violation = None\n            if violation:"
     },
     {
@@ -884,7 +886,7 @@
     {
       "id": "v-evidence-without-call-unchecked",
       "file": "src/ai_engine/verify.py",
-      "old": "    if not llm[\"attempted\"] and llm[\"evidence_sent\"]:",
+      "old": "    if not llm[\"attempted\"] and (llm[\"evidence_sent\"] or llm[\"investigation_sent\"]):",
       "new": "    if False:"
     },
     {
@@ -934,6 +936,228 @@
       "file": "src/ai_engine/verify.py",
       "old": "    if _is_noise(change):\n        return False\n    if section == \"security\":",
       "new": "    if section == \"security\":"
+    },
+    {
+      "id": "i-verdict-not-copied",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "    correlation = {\"status\": \"investigated\" if investigated else \"not_investigated\", \"verdict\": verdict,",
+      "new": "    correlation = {\"status\": \"investigated\" if investigated else \"not_investigated\", \"verdict\": \"sole_capable_operation\" if verdict == \"ambiguous\" else verdict,"
+    },
+    {
+      "id": "i-link-upgraded",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "                   \"reason\": reason, \"property_link\": r[\"property_link\"],",
+      "new": "                   \"reason\": reason, \"property_link\": \"confirmed\" if r[\"property_link\"] == \"inferred_not_provable\" else r[\"property_link\"],"
+    },
+    {
+      "id": "i-actor-upgraded",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "    if attribution[\"status\"] == \"confirmed\":\n        actor =",
+      "new": "    if attribution[\"status\"] == \"confirmed\" or r[\"verdict\"] == \"sole_capable_operation\":\n        actor ="
+    },
+    {
+      "id": "i-caller-multiple-threshold",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "    if r[\"verdict\"] == \"ambiguous\" and candidates >= 2:",
+      "new": "    if r[\"verdict\"] == \"ambiguous\" and candidates >= 1:"
+    },
+    {
+      "id": "i-gap-wrong-sign",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "        gap = round((parse_utc(observation[\"started_at\"]) - parse_utc(decisive[\"end\"])).total_seconds(), 6)",
+      "new": "        gap = round((parse_utc(decisive[\"end\"]) - parse_utc(observation[\"started_at\"])).total_seconds(), 6)"
+    },
+    {
+      "id": "i-failed-not-marked",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "        reason = \"investigation_failed\" if status == \"failed\" else None",
+      "new": "        reason = None"
+    },
+    {
+      "id": "i-not-drift-investigated",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "        if item.get(\"drift_actions\") is None:\n            resources.append(_not_applicable(item[\"address\"]))",
+      "new": "        if False:\n            resources.append(_not_applicable(item[\"address\"]))"
+    },
+    {
+      "id": "i-binding-hash-unchecked",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "    if (binding.drift_report_sha256 != pub.canonical_sha256(drift_report)\n            or binding.run_id",
+      "new": "    if (False\n            or binding.run_id"
+    },
+    {
+      "id": "i-scope-unchecked",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "    if [r.address for r in model.resources] != [r[\"address\"] for r in drifted]:",
+      "new": "    if False:"
+    },
+    {
+      "id": "i-leak-unchecked",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "    if pub.leak_findings(document):\n        raise InvestigationInputError(\"leak\")",
+      "new": "    if False:\n        raise InvestigationInputError(\"leak\")"
+    },
+    {
+      "id": "i-when-unknown-not-stated",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "        when_statements.append(statement(\"when.not_confirmed.v1\"))",
+      "new": "        when_statements.append(statement(\"when.no_window.v1\"))"
+    },
+    {
+      "id": "e-investigation-leak-scan-skipped",
+      "file": "src/ai_engine/evidence.py",
+      "old": "    if findings:\n        # Name the locations only",
+      "new": "    if False:\n        # Name the locations only"
+    },
+    {
+      "id": "e-caller-status-sent",
+      "file": "src/ai_engine/evidence.py",
+      "old": "\"timing\", \"in_window\", \"role\", \"capable_areas\", \"caller_type\", \"client_app\",\n                                  \"pipeline_identity\")",
+      "new": "\"timing\", \"in_window\", \"role\", \"capable_areas\", \"caller_type\", \"client_app\",\n                                  \"pipeline_identity\", \"caller_status\")"
+    },
+    {
+      "id": "e-not-investigated-sent",
+      "file": "src/ai_engine/evidence.py",
+      "old": "        if resource[\"investigation_scope\"] != \"drift\" or correlation[\"verdict\"] == \"not_investigated\":",
+      "new": "        if resource[\"investigation_scope\"] != \"drift\":"
+    },
+    {
+      "id": "c-verdict-upgrade-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    if contains_verdict_upgrade(text):\n        return \"verdict_upgrade\"",
+      "new": "    if False:\n        return \"verdict_upgrade\""
+    },
+    {
+      "id": "c-identity-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    if identity_like_violation(text, refs):",
+      "new": "    if False:"
+    },
+    {
+      "id": "c-references-off",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "    return reference_violation(text, refs)",
+      "new": "    return None"
+    },
+    {
+      "id": "c-ip-from-evidence-unchecked",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "                if _identity_kinds(candidate) and candidate not in refs.evidence_text:",
+      "new": "                if False:"
+    },
+    {
+      "id": "c-timestamp-any",
+      "file": "src/ai_engine/nodes/common.py",
+      "old": "        if any(_normalize_timestamp(t) not in refs.timestamps for t in _TIMESTAMP_TOKEN.findall(variant)):",
+      "new": "        if False:"
+    },
+    {
+      "id": "s-consistency-unchecked",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "        problem = consistency_problem(finding.consistency, resource[\"verdict\"], [ops[i] for i in cited_ids])",
+      "new": "        problem = None"
+    },
+    {
+      "id": "s-citation-unchecked",
+      "file": "src/ai_engine/nodes/investigation_facts.py",
+      "old": "        if resource is None or not all(op_id in ops for op_id in cited_ids):",
+      "new": "        if resource is None:"
+    },
+    {
+      "id": "p-r1-skipped",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if any(option[\"human_decision_required\"] for option in options):",
+      "new": "    if False:"
+    },
+    {
+      "id": "p-r2-data-ignored",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if plan[\"destructive\"] or plan[\"data_not_restored\"]:",
+      "new": "    if plan[\"destructive\"]:"
+    },
+    {
+      "id": "p-r3-skipped",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if resource[\"classification\"] == \"converged_drift\" and refresh is not None:",
+      "new": "    if False and refresh is not None:"
+    },
+    {
+      "id": "p-note-missing",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    notes = [ACCEPT_REMOTE_NOTE] if any(option[\"kind\"] == \"accept_remote_value\" for option in options) else []",
+      "new": "    notes = []"
+    },
+    {
+      "id": "g-narrative-skips-correlation",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "                     + inv[\"correlation\"][\"statements\"] + recommendation[\"statements\"])",
+      "new": "                     + recommendation[\"statements\"])"
+    },
+    {
+      "id": "g-markdown-unknown-blank",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    if value is None:\n        return md_text(NOT_CONFIRMED)",
+      "new": "    if value is None:\n        return \"\""
+    },
+    {
+      "id": "v-investigation-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    problems.extend(_verify_investigation(report, drift, inv, by_address))",
+      "new": "    pass"
+    },
+    {
+      "id": "v-caller-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if who[\"recorded_caller\"] != _expected_caller(p, len(candidates)):",
+      "new": "        if False:"
+    },
+    {
+      "id": "v-statement-templates-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "        if pattern is None or not pattern.fullmatch(item[\"text\"]):",
+      "new": "        if pattern is None:"
+    },
+    {
+      "id": "v-policy-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "    expected = {\"option_id\": None, \"kind\": None, \"notes\": []}",
+      "new": "    return []"
+    },
+    {
+      "id": "v-investigation-finding-unchecked",
+      "file": "src/ai_engine/verify.py",
+      "old": "                problems.extend(_verify_investigation_finding(index, finding, inv_sent, inv, drift))",
+      "new": "                pass"
+    },
+    {
+      "id": "cli-verify-skipped",
+      "file": "src/ai_engine/cli.py",
+      "old": "        if problems:  # D4",
+      "new": "        if False:  # D4"
+    },
+    {
+      "id": "cli-investigation-binding-skipped",
+      "file": "src/ai_engine/cli.py",
+      "old": "        return load_investigation(pub.strict_json(data), report)  # binding and scope",
+      "new": "        return pub.strict_json(data)"
+    },
+    {
+      "id": "pr-withheld-gap-skipped",
+      "file": "src/ai_engine/nodes/remediation.py",
+      "old": "    if change[\"real\"][\"status\"] == \"withheld\":",
+      "new": "    if False:"
+    },
+    {
+      "id": "pr-parse-internal-accepted",
+      "file": "src/ai_engine/nodes/parse_drift.py",
+      "old": "from drift_engine.report_public import PublicDriftReport as DriftReport",
+      "new": "from drift_engine.models import DriftReport"
+    },
+    {
+      "id": "pr-cli-internal-accepted",
+      "file": "src/ai_engine/cli.py",
+      "old": "        report = PublicDriftReport.model_validate(raw)",
+      "new": "        report = __import__(\"drift_engine.models\", fromlist=[\"DriftReport\"]).DriftReport.model_validate(raw)"
     }
   ]
 }

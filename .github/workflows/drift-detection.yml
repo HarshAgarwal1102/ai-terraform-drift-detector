@@ -8,17 +8,22 @@ name: "Phase 5 - Drift Detection"
 # `drift-engine analyze` (Task 5.3), the report artifact (Task 5.4), failure
 # reporting with the `drift_detected` output (Task 5.5), one GitHub Issue per
 # drifted resource (Task 8.1), evidence-based closing of those issues once the
-# resource is no longer drifted (Task 8.3), and an Infracost cost estimate of the
-# same plan (Task 10.1).
+# resource is no longer drifted (Task 8.3), an Infracost cost estimate of the
+# same plan (Task 10.1), the public drift report (Task 9B.4A) and the drift
+# investigation (Task 9B.5).
 #
-# Jobs: preflight -> plan-and-analyze -> issues / cost / report.
+# Jobs: preflight -> plan-and-analyze -> issues / cost / investigation / report.
 #   preflight         main-branch guard and environment/path validation.
 #   plan-and-analyze  OIDC, Terraform init/validate, plan evidence, drift-engine
 #                     analyze, and upload of the two-file report artifact. Plan
 #                     generation and analysis share one job on purpose: raw plan
 #                     evidence (tfplan, plan.json, plan.log) must never leave this
 #                     ephemeral runner (spec §8.3), so it is never passed between
-#                     jobs. Only the redacted report and the manifest are uploaded.
+#                     jobs. Task 9B.4A/9B.5: `analyze` writes the internal report to
+#                     a runner-only directory and the PUBLIC report (identifiers
+#                     withheld) beside the manifest; only the public report and the
+#                     manifest are uploaded. Then the drift investigation (Activity
+#                     Log, Reader) runs and uploads only its public file.
 #   issues            Tasks 8.1/8.3: one GitHub Issue per drifted resource when
 #                     drift_detected is the literal "true"; closes issues whose
 #                     resource is present and no longer drifted when it is "true"
@@ -34,6 +39,12 @@ name: "Phase 5 - Drift Detection"
 #                     no id-token, no Azure, no secrets). Cost is informational: a
 #                     cost failure turns the run red but never changes
 #                     drift_detected, the drift report, issues or the report job.
+#   investigation     Task 9B.5: fails unless the drift investigation succeeded,
+#                     its upload succeeded and the downloaded public investigation
+#                     binds to the downloaded public drift report; counts-only
+#                     summary. Least privilege (contents: read; no id-token, no
+#                     Azure, no secrets). Never changes drift_detected, the drift
+#                     report or artifact, issues, cost or the report job.
 #   report            run summary, also after failures (reporting only).
 #
 # Job status reflects process validity only: detected drift is a valid result and
@@ -155,7 +166,15 @@ jobs:
     name: "Terraform Plan & Drift Analysis (${{ github.event.inputs.environment || 'dev' }})"
     needs: preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Task 9B.5 (G10): the drift investigation waits until the observation end + 10 min
+    # and polls up to + 20 min (G8), bounded inside its script (no step timeout).
+    timeout-minutes: 45
+    # Job-level block (replaces the workflow-level one for this job): id-token for the
+    # OIDC login, contents for checkout, actions: read for the anchor fetch (G9).
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
     env:
       DRIFT_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
 
@@ -183,6 +202,12 @@ jobs:
       cost_status: ${{ steps.cost.outputs.cost_status }}
       cost_failure: ${{ steps.cost.outputs.cost_failure }}
       cost_upload_outcome: ${{ steps.cost_upload.outcome }}
+      # Task 9B.5 investigation status, consumed only by the investigation job.
+      investigation_status: ${{ steps.investigation.outputs.investigation_status }}
+      investigation_failure: ${{ steps.investigation.outputs.investigation_failure }}
+      investigation_detail: ${{ steps.investigation.outputs.investigation_detail }}
+      investigation_publishable: ${{ steps.investigation.outputs.investigation_publishable }}
+      investigation_upload_outcome: ${{ steps.investigation_upload.outcome }}
 
     steps:
       # Same commit as preflight (checkout defaults to github.sha); this runner
@@ -344,8 +369,14 @@ jobs:
       # exists, so the failed run gets an explicit outcome=failed report
       # (has_drift null), as spec §8.2 requires. The full integrity gate is
       # re-applied by the engine because --manifest is always passed.
+      # Task 9B.4A/9B.5 (item 1): the internal report goes to a runner-only directory
+      # (never uploaded; `investigate` reads it); the PUBLIC report (identifiers
+      # withheld, verified and scanned by the engine) stays at drift/drift_report.json
+      # beside the manifest, so the artifact root, the upload paths and the cost
+      # step's DRIFT_REPORT are unchanged. Validity is read from the public file.
       #   engine exit 0 = valid classification (drift or not); anything else
-      #   (1 evidence rejected, 70 internal, 73 write error, ...) = UNKNOWN.
+      #   (1 evidence rejected, 70 internal or public_projection_failed, 73 write
+      #   error, ...) = UNKNOWN, and nothing is uploaded.
       - name: Analyze Drift
         id: analyze
         if: ${{ !cancelled() && steps.evidence.outputs.manifest_present == 'true' }}
@@ -355,16 +386,20 @@ jobs:
         run: |
           set -euo pipefail
           report="${ARTIFACT_DIR}/drift_report.json"
+          internal_dir="${RUNNER_TEMP}/drift-internal"
+          mkdir -m 0700 "${internal_dir}"
           engine_rc=0
           drift-engine analyze \
             --plan "${ARTIFACT_DIR}/plan.json" \
             --manifest "${ARTIFACT_DIR}/detection_run.json" \
-            --output "${report}" || engine_rc=$?
+            --output "${internal_dir}/drift_report.json" \
+            --public-output "${report}" || engine_rc=$?
           echo "engine_exit_code=${engine_rc}" >> "${GITHUB_OUTPUT}"
 
           has_drift=unknown
           report_outcome=missing
-          if [ -f "${report}" ]; then
+          if [ -f "${report}" ] && [ -f "${internal_dir}/drift_report.json" ] \
+             && [ "$(jq -r '.public_version // "none"' "${report}" 2>/dev/null || echo none)" = "1" ]; then
             report_outcome="$(jq -r '.outcome // "invalid"' "${report}" 2>/dev/null || echo invalid)"
             has_drift="$(jq -r 'if (.has_drift | type) == "boolean" then (.has_drift | tostring) else "unknown" end' "${report}" 2>/dev/null || echo unknown)"
           fi
@@ -399,8 +434,9 @@ jobs:
           echo "::error::Drift classification not valid (engine exit ${engine_rc}, evidence ${EVIDENCE_OUTCOME}, report ${report_outcome}). Drift status: UNKNOWN."
           exit 1
 
-      # Publishes only the contract report (sensitive values redacted by the
-      # engine) and the run manifest. Raw plan evidence (tfplan, plan.json,
+      # Publishes only the PUBLIC drift report (Task 9B.4A: identifiers withheld;
+      # sensitive values redacted by the engine) and the run manifest; the internal
+      # report lives in drift-internal/ and is never uploaded. Raw plan evidence (tfplan, plan.json,
       # plan.log) is kept only on the ephemeral runner and is not uploaded: this is
       # a public repository and plan files can hold clear-text values (spec §8.3).
       # Default success() condition: runs only when evidence and analysis both
@@ -414,6 +450,62 @@ jobs:
           path: |
             ${{ runner.temp }}/drift/drift_report.json
             ${{ runner.temp }}/drift/detection_run.json
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
+
+      # Task 9B.5 (G8-G13, G10): drift investigation against the Azure Activity Log
+      # (read-only, Reader), only after a valid classification whose drift report was
+      # uploaded, and before the cost step (which runs `az logout`). Second documented
+      # always-exit-0 step (D5 pattern): scripts/investigation_analysis.sh writes
+      # investigation_status / _failure / _detail / _publishable and exits 0; the step
+      # maps an unexpected script failure to `script_error` and exits 0, so the
+      # investigation can never change this job's result, drift_detected, issues, cost
+      # or report. The investigation job fails visibly instead. No step-level
+      # timeout-minutes (a step timeout would fail this job and skip issues/cost):
+      # the script bounds itself (timeout 1500 / 300). GH_TOKEN reaches only the
+      # anchor fetch; the pipeline principal is compared on the runner, never written.
+      - name: Drift Investigation
+        id: investigation
+        if: ${{ steps.upload.outcome == 'success' && (steps.analyze.outputs.drift_detected == 'true' || steps.analyze.outputs.drift_detected == 'false') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFT_ENGINE_PIPELINE_PRINCIPAL: ${{ secrets.AZURE_CLIENT_ID }}
+          DRIFT_DETECTED: ${{ steps.analyze.outputs.drift_detected }}
+          PLAN_JSON: ${{ runner.temp }}/drift/plan.json
+          MANIFEST: ${{ runner.temp }}/drift/detection_run.json
+          INTERNAL_REPORT: ${{ runner.temp }}/drift-internal/drift_report.json
+          PUBLIC_REPORT: ${{ runner.temp }}/drift/drift_report.json
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          script_rc=0
+          ./scripts/investigation_analysis.sh || script_rc=$?
+          if [ "${script_rc}" -ne 0 ]; then
+            {
+              echo "investigation_status=failed"
+              echo "investigation_failure=script_error"
+              echo "investigation_detail=none"
+              echo "investigation_publishable=false"
+            } >> "${GITHUB_OUTPUT}"
+            rm -f "${RUNNER_TEMP}/investigation/public/drift_investigation.json"
+            echo "::error::Drift investigation failed unexpectedly (script exit ${script_rc}); drift result unaffected; the investigation job reports it."
+          fi
+          exit 0
+
+      # Task 9B.5 (G10): second documented continue-on-error upload: the public
+      # investigation only, when publishable (succeeded, incomplete, or failed but
+      # bindable: decision 1). Its outcome is exported and the investigation job
+      # fails unless it is success. Restricted files never leave the runner.
+      - name: Upload Drift Investigation
+        id: investigation_upload
+        if: ${{ steps.investigation.outputs.investigation_publishable == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-investigation-${{ github.run_id }}
+          path: ${{ runner.temp }}/investigation/public/drift_investigation.json
           retention-days: 30
           if-no-files-found: error
           overwrite: true
@@ -663,6 +755,124 @@ jobs:
           print(f"| Infracost | `{run['infracost_version']}` ({run['pricing']}) |")
           print(f"| Run | `{run['run_id']}` |")
           PY
+
+  # Task 9B.5 (G10): makes the drift investigation's outcome visible. Runs for every
+  # valid classification (literal "true" or "false"). It verifies the uploaded public
+  # investigation against the downloaded PUBLIC drift report (item 3), writes a
+  # counts-only summary, and fails (Require Investigation Success, last so the summary
+  # still renders) unless the investigation succeeded, its upload succeeded and the
+  # verification passed (decision 1: an incomplete or failed-but-bindable
+  # investigation is uploaded and still fails here). drift_detected, the drift report
+  # and artifact, issues, cost and the report job are unaffected (report keeps
+  # needs: [preflight, plan-and-analyze]). Least privilege: contents: read only; no
+  # id-token, no Azure, no secrets (same-run artifact downloads need no token).
+  investigation:
+    name: "Drift Investigation (${{ github.event.inputs.environment || 'dev' }})"
+    needs: [preflight, plan-and-analyze]
+    if: ${{ !cancelled() && (needs.plan-and-analyze.outputs.drift_detected == 'true' || needs.plan-and-analyze.outputs.drift_detected == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      UPLOADED: ${{ needs.plan-and-analyze.outputs.investigation_upload_outcome == 'success' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Runtime dependencies only (pydantic, PyYAML); no Azure, AI or dev extras.
+      - name: Install drift-engine
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input .
+
+      - name: Download Drift Report
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/drift-report
+
+      - name: Download Drift Investigation
+        if: ${{ env.UPLOADED == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-investigation-${{ github.run_id }}
+          path: ${{ runner.temp }}/drift-investigation
+
+      # Contract, leak scan and binding to the downloaded PUBLIC drift report.
+      - name: Verify Drift Investigation
+        id: verify
+        if: ${{ env.UPLOADED == 'true' }}
+        run: |
+          set -euo pipefail
+          drift-engine investigation-check \
+            --public "${RUNNER_TEMP}/drift-investigation/drift_investigation.json" \
+            --report "${RUNNER_TEMP}/drift-report/drift_report.json"
+
+      # Counts and fixed codes only: no caller, ID or Activity Log text.
+      - name: Investigation Summary
+        if: ${{ !cancelled() }}
+        env:
+          INVESTIGATION_STATUS: ${{ needs.plan-and-analyze.outputs.investigation_status }}
+          INVESTIGATION_FAILURE: ${{ needs.plan-and-analyze.outputs.investigation_failure }}
+          INVESTIGATION_DETAIL: ${{ needs.plan-and-analyze.outputs.investigation_detail }}
+          INVESTIGATION_UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.investigation_upload_outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json, os, re
+          from collections import Counter
+          code = lambda name: (os.environ.get(name) or "n/a") if re.fullmatch(r"[a-z0-9_=,.-]{0,400}", os.environ.get(name) or "") else "invalid"
+          print("### Drift investigation")
+          print("")
+          print("| Field | Value |")
+          print("| --- | --- |")
+          for label, name in (("Status", "INVESTIGATION_STATUS"), ("Failure", "INVESTIGATION_FAILURE"),
+                              ("Detail", "INVESTIGATION_DETAIL"), ("Upload", "INVESTIGATION_UPLOAD_OUTCOME"),
+                              ("Verification", "VERIFY_OUTCOME")):
+              print(f"| {label} | `{code(name)}` |")
+          path = os.path.join(os.environ["RUNNER_TEMP"], "drift-investigation", "drift_investigation.json")
+          if os.environ.get("VERIFY_OUTCOME") == "success" and os.path.isfile(path):
+              doc = json.load(open(path, encoding="utf-8"))
+              verdicts = Counter(r["verdict"] for r in doc["resources"])
+              print(f"| Outcome | `{doc['outcome']}` |")
+              print(f"| Resources | {len(doc['resources'])} |")
+              print(f"| Verdicts | `{', '.join(f'{k}={v}' for k, v in sorted(verdicts.items())) or 'none'}` |")
+              print(f"| Anchors | examined {doc['anchors']['examined']}, accepted {doc['anchors']['accepted']} |")
+              print(f"| Artifact | `drift-investigation-{os.environ['GITHUB_RUN_ID']}` (30 days) |")
+          PY
+
+      - name: Require Investigation Success
+        if: ${{ !cancelled() }}
+        env:
+          INVESTIGATION_STATUS: ${{ needs.plan-and-analyze.outputs.investigation_status }}
+          INVESTIGATION_FAILURE: ${{ needs.plan-and-analyze.outputs.investigation_failure }}
+          INVESTIGATION_UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.investigation_upload_outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "${INVESTIGATION_STATUS}" != "succeeded" ]; then
+            echo "::error::Drift investigation did not succeed (status '${INVESTIGATION_STATUS:-not run}', failure '${INVESTIGATION_FAILURE:-n/a}'). Drift result unaffected."
+            exit 1
+          fi
+          if [ "${INVESTIGATION_UPLOAD_OUTCOME}" != "success" ]; then
+            echo "::error::Drift investigation upload did not succeed (outcome '${INVESTIGATION_UPLOAD_OUTCOME:-n/a}'). Drift result unaffected."
+            exit 1
+          fi
+          if [ "${VERIFY_OUTCOME}" != "success" ]; then
+            echo "::error::The uploaded drift investigation failed verification against the public drift report. Drift result unaffected."
+            exit 1
+          fi
+          echo "investigation_status=succeeded, upload=success, verification=success"
 
   # Runs after failures too (not after cancellation) so every completed run
   # reports its result. It only reports: the run's red/green status comes from the

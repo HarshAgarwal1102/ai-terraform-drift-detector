@@ -31,7 +31,7 @@ from test_activity_logs import (  # noqa: E402  (shared helpers; no test classes
     CALLER, NSG_ADDR, NSG_ID, RG, ROOT, SUB, FakeSource, NoCallSource, al, ev, page,
 )
 from test_investigation import (  # noqa: E402
-    REPO, UTC, FakeClock, _Base, at_time, in_sync, nsg_and_rg, nsg_drift, report_bytes,
+    REPO, UTC, FakeClock, _Base, at_time, in_sync, nsg_and_rg, nsg_drift, public_report_bytes, report_bytes,
 )
 
 try:
@@ -400,7 +400,10 @@ class CliTests(_PubBase):
         directory = self.dir("cli")
         self.report = os.path.join(directory, "drift_report.json")
         with open(self.report, "wb") as fh:
-            fh.write(report_bytes(paths))
+            fh.write(report_bytes(paths))  # investigate reads the internal report
+        self.public_report = os.path.join(directory, "drift_report.public.json")
+        with open(self.public_report, "wb") as fh:
+            fh.write(public_report_bytes(paths))  # what the artifact carries (Task 9B.4A)
         self.restricted = os.path.join(directory, "restricted.json")
         self.evidence = os.path.join(directory, "evidence.json")
         self.public_file = os.path.join(directory, "drift_investigation.json")
@@ -414,10 +417,14 @@ class CliTests(_PubBase):
         self.assertEqual(code, 0, err)
         self.assertIn("Public investigation:", out)
         public = open(self.public_file, "rb").read()
-        pub.check_binding(pub.load_public(public), open(self.report, "rb").read())
+        pub.check_binding(pub.load_public(public), open(self.public_report, "rb").read())
         self.assertNotIn(CALLER, public.decode())
-        code, out, _ = self.main(["investigation-check", "--public", self.public_file, "--report", self.report])
+        code, out, _ = self.main(["investigation-check", "--public", self.public_file, "--report", self.public_report])
         self.assertEqual((code, "public_investigation=valid" in out), (0, True))
+        # the internal report's hash is never the binding (Task 9B.4A)
+        code, _, err = self.main(["investigation-check", "--public", self.public_file, "--report", self.report])
+        self.assertEqual(code, 1)
+        self.assertIn("binding_mismatch", err)
 
     def test_public_failure_writes_nothing(self):
         paths = self.plan(nsg_drift())
@@ -518,6 +525,44 @@ class BoundaryTests(unittest.TestCase):
     @unittest.skipIf(pub is None, "drift_engine is not installed")
     def test_importing_the_public_module_loads_no_restricted_module(self):
         code = ("import json, sys; import drift_engine.investigation_public; "
+                "print(json.dumps(sorted(m for m in sys.modules if m == 'azure' or m.startswith('azure.') "
+                f"or m in {list(self.FORBIDDEN)!r})))")
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                             env=dict(os.environ, PYTHONPATH=os.path.join(ROOT, "src")))
+        self.assertEqual(json.loads(out.stdout), [])
+
+    AI_ALLOWED = ("drift_engine.investigation_public", "drift_engine.logs", "drift_engine.models",
+                  "drift_engine.report_public")  # + the public drift report (Task 9B.4A)
+
+    def test_ai_engine_imports_only_allowlisted_drift_engine_modules(self):
+        """Task 9B.4 (G14): of drift_engine, ai_engine imports only the public investigation model, the
+        drift report contract and logging; never a restricted module or the package as a whole."""
+        offenders = []
+        for directory, _, files in os.walk(os.path.join(ROOT, "src", "ai_engine")):
+            for file in files:
+                if not file.endswith(".py"):
+                    continue
+                path = os.path.join(directory, file)
+                for node in ast.walk(ast.parse(open(path, encoding="utf-8").read(), path)):
+                    if isinstance(node, ast.Import):
+                        modules = [a.name for a in node.names]
+                    elif isinstance(node, ast.ImportFrom):
+                        module = node.module or ""
+                        modules = ([f"{module}.{a.name}" for a in node.names] if module == "drift_engine"
+                                   else [module])
+                    else:
+                        continue
+                    offenders += [f"{os.path.relpath(path, ROOT)}: {m}" for m in modules
+                                  if m.split(".")[0] == "drift_engine" and m not in self.AI_ALLOWED]
+        self.assertEqual(offenders, [])
+
+    @unittest.skipIf(pub is None, "drift_engine is not installed")
+    def test_importing_the_ai_engine_loads_no_restricted_module(self):
+        try:
+            import langgraph  # noqa: F401
+        except ImportError:
+            self.skipTest("needs the 'ai' extra")
+        code = ("import json, sys; import ai_engine.cli, ai_engine.graph, ai_engine.verify; "
                 "print(json.dumps(sorted(m for m in sys.modules if m == 'azure' or m.startswith('azure.') "
                 f"or m in {list(self.FORBIDDEN)!r})))")
         out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,

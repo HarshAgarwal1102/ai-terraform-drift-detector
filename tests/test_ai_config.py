@@ -26,6 +26,13 @@ from ai_engine.config import (
 )
 from drift_engine.classifier import evaluate
 
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
 if HAS_AI_EXTRA:
@@ -61,7 +68,7 @@ AZURE_ENV = {
 # A real contract drift_report.json, built by drift_engine from the external_drift plan fixture
 # (the graph validates it against the report contract since Task 6.2).
 _EVIDENCE = Path(__file__).parent / "fixtures" / "plan_evidence" / "external_drift"
-DRIFT_REPORT = evaluate(str(_EVIDENCE / "plan.sanitized.json"), str(_EVIDENCE / "detection_run.json")).report
+DRIFT_REPORT = _public(evaluate(str(_EVIDENCE / "plan.sanitized.json"), str(_EVIDENCE / "detection_run.json")))
 
 
 # --------------------------------------------------------------------------- config
@@ -72,6 +79,12 @@ def test_default_is_disabled_and_opt_in():
     assert config.provider is LLMProvider.NONE
     assert not config.enabled
     assert "opt-in" in config.disabled_reason
+
+
+def test_explicit_none_says_so():  # Task 9B.4: CI sets the provider to none on purpose
+    config = load_config({"AI_LLM_PROVIDER": "none"})
+    assert not config.enabled and config.disabled_reason == "AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)"
+    assert load_config({"AI_LLM_PROVIDER": " "}).disabled_reason == "AI_LLM_PROVIDER is not set (LLM analysis is opt-in)"
 
 
 def test_credentials_alone_do_not_enable_llm():
@@ -230,8 +243,8 @@ def test_missing_client_library_degrades(monkeypatch):
 @requires_ai
 def test_ai_state_schema():
     assert set(AiState.__annotations__) == {"drift_report", "parsed_drift", "security_targets", "cost_targets",
-                                            "config_targets", "origin_facts", "remediation_plan", "report",
-                                            "llm_call", "llm", "inferences", "warnings"}
+                                            "config_targets", "origin_facts", "investigation", "investigation_facts",
+                                            "remediation_plan", "report", "llm_call", "llm", "inferences", "warnings"}
     assert AiState.__total__ is False
 
 
@@ -245,7 +258,7 @@ def test_graph_without_llm_falls_back_to_deterministic():
                             "reason": "AI_LLM_PROVIDER is not set (LLM analysis is opt-in)"}
     # The single AI node records why each section did not run; nothing else enters `inferences`.
     assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration",
-                                        "analyze_root_cause", "assess_risk"}
+                                        "analyze_root_cause", "assess_risk", "analyze_investigation"}
     assert {r["status"] for r in state["inferences"].values()} == {"skipped"}
     assert state["llm_call"]["attempted"] is False
     assert len(state["warnings"]) == 1 and "deterministic evidence" in state["warnings"][0]
@@ -262,7 +275,7 @@ def test_graph_with_missing_key_does_not_raise():
 def test_graph_with_configured_llm():
     # An in-sync report routes nothing, so the real client is built but never called.
     in_sync = Path(__file__).parent / "fixtures" / "plan_evidence" / "in_sync"
-    report = evaluate(str(in_sync / "plan.sanitized.json"), str(in_sync / "detection_run.json")).report
+    report = _public(evaluate(str(in_sync / "plan.sanitized.json"), str(in_sync / "detection_run.json")))
     state = run_analysis(report, config=load_config(OPENAI_ENV))
     assert state["llm_call"]["attempted"] is False
     assert state["llm"] == {"available": True, "provider": "openai", "model": "test-model", "reason": None}
@@ -464,8 +477,8 @@ def test_non_json_evidence_rejected(value):
 
 @requires_ai
 def test_frozen_real_report_validates_against_drift_engine_model():
-    from drift_engine.models import DriftReport
+    from drift_engine.report_public import PublicDriftReport
 
     state = run_analysis(copy.deepcopy(DRIFT_REPORT), config=load_config({}))
-    assert DriftReport.model_validate(state["drift_report"]).outcome == "succeeded"
+    assert PublicDriftReport.model_validate(state["drift_report"]).outcome == "succeeded"
     assert json.loads(json.dumps(state["drift_report"])) == DRIFT_REPORT

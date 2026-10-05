@@ -167,6 +167,9 @@ def load_config(env: Mapping[str, str] | None = None) -> AiConfig:
 
     if provider is LLMProvider.NONE:
         config = AiConfig(**common)
+        if _get(env, "AI_LLM_PROVIDER") is not None:  # set on purpose (e.g. CI), not merely missing
+            config = config.model_copy(update={"disabled_reason": "AI_LLM_PROVIDER is explicitly none "
+                                                                  "(LLM analysis disabled)"})
     elif provider is LLMProvider.OPENAI:
         key = _get(env, "OPENAI_API_KEY")
         model = _get(env, "AI_LLM_MODEL")

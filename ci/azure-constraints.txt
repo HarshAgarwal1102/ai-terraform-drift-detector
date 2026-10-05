@@ -1,0 +1,33 @@
+# CI-only constraints for the drift investigation (Task 9B.5, PROJECT_PLAN.md Phase 9B G10).
+#
+# The complete resolved dependency set of `pip install .[azure]` (runtime + azure extra), pinned
+# with exact versions for reproducible CI installs into the investigation's separate venv.
+# Resolved 2026-10-05 for CPython 3.12 on linux x86_64 (the plan-and-analyze job's runtime)
+# within the pyproject.toml ranges (pydantic>=2.11,<3; PyYAML>=6.0,<7; azure-mgmt-monitor>=7,<8;
+# azure-identity>=1.19,<2), aligned with ci/ai-constraints.txt for every shared package.
+# Local development keeps the pyproject.toml ranges. Change these pins only through a
+# reviewed update that re-resolves the whole set.
+
+annotated-types==0.8.0
+azure-common==1.1.28
+azure-core==1.41.0
+azure-identity==1.26.0
+azure-mgmt-core==1.6.0
+azure-mgmt-monitor==7.0.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.2
+cryptography==50.0.2
+idna==3.20
+isodate==0.7.2
+msal==1.39.0
+msal-extensions==1.3.1
+pycparser==3.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+PyJWT==2.15.1
+PyYAML==6.0.3
+requests==2.34.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.8.0

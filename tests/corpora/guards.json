@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Free-text guard corpus (Task 6.7): expected = rejection reason or null; known_tradeoff entries document accepted false positives / negatives and are asserted as-is.",
+  "description": "Free-text guard corpus (Task 6.7): expected = rejection reason or null; known_tradeoff entries document accepted false positives / negatives and are asserted as-is. Task 9B.4 adds identity, verdict_upgrade and reference cases (checked without evidence refs).",
   "cases": [
     {
       "category": "attribution",
@@ -974,6 +974,146 @@
       "expected": "unsupported_attribution",
       "note": "entities nested three levels deep",
       "known_tradeoff": false
+    },
+    {
+      "category": "identity",
+      "text": "The request came from 198.51.100.4.",
+      "expected": "identity_like_string",
+      "note": "investigation guards (Task 9B.4): IP address not in the evidence sent",
+      "known_tradeoff": false
+    },
+    {
+      "category": "identity",
+      "text": "See https://portal.example.com/x for the record.",
+      "expected": "identity_like_string",
+      "note": "investigation guards (Task 9B.4): URL not in the evidence sent",
+      "known_tradeoff": false
+    },
+    {
+      "category": "identity",
+      "text": "The scope /subscriptions/abc/resourceGroups/rg was involved.",
+      "expected": "identity_like_string",
+      "note": "investigation guards (Task 9B.4): subscription path",
+      "known_tradeoff": false
+    },
+    {
+      "category": "identity",
+      "text": "Recorded under /providers/Microsoft.Resources/tags/default.",
+      "expected": "identity_like_string",
+      "note": "investigation guards (Task 9B.4): provider path",
+      "known_tradeoff": false
+    },
+    {
+      "category": "identity",
+      "text": "The tag value is now absent in Azure.",
+      "expected": null,
+      "note": "investigation guards (Task 9B.4): no identity-like token",
+      "known_tradeoff": false
+    },
+    {
+      "category": "identity",
+      "text": "The NSG now allows 0.0.0.0/0.",
+      "expected": "identity_like_string",
+      "note": "investigation guards (Task 9B.4): without evidence refs an IP is rejected; it is accepted when quoted verbatim from the Terraform evidence sent",
+      "known_tradeoff": true
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "This operation caused the drift.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): causation",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "op-1 changed tags.owner.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): an operation that changed a value",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "The evidence proves the tag write explains the drift.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): proof",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "The tag write is definitely the source.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): certainty",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "It is responsible for the drift.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): responsibility",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "This confirms the drift came from the portal.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): confirmation",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "The recorded tag write is consistent with the drifted tags area.",
+      "expected": null,
+      "note": "investigation guards (Task 9B.4): consistency wording is allowed",
+      "known_tradeoff": false
+    },
+    {
+      "category": "verdict_upgrade",
+      "text": "The attribution is not confirmed.",
+      "expected": "verdict_upgrade",
+      "note": "investigation guards (Task 9B.4): negated proof wording is rejected too (conservative)",
+      "known_tradeoff": true
+    },
+    {
+      "category": "reference",
+      "text": "The write ended at 11:04:58 UTC.",
+      "expected": "unsupported_timestamp",
+      "note": "investigation guards (Task 9B.4): time not in the evidence sent",
+      "known_tradeoff": false
+    },
+    {
+      "category": "reference",
+      "text": "On 2026-10-04 the tags changed outside Terraform.",
+      "expected": "unsupported_timestamp",
+      "note": "investigation guards (Task 9B.4): date not in the evidence sent",
+      "known_tradeoff": false
+    },
+    {
+      "category": "reference",
+      "text": "Microsoft.Resources/deployments/write ran nearby.",
+      "expected": "unsupported_operation",
+      "note": "investigation guards (Task 9B.4): operation not in the evidence sent",
+      "known_tradeoff": false
+    },
+    {
+      "category": "reference",
+      "text": "op-7 is unrelated.",
+      "expected": "unsupported_operation",
+      "note": "investigation guards (Task 9B.4): operation reference not sent",
+      "known_tradeoff": false
+    },
+    {
+      "category": "reference",
+      "text": "The change happened before the detection run.",
+      "expected": null,
+      "note": "investigation guards (Task 9B.4): relative timing without a timestamp",
+      "known_tradeoff": false
+    },
+    {
+      "category": "reference",
+      "text": "A 10:30 ratio was configured.",
+      "expected": "unsupported_timestamp",
+      "note": "investigation guards (Task 9B.4): a clock-like number reads as a time",
+      "known_tradeoff": true
     }
   ]
 }

@@ -4,13 +4,21 @@ name: "Phase 9A - AI Analysis (no LLM)"
 #
 # A separate workflow on purpose (decision D3): it runs after "Phase 5 - Drift
 # Detection" completes, so an AI failure can never change the detection run's
-# result, its drift_detected output or its drift report. drift-detection.yml is
-# not modified.
+# result, its drift_detected output or its drift report. This workflow never
+# changes drift-detection.yml's results; it only reads that run's public artifacts.
 #
-# Valid runs only (D4): the source run's drift-report-<run id> artifact must exist
-# and hold a report with outcome "succeeded" and a boolean has_drift (drift or no
-# drift). A failed or unknown detection run uploads no report, so no AI analysis
-# runs for it; that is reported, not treated as an AI failure. Validity comes from
+# Valid runs only (D4, amended by Task 9B.5 decision 6): the source run's
+# drift-report-<run id> artifact must exist and hold the PUBLIC drift report (Task
+# 9B.4A) with outcome "succeeded" and a boolean has_drift (drift or no drift). A
+# missing artifact or a valid public report with outcome "failed" is UNKNOWN: no AI
+# analysis, reported, not an AI failure. A present report that is invalid or not the
+# public contract (e.g. an internal-format report) fails the job with no result
+# artifact: that is a wiring/privacy violation, not a detection result.
+#
+# Drift investigation (Task 9B.5): the source run's drift-investigation-<run id>
+# artifact is downloaded by pattern. Missing -> report v2 with every drifted resource
+# not_investigated; present -> `ai-analysis --investigation` validates it and binds
+# it to the public drift report itself (exit 1 -> the job fails, no artifact). Validity comes from
 # the evidence, not from the source run's conclusion (a valid run whose issues job
 # failed is still analysed).
 #
@@ -25,7 +33,8 @@ name: "Phase 9A - AI Analysis (no LLM)"
 #
 # Output (D5/D6): artifact ai-analysis-report-<source run id> (the two report
 # files, 30 days) and a step summary with counts only. Nothing is written to
-# issues. The artifact has the same public-exposure profile as the drift report.
+# issues. The artifact has the same public-exposure profile as the public drift
+# report (Task 9B.4A).
 
 on:
   workflow_run:
@@ -80,11 +89,26 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/source
 
+      # Task 9B.5: same pattern rule; a missing investigation is not a failure.
+      - name: Download source drift investigation
+        uses: actions/download-artifact@v4
+        with:
+          pattern: drift-investigation-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/source
+
       - name: Check for a valid detection result
         id: present
         run: |
           set -euo pipefail
           report="${RUNNER_TEMP}/source/drift-report-${SOURCE_RUN_ID}/drift_report.json"
+          investigation="${RUNNER_TEMP}/source/drift-investigation-${SOURCE_RUN_ID}/drift_investigation.json"
+          if [ -f "${investigation}" ]; then
+            echo "investigation=${investigation}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "investigation=" >> "${GITHUB_OUTPUT}"
+          fi
           if [ -f "${report}" ]; then
             echo "present=true" >> "${GITHUB_OUTPUT}"
             echo "report=${report}" >> "${GITHUB_OUTPUT}"
@@ -136,8 +160,10 @@ jobs:
           EOF
           ai-analysis --help > /dev/null
 
-      # Valid = DriftReport with outcome "succeeded" and a boolean has_drift; anything
-      # else is unknown (no analysis). A valid report from another run or attempt fails.
+      # Decision 6 (Task 9B.5): the PUBLIC drift report contract. Valid public report
+      # with outcome "failed" -> unknown (no analysis, exit 0). Present but invalid or
+      # not public -> the job fails, no artifact. A valid report from another run or
+      # attempt fails.
       - name: Validate and bind the drift report
         id: gate
         if: ${{ steps.present.outputs.present == 'true' }}
@@ -147,16 +173,17 @@ jobs:
           set -euo pipefail
           python - <<'EOF'
           import json, os, sys
-          from drift_engine.models import DriftReport
+          from drift_engine.report_public import PublicDriftReport
           out = open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8")
           summary = open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8")
           run_id, attempt = os.environ["SOURCE_RUN_ID"], os.environ["SOURCE_RUN_ATTEMPT"]
           try:
-              report = DriftReport.model_validate(json.load(open(os.environ["REPORT"], encoding="utf-8")))
-              valid = report.outcome == "succeeded" and isinstance(report.has_drift, bool)
+              report = PublicDriftReport.model_validate_json(open(os.environ["REPORT"], "rb").read())
           except Exception as exc:
-              print(f"Drift report rejected: {type(exc).__name__}")
-              report, valid = None, False
+              print(f"::error::Source run {run_id}: the drift report artifact is not a valid public drift report "
+                    f"({type(exc).__name__}); not analysed.")
+              sys.exit(1)
+          valid = report.outcome == "succeeded" and isinstance(report.has_drift, bool)
           if not valid:
               out.write("valid=false\n")
               line = f"Source run {run_id}: drift report not valid. Detection result unknown: no AI analysis."
@@ -176,9 +203,14 @@ jobs:
         if: ${{ steps.gate.outputs.valid == 'true' }}
         env:
           REPORT: ${{ steps.present.outputs.report }}
+          INVESTIGATION: ${{ steps.present.outputs.investigation }}
         run: |
           set -euo pipefail
-          ai-analysis --report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis"
+          args=(--report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis")
+          if [ -n "${INVESTIGATION}" ]; then
+            args+=(--investigation "${INVESTIGATION}")
+          fi
+          ai-analysis "${args[@]}"
 
       # Counts only: no AI text in the summary (decision D6).
       - name: Summary (counts only)
@@ -195,6 +227,7 @@ jobs:
             jq -r '"| Resources | \(.resources | length) |",
                    "| Remediation options | \(.remediation.options | length) |",
                    "| AI sections analysed | \([.analysis[] | select(.status == "ok")] | length) of \(.analysis | length) |",
+                   "| Investigation | `\(.investigation.status)` |",
                    "| LLM | `\(.llm.provider // "none")` / `\(.llm.status)` |"' "${report}"
             echo "| Artifact | \`ai-analysis-report-${SOURCE_RUN_ID}\` (30 days) |"
           } >> "${GITHUB_STEP_SUMMARY}"

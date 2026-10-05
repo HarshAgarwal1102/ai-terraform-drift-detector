@@ -10,7 +10,9 @@ Standard library only. Turns the raw `infracost breakdown --format json` output
                   metadata, paths, project names, tags, resource metadata, run and
                   share URLs) is dropped.
   cost_run.json   binding manifest: run id, environment, canonical drift report
-                  hash, Infracost version, mode, pricing and the cost sign rule.
+                  hash (of the public drift report only, Task 9B.4A; an internal
+                  report is refused), Infracost version, mode, pricing and the
+                  cost sign rule.
 
 Write mode:
     sanitize_infracost.py --raw RAW --drift-report REPORT --run-id ID \
@@ -264,8 +266,11 @@ def load_json(path: Path, label: str) -> Any:
 
 
 def report_binding(report: Any, run_id: str) -> tuple[str, str]:
-    """Returns (environment, canonical hash); the report's run must be this run."""
-    run = report.get("run") if isinstance(report, dict) else None
+    """Returns (environment, canonical hash); the report's run must be this run. Only the public drift report
+    (Task 9B.4A, `public_version`) is accepted: the hash of the internal report is never published."""
+    if not isinstance(report, dict) or report.get("public_version") != "1":
+        raise SanitizeError("drift report: not the public drift report")
+    run = report.get("run")
     if not isinstance(run, dict):
         raise SanitizeError("drift report: missing run")
     if run.get("run_id") != run_id:

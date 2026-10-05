@@ -52,6 +52,12 @@ SECOND_RG = "second-rg"
 SECOND_RG_ID = f"/subscriptions/{SUB}/resourceGroups/{SECOND_RG}"
 
 
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 class FallbackTests(_Base):
     def statements(self, document, addresses=(NSG_ADDR,)):
         return {a: at.origin_statement(document, a) for a in addresses}
@@ -289,9 +295,10 @@ class AiBoundaryTests(_Base):
                 if name.endswith(".py"):
                     with open(os.path.join(directory, name), encoding="utf-8") as fh:
                         text = fh.read()
+                    # Task 9B.4: `activity_log_evidence` is now the report v2 basis label of the public
+                    # investigation's operations; the restricted modules and documents stay out of reach.
                     for needle in ("drift_engine.activity_logs", "drift_engine.attribution", "import activity_logs",
-                                   "import attribution", "origin_statement", "drift_attribution",
-                                   "activity_log_evidence"):
+                                   "import attribution", "origin_statement", "drift_attribution"):
                         self.assertNotIn(needle, text, f"{name}: {needle}")
 
 
@@ -318,7 +325,7 @@ class AiAntiCallerTests(_Base):
                 self.prompts.append(messages)
                 shown = json.loads(re.search(rf"<{tag}>\n(.*)\n</{tag}>", messages[-1].content, re.S).group(1))
                 causes = [{"address": r["address"], "cited_paths": [c["path"]], "hypothesis": "out_of_band_change",
-                           "possible_channels": ["portal"], "actor": "unknown", "confirmed": False,
+                           "possible_channels": ["portal"],
                            "explanation": f"{caller} changed this in the portal.", "basis": "inference"}
                           for r in shown["resources"] for c in r["changes"] if "root_cause" in c["sections"]]
 
@@ -327,15 +334,22 @@ class AiAntiCallerTests(_Base):
                 return json.dumps({"security_analysis": section([], ""), "cost_analysis": section([], ""),
                                    "configuration_analysis": section([], ""),
                                    "root_cause_analysis": section(causes, f"The change was made by {caller}."),
-                                   "risk_assessment": section([], f"{caller} deleted it.")})
+                                   "risk_assessment": section([], f"{caller} deleted it."),
+                                   "investigation_analysis": section([], f"{caller} made the change.")})
         return CallerNamingModel()
 
     def check(self, drift_report: dict, caller: str):
         model = self.naming_model(caller)
         state = self.run_analysis(copy.deepcopy(drift_report), llm=model)
         report = state["report"]
-        self.assertEqual(report["attribution"], {"actor": "unknown", "confirmed": False,
-                                                 "pending": "phase_7_activity_log"})
+        # report v2 (Task 9B.4): without a public investigation, WHO is not investigated and attribution is
+        # not confirmed by available evidence, whatever the model says
+        for resource in report["resources"]:
+            if resource["investigation_scope"] == "drift":
+                self.assertEqual(resource["who"]["recorded_caller"]["status"], "not_investigated")
+                self.assertEqual(resource["who"]["actor_attribution"]["status"],
+                                 "not_confirmed_by_available_evidence")
+        self.assertEqual(report["investigation"]["status"], "not_available")
         self.assertNotIn(caller, json.dumps(report))
         self.assertEqual(self.verify.verify_report(report, drift_report), [])
         for messages in model.prompts:
@@ -345,8 +359,8 @@ class AiAntiCallerTests(_Base):
         return report
 
     def test_caller_named_by_the_model_is_rejected(self):
-        drift_report = evaluate(os.path.join(FIXTURES, "plan_evidence", "external_drift", "plan.sanitized.json"),
-                                os.path.join(FIXTURES, "plan_evidence", "external_drift", "detection_run.json")).report
+        drift_report = _public(evaluate(os.path.join(FIXTURES, "plan_evidence", "external_drift", "plan.sanitized.json"),
+                                os.path.join(FIXTURES, "plan_evidence", "external_drift", "detection_run.json")))
         report = self.check(drift_report, CALLER)
         rejections = report["analysis"]["root_cause"]["rejection_reasons"]
         self.assertEqual(rejections, {"summary_unsupported_attribution": 1, "unsupported_attribution": 1})
@@ -355,7 +369,9 @@ class AiAntiCallerTests(_Base):
         # Task 7.2 confirms the deletion; the AI still sees only the drift report
         scenario = self.scenario(deleted(), self.W(8) + self.D(9))
         self.assertEqual(self.resource(scenario.attribute()).attribution.status, "confirmed")
-        drift_report = json.loads(scenario.report_bytes)
+        from drift_engine.report_public import public_document
+        with open(scenario.plan, encoding="utf-8") as fh:  # the AI engine reads only the public report (Task 9B.4A)
+            drift_report = public_document(json.loads(scenario.report_bytes), json.load(fh))
         with_files = self.check(drift_report, CALLER)
         os.remove(scenario.evidence_path)
         without_files = self.run_analysis(copy.deepcopy(drift_report), config=None, llm=self.naming_model(CALLER))

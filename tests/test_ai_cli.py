@@ -35,7 +35,20 @@ LLM_ENV = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_API_KEY", "AZURE_O
            "AZURE_OPENAI_DEPLOYMENT", "AI_LLM_MODEL", "AI_LLM_PROVIDER", "GITHUB_ACTIONS")
 
 
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 def report(group: str, name: str) -> dict:
+    base = FIXTURES / group / name
+    plan = next((base / f for f in ("plan.synthetic.json", "plan.sanitized.json") if (base / f).exists()),
+                base / "plan.json")
+    return _public(evaluate(str(plan), str(base / "detection_run.json")))
+
+
+def internal_report(group: str, name: str) -> dict:
     base = FIXTURES / group / name
     plan = next((base / f for f in ("plan.synthetic.json", "plan.sanitized.json") if (base / f).exists()),
                 base / "plan.json")
@@ -74,7 +87,12 @@ def test_writes_report_without_llm(tmp_path, capsys, fixture):
     assert data["llm"]["evidence_sent"] == []
     assert all(section["status"] == "skipped" for section in data["analysis"].values())
     assert data["remediation"]["automatic_apply"] is False
-    assert data["attribution"]["actor"] == "unknown"  # no caller identity or Activity Log data (D5)
+    # report v2 without --investigation (Task 9B.4): nothing is investigated, no caller data
+    assert data["report_version"] == "2" and data["investigation"]["status"] == "not_available"
+    assert data["provenance"]["investigation_sha256"] is None and data["llm"]["investigation_sent"] == []
+    for resource in data["resources"]:
+        assert resource["correlation"]["reason"] in ("investigation_not_provided", None)
+        assert resource["who"]["actor_attribution"]["status"] != "confirmed"
     assert src.read_bytes() == before  # the drift report is never changed
     assert "AI analysis report written" in capsys.readouterr().out
 
@@ -92,13 +110,16 @@ def test_output_is_deterministic(tmp_path):
 @pytest.mark.parametrize("content, message", [
     (None, "cannot read"),
     ("{not json", "not valid JSON"),
-    ({"outcome": "succeeded"}, "does not match the report contract"),
+    ({"outcome": "succeeded"}, "does not match the public drift report contract"),
     ("FAILED_RUN", "drift status is unknown"),
+    ("INTERNAL", "never the internal one"),  # Task 9B.4A: the internal report never reaches the AI engine
 ])
 def test_rejected_input_writes_nothing(tmp_path, capsys, content, message):
     src = tmp_path / "drift_report.json"
     if content == "FAILED_RUN":
         write_json(src, report("plan_evidence", "failed_run"))
+    elif content == "INTERNAL":
+        write_json(src, internal_report("plan_evidence", "external_drift"))
     elif content is not None:
         write_json(src, content)
     out = tmp_path / "out"
@@ -327,12 +348,13 @@ def test_no_secrets_azure_or_llm_credentials(workflow):
         assert forbidden not in code, forbidden
     steps = steps_by_name(workflow)
     users = [name for name, step in steps.items() if "github.token" in json.dumps(step)]
-    assert users == ["Download source drift report"]
+    assert users == ["Download source drift report", "Download source drift investigation"]  # Task 9B.5
 
 
 def test_steps_download_install_and_upload(workflow):
     steps = steps_by_name(workflow)
-    assert list(steps) == ["Verify source run", "Download source drift report", "Check for a valid detection result",
+    assert list(steps) == ["Verify source run", "Download source drift report", "Download source drift investigation",
+                           "Check for a valid detection result",
                            "Checkout Code", "Setup Python", "Install AI analysis (pinned)",
                            "Validate and bind the drift report", "Run AI analysis (no LLM)", "Summary (counts only)",
                            "Upload AI analysis report"]
@@ -341,6 +363,11 @@ def test_steps_download_install_and_upload(workflow):
     assert download["with"] == {"pattern": "drift-report-${{ github.event.workflow_run.id }}",
                                 "run-id": "${{ github.event.workflow_run.id }}",
                                 "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
+    investigation = steps["Download source drift investigation"]  # Task 9B.5: pattern, so a missing one is no failure
+    assert investigation["uses"] == "actions/download-artifact@v4" and "if" not in investigation
+    assert investigation["with"] == {"pattern": "drift-investigation-${{ github.event.workflow_run.id }}",
+                                     "run-id": "${{ github.event.workflow_run.id }}",
+                                     "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
     assert steps["Checkout Code"]["with"] == {"persist-credentials": False}
     assert steps["Setup Python"]["with"] == {"python-version": "3.12"}
     assert '-c ci/ai-constraints.txt ".[ai]"' in steps["Install AI analysis (pinned)"]["run"]
@@ -354,8 +381,10 @@ def test_steps_download_install_and_upload(workflow):
         assert steps[name]["if"] == "${{ steps.present.outputs.present == 'true' }}", name
     for name in ("Run AI analysis (no LLM)", "Summary (counts only)", "Upload AI analysis report"):
         assert steps[name]["if"] == "${{ steps.gate.outputs.valid == 'true' }}", name
-    assert 'ai-analysis --report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis"' in \
-        steps["Run AI analysis (no LLM)"]["run"]
+    run = steps["Run AI analysis (no LLM)"]
+    assert 'args=(--report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis")' in run["run"]
+    assert 'args+=(--investigation "${INVESTIGATION}")' in run["run"]  # only when the file is present
+    assert run["env"]["INVESTIGATION"] == "${{ steps.present.outputs.investigation }}"
 
 
 def test_existing_automation_untouched():
@@ -398,7 +427,7 @@ def test_source_run_verification(workflow, tmp_path, branch, event, ok):
 def test_missing_artifact_means_unknown_not_failure(workflow, tmp_path):
     result, outputs, summary = run_step(workflow, "Check for a valid detection result", tmp_path, {})
     assert result.returncode == 0
-    assert outputs == {"present": "false"}
+    assert outputs == {"present": "false", "investigation": ""}
     assert "Detection result unknown: no AI analysis" in summary
 
 
@@ -411,11 +440,17 @@ def source_report(tmp_path: Path, data) -> Path:
 def test_present_artifact_is_detected(workflow, tmp_path):
     path = source_report(tmp_path, report("plan_evidence", "in_sync"))
     result, outputs, _ = run_step(workflow, "Check for a valid detection result", tmp_path, {})
-    assert result.returncode == 0 and outputs == {"present": "true", "report": str(path)}
+    assert result.returncode == 0 and outputs == {"present": "true", "report": str(path), "investigation": ""}
+    investigation = tmp_path / "runner" / "source" / "drift-investigation-123" / "drift_investigation.json"
+    investigation.parent.mkdir(parents=True)
+    investigation.write_text("{}")
+    result, outputs, _ = run_step(workflow, "Check for a valid detection result", tmp_path, {})
+    assert outputs["investigation"] == str(investigation)  # passed to ai-analysis, which validates and binds it
 
 
-def bound(fixture: str, run_id: str | None = "github-123-2") -> dict:
-    data = report("plan_evidence", fixture)
+def bound(fixture: str, run_id: str | None = "github-123-2", internal: bool = False) -> dict:
+    """The PUBLIC drift report the source run uploads (Task 9B.4A/9B.5), bound to a run id."""
+    data = internal_report("plan_evidence", fixture) if internal else report("plan_evidence", fixture)
     if data.get("run") is not None:
         data["run"]["run_id"] = run_id
     return data
@@ -429,14 +464,26 @@ def test_valid_bound_report_is_analysed(workflow, tmp_path, fixture):
     assert outputs == {"valid": "true"}
 
 
-@pytest.mark.parametrize("data", ["FAILED", "{not json", {"outcome": "succeeded"}])
-def test_invalid_report_means_unknown(workflow, tmp_path, data):
-    path = source_report(tmp_path, bound("failed_run") if data == "FAILED" else data)
+def test_failed_public_report_means_unknown(workflow, tmp_path):  # decision 6: a valid failed run -> UNKNOWN
+    path = source_report(tmp_path, bound("failed_run"))
     result, outputs, summary = run_step(workflow, "Validate and bind the drift report", tmp_path,
                                         {"REPORT": str(path)})
     assert result.returncode == 0, result.stdout + result.stderr
     assert outputs == {"valid": "false"}
     assert "Detection result unknown: no AI analysis" in summary
+
+
+@pytest.mark.parametrize("data", ["{not json", {"outcome": "succeeded"}, "INTERNAL", "INTERNAL_FAILED"])
+def test_invalid_or_non_public_report_fails_the_job(workflow, tmp_path, data):  # decision 6
+    builders = {"INTERNAL": lambda: bound("external_drift", internal=True),
+                "INTERNAL_FAILED": lambda: bound("failed_run", internal=True)}
+    content = builders[data]() if isinstance(data, str) and data in builders else data
+    path = source_report(tmp_path, content)
+    result, outputs, summary = run_step(workflow, "Validate and bind the drift report", tmp_path,
+                                        {"REPORT": str(path)})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "valid" not in outputs
+    assert "not a valid public drift report" in result.stdout
 
 
 @pytest.mark.parametrize("run_id", ["github-123-1", "github-124-2", "local-20261001T171607Z-1", None])
@@ -457,6 +504,7 @@ def test_summary_has_counts_only(workflow, tmp_path):
     assert result.returncode == 0, result.stderr
     rows = [line for line in summary.splitlines() if line.startswith("| ") and not line.startswith("| ---")]
     assert [row.split("|")[1].strip() for row in rows] == ["Field", "Source run", "Resources", "Remediation options",
-                                                           "AI sections analysed", "LLM", "Artifact"]
-    assert "| Resources | 1 |" in summary and "| AI sections analysed | 0 of 5 |" in summary
+                                                           "AI sections analysed", "Investigation", "LLM", "Artifact"]
+    assert "| Investigation | `not_available` |" in summary
+    assert "| Resources | 1 |" in summary and "| AI sections analysed | 0 of 6 |" in summary  # report v2: six sections
     assert "`none` / `not_attempted`" in summary

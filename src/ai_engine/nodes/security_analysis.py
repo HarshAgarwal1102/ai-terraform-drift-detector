@@ -40,7 +40,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, ValidationError
 
-from ai_engine.evidence import cited_keys, severity_rank
+from ai_engine.evidence import cited_keys, evidence_refs, severity_rank
 from ai_engine.nodes.common import CitedPath, Strict, free_text_violation, strict_json_loads
 from drift_engine.logs import log_event
 
@@ -133,6 +133,7 @@ def parse_model_output(text: str) -> AiSecurityOutput:
 def validate_findings(output: AiSecurityOutput, evidence: Mapping[str, Any]) -> tuple[list[dict], list[dict]]:
     """Keep findings whose every citation was sent for the security section; attach the authoritative severity."""
     known = cited_keys(evidence, SECTION)
+    refs = evidence_refs(evidence)
     accepted: list[dict] = []
     rejected: list[dict] = []
     for index, finding in enumerate(output.findings):
@@ -140,7 +141,7 @@ def validate_findings(output: AiSecurityOutput, evidence: Mapping[str, Any]) -> 
         if not all(key in known for key in keys):
             rejected.append({"index": index, "reason": "unsupported_citation"})
             continue
-        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation
+        violation = free_text_violation(finding.explanation, refs)  # all free-text guards
         if violation:
             rejected.append({"index": index, "reason": violation})
             continue

@@ -60,8 +60,15 @@ settledness, window coverage, binding) give `not_investigated`.
 
 Anchor candidates (G9) are subdirectories of the given directory holding `run.json`
 ({id, run_attempt, repository, workflow_path, head_branch, event}) and
-`drift_report.json`. Other entries are `not_a_candidate`. Candidates are examined in
-directory-name order, at most 50; each rejection is recorded with a fixed code.
+`drift_report.json` (a downloaded public artifact: the public drift report of Task
+9B.4A; an internal-format report is `report_invalid`). Other entries are
+`not_a_candidate`. Candidates are examined in directory-name order, at most 50; each
+rejection is recorded with a fixed code.
+
+Binding (Task 9B.4A): the investigation reads the internal drift report, but its
+`binding.drift_report_sha256` is the canonical SHA-256 of that report's **public**
+projection (report_public.py), so the public investigation binds to the public artifact
+and no document carries a hash of the internal report.
 
 Deterministic apart from the clock and the Azure source, both injected. Logs carry
 counts and codes only, never a caller, resource ID or candidate content.
@@ -86,6 +93,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from drift_engine import activity_logs as al
 from drift_engine import attribution as at
 from drift_engine import investigation_public as pub
+from drift_engine import report_public
 from drift_engine.classifier import evaluate
 from drift_engine.logs import log_event
 from drift_engine.models import Action, DriftReport
@@ -508,13 +516,14 @@ def _read(path: str) -> bytes | None:
         return None
 
 
-def _load_report_json(data: bytes | None) -> dict | None:
-    """The parsed JSON of a contract-valid drift report (strict JSON), else None."""
+def _load_report_json(data: bytes | None, model: type[DriftReport] = DriftReport) -> dict | None:
+    """The parsed JSON of a contract-valid drift report (strict JSON), else None. `model` is the internal
+    contract for this run's report, the public contract for anchor candidates (Task 9B.4A)."""
     if data is None:
         return None
     try:
         raw = at._json(data)
-        DriftReport.model_validate(raw)
+        model.model_validate(raw)
     except (ValueError, ValidationError, RecursionError, UnicodeDecodeError):
         return None
     return raw if isinstance(raw, dict) else None
@@ -588,7 +597,9 @@ def _check_candidate(path: str, report: dict, repository: str) -> AnchorRun | st
     run = report.get("run") or {}
     if metadata.id == _current_workflow_run_id(run.get("run_id")):
         return "same_run"  # every attempt of the current run, including the current one
-    raw = _load_report_json(_read(os.path.join(path, ANCHOR_REPORT_FILE)))
+    # anchor candidates are public artifacts: the public drift report (Task 9B.4A); older internal-format
+    # reports are report_invalid
+    raw = _load_report_json(_read(os.path.join(path, ANCHOR_REPORT_FILE)), report_public.PublicDriftReport)
     if raw is None:
         return "report_invalid"
     if raw["outcome"] != "succeeded":
@@ -1012,8 +1023,8 @@ def investigate(
 ) -> Result:
     """Investigate the drifted resources of one detection run.
 
-    `report_bytes` must be the drift report `drift-engine analyze` wrote for the same
-    plan and manifest (verified by canonical hash). Anchor candidates are read only
+    `report_bytes` must be the (internal) drift report `drift-engine analyze` wrote for the same
+    plan and manifest (verified by canonical hash); the binding records its public projection's hash. Anchor candidates are read only
     when `anchors_dir` is given, which needs `repository` (owner/name). Bad input is
     recorded in the result, never raised.
     """
@@ -1048,7 +1059,13 @@ def investigate(
     binding.update(run_id=run.get("run_id"), plan_timestamp=plan.get("timestamp"))
     if report_sha != canonical_sha256(recomputed):
         return failed_input("report_mismatch")
-    binding["drift_report_sha256"] = report_sha
+    try:
+        # the public investigation binds to the public drift report (Task 9B.4A); the internal report's
+        # hash is never written to any document
+        public_text = report_public.publish_report(given, evaluation.plan or {})
+    except report_public.PublicReportError:
+        return failed_input("report_invalid")
+    binding["drift_report_sha256"] = report_public.public_sha256(json.loads(public_text))
     if given["outcome"] != "succeeded":
         return failed_input("report_failed")
     started, finished = al.parse_timestamp(run.get("started_at")), al.parse_timestamp(run.get("finished_at"))

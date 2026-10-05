@@ -27,7 +27,7 @@ from test_activity_logs import (  # noqa: E402  (shared helpers; no test classes
     CALLER, NSG_ADDR, NSG_ID, RG, RG_ADDR, RG_ID, SUB, FakeSource, NoCallSource, al, ev, page,
 )
 from test_investigation import (  # noqa: E402
-    REPO, TAGS_OP, UTC, FakeClock, _Base, at_time, nsg_drift, report_bytes,
+    REPO, TAGS_OP, UTC, FakeClock, _Base, at_time, nsg_drift, public_report_bytes, report_bytes,
 )
 
 try:
@@ -187,7 +187,7 @@ class MatchingTests(_WhoBase):
         public = self.public_for(rows)
         leaky = public.replace(b'"github-500-1"', b'"alice@example.com"')
         contract = json.dumps({k: v for k, v in json.loads(public).items() if k != "rules"}).encode()
-        other_report = report_bytes(self.plan(nsg_drift("other")))
+        other_report = public_report_bytes(self.plan(nsg_drift("other")))
         cases = {
             "invalid_json": dict(public=b"{"),
             "leak": dict(public=leaky),
@@ -203,9 +203,11 @@ class MatchingTests(_WhoBase):
                 result = self.who(args.pop("public"), source=NoCallSource(), **args)
                 self.assertEqual(result.document["failure"], {"code": "binding_failed", "detail": detail})
                 self.assertEqual(result.document["results"], [])
-        # the matching drift report passes
-        ok = self.who(public, rows, report=report_bytes(self.plan(nsg_drift())))
+        # the matching public drift report passes (Task 9B.4A); the internal report never binds
+        ok = self.who(public, rows, report=public_report_bytes(self.plan(nsg_drift())))
         self.assertTrue(ok.complete)
+        internal = self.who(public, source=NoCallSource(), report=report_bytes(self.plan(nsg_drift())))
+        self.assertEqual(internal.document["failure"], {"code": "binding_failed", "detail": "binding_mismatch"})
 
     def test_resources_without_operations_need_no_id(self):
         public = self.public_for([], entries=nsg_drift())  # none found: no operations to look up

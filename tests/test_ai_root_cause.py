@@ -25,6 +25,13 @@ from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.classifier import evaluate
 
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
 if HAS_AI_EXTRA:
@@ -46,7 +53,7 @@ def report(group: str, name: str) -> dict:
     base = FIXTURES / group / name
     plan = next(base / f for f in ("plan.synthetic.json", "plan.sanitized.json", "plan.json") if (base / f).exists()
                 or f == "plan.json")
-    return evaluate(str(plan), str(base / "detection_run.json")).report
+    return _public(evaluate(str(plan), str(base / "detection_run.json")))
 
 
 def rc(name):
@@ -78,12 +85,13 @@ def envelope(root_cause=(), risk=(), security=(), cost=(), configuration=(), sum
     return json.dumps({"security_analysis": section(security, "security"), "cost_analysis": section(cost, "cost"),
                        "configuration_analysis": section(configuration, "configuration"),
                        "root_cause_analysis": section(root_cause, "root_cause"),
-                       "risk_assessment": section(risk, "risk")})
+                       "risk_assessment": section(risk, "risk"),
+                       "investigation_analysis": section((), "investigation")})
 
 
 def cause(address=RG, paths=(["tags", "probe"],), hypothesis="out_of_band_change", **extra) -> dict:
     return {"address": address, "cited_paths": [list(p) for p in paths], "hypothesis": hypothesis,
-            "possible_channels": ["portal", "cli_or_sdk", "azure_policy"], "actor": "unknown", "confirmed": False,
+            "possible_channels": ["portal", "cli_or_sdk", "azure_policy"],
             "explanation": "Azure differs from the recorded state while the declaration did not change.",
             "basis": "inference", **extra}
 
@@ -157,7 +165,7 @@ ORIGINS = [
 def test_origin_categories(group, name, expected):
     facts = prepared(report(group, name))["origin_facts"]
     assert {(c["origin"], c["lifecycle"]) for c in facts["changes"]} == expected
-    assert (facts["actor"], facts["confirmed"]) == ("unknown", False)
+    assert not {"actor", "confirmed"} & set(facts)  # attribution comes only from the investigation (Task 9B.4)
 
 
 RISKS = [
@@ -217,11 +225,11 @@ def test_origin_facts_do_not_rewrite_the_report():
 # --------------------------------------------------------------------------- one call, five sections
 
 
-def test_five_section_envelope_required():
+def test_six_section_envelope_required():
     full = json.loads(envelope())
     assert set(full) == {"security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis",
-                         "risk_assessment"}
-    for missing in ("root_cause_analysis", "risk_assessment"):
+                         "risk_assessment", "investigation_analysis"}
+    for missing in ("root_cause_analysis", "risk_assessment", "investigation_analysis"):
         partial = {k: v for k, v in full.items() if k != missing}
         with pytest.raises(InvalidEnvelope):
             parse_envelope(json.dumps(partial))
@@ -357,7 +365,7 @@ def test_hypothesis_must_agree_with_origin(group, name, address, path, hypothesi
     assert root["status"] == "ok"
     if accepted:
         [kept] = root["findings"]
-        assert (kept["actor"], kept["confirmed"], kept["confirmation_requires"]) == ("unknown", False, "activity_log")
+        assert not {"actor", "confirmed", "confirmation_requires"} & set(kept)  # no AI attribution (Task 9B.4)
         assert kept["origin_facts"][0]["path"] == path
     else:
         assert root["findings"] == []
@@ -519,15 +527,16 @@ def test_injected_actor_and_fix_are_escaped_and_echoes_rejected():
                     [risk(SA, (["tags", "note"],), explanation="You should run terraform apply now to fix this.")])
     llm = ScriptedLLM(echo)
     inferences = analyze(state, llm)["inferences"]
-    assert "admin@contoso.com" in llm.prompts[0][1].content  # present only as data inside the evidence block
+    assert "admin@contoso.com" not in llm.prompts[0][1].content  # an identity: withheld from the public report
     assert llm.prompts[0][1].content.count(f"</{EVIDENCE_TAG}>") == 1
     assert inferences["analyze_root_cause"]["rejected_findings"] == [{"index": 0, "reason": "unsupported_attribution"}]
     assert inferences["assess_risk"]["rejected_findings"] == [{"index": 0, "reason": "remediation_not_allowed"}]
 
 
 def test_system_prompt_states_the_boundaries():
-    for phrase in ('The actor is "unknown"', "Do not claim who or what made a change", "Do not recommend remediation",
-                   "No risk level", "unconfirmed hypotheses", "possible_channels"):
+    for phrase in ("Caller identities are withheld", "Do not claim who or what made a change",
+                   "Do not recommend remediation", "No risk level", "unconfirmed hypotheses", "possible_channels",
+                   "upgrade or contradict them", "operations, not property values"):
         assert phrase in SYSTEM_PROMPT
 
 
@@ -546,7 +555,7 @@ def test_consistent_model_output_is_accepted_end_to_end(group, name):
     inferences = analyze(prepared(report(group, name)), llm)["inferences"]
     root, risk_result = inferences["analyze_root_cause"], inferences["assess_risk"]
     assert root["status"] == "ok" and root["rejected_findings"] == [] and root["findings"]
-    assert all((f["actor"], f["confirmed"], f["basis"]) == ("unknown", False, "inference") for f in root["findings"])
+    assert all(f["basis"] == "inference" and "actor" not in f for f in root["findings"])
     assert risk_result["rejected_findings"] == []
     assert len(llm.prompts) == 1
 

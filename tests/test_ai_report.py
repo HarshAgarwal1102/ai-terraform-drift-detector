@@ -39,6 +39,13 @@ from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.classifier import evaluate
 
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
 if HAS_AI_EXTRA:
@@ -58,7 +65,7 @@ def report(group: str, name: str) -> dict:
     base = FIXTURES / group / name
     plan = next((base / f for f in ("plan.synthetic.json", "plan.sanitized.json") if (base / f).exists()),
                 base / "plan.json")
-    return evaluate(str(plan), str(base / "detection_run.json")).report
+    return _public(evaluate(str(plan), str(base / "detection_run.json")))
 
 
 def deterministic_state(drift_report: dict) -> dict:
@@ -73,7 +80,8 @@ def options(group, name):
 
 
 def envelope(**sections) -> str:
-    keys = ("security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment")
+    keys = ("security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment",
+            "investigation_analysis")
     return json.dumps({k: sections.get(k, {"findings": [], "summary": ""}) for k in keys})
 
 
@@ -148,12 +156,17 @@ def test_plan_default_marks_only_the_plan_direction():
         assert defaults[0]["terraform_plan_action"] == changed["action"]
         assert all(o["terraform_plan_action"] is None for o in opts if not o["plan_default"])
     plan = deterministic_state(report("plan_evidence", "replace"))["remediation_plan"]
-    assert plan["ranking"] == "none"
-    # A destructive plan direction is still marked plan_default: it describes the plan, it does not endorse it.
+    assert plan["recommendation_policy_version"] == "1"
+    # A destructive plan direction is still marked plan_default: it describes the plan, it does not endorse it,
+    # and policy v1 (R2) recommends nothing for it (Task 9B.4).
     [replace] = [o for o in plan["options"] if o["plan_default"]]
     assert replace["destructive"] is True and replace["terraform_plan_action"] == "replace"
+    [recommendation] = plan["recommendations"]
+    assert (recommendation["decision"], recommendation["policy_rule"], recommendation["option_id"]) == (
+        "human_decision_required", "R2", None)
     schema = RemediationPlan.model_json_schema()
-    assert "recommended" not in json.dumps(schema).lower() and "rank" not in str(schema["$defs"]["RemediationOption"])
+    option_schema = str(schema["$defs"]["RemediationOption"]).lower()
+    assert "rank" not in option_schema and "recommend" not in option_schema  # options carry no ranking
 
 
 def test_failed_report_has_no_options():
@@ -294,9 +307,13 @@ def test_report_schema_is_strict_and_constants_hold():
     state = run_analysis(report("plan_evidence", "external_drift"), config=load_config({}))
     built = dict(state["report"])
     AiAnalysisReport.model_validate_json(json.dumps(built))
-    for path, bad in ((("attribution", "actor"), "admin"), (("attribution", "confirmed"), True),
+    for path, bad in ((("resources", 0, "who", "actor_attribution", "status"), "confirmed"),
+                      (("resources", 0, "who", "recorded_caller", "identity"), "alice"),
+                      (("resources", 0, "remediation", "recommendation", "execution_allowed"), True),
+                      (("resources", 0, "remediation", "recommendation", "automatic_apply"), True),
+                      (("investigation", "exposure", "caller_identity"), "shown"),
                       (("cost", "monetary_impact"), "$20"), (("remediation", "automatic_apply"), True),
-                      (("report_version",), "2"), (("extra",), 1)):
+                      (("report_version",), "1"), (("extra",), 1)):
         broken = json.loads(json.dumps(built))
         target = broken
         for key in path[:-1]:
@@ -333,15 +350,19 @@ def test_write_report_requires_a_report(tmp_path):
 def test_markdown_sections_and_boundaries(tmp_path):
     state = run_analysis(report("plan_evidence", "resource_removed"), config=load_config({}))
     md = write_report(state, tmp_path)["markdown"].read_text(encoding="utf-8")
-    for heading in ("## Summary", "## Resources", "## Security Impact", "## Cost Impact", "## Configuration",
-                    "## Root Cause (unconfirmed until Phase 7)", "## Risk", "## Remediation Options",
-                    "## Approval Required", "## Limitations"):
+    headings = ["## Summary", "## What changed", "## Recorded Azure operations", "## When", "## Who",
+                "## Correlation", "## Analysis", "## Recommendation & options", "## Limitations", "## Provenance"]
+    assert [line for line in md.splitlines() if line.startswith("## ")] == headings  # locked order (Task 9B.4)
+    for heading in ("### Security Impact", "### Cost Impact", "### Configuration", "### Root Cause (hypotheses)",
+                    "### Risk", "### Investigation Interpretation", "### Approval Required"):
         assert heading in md
-    assert "not determinable from evidence" in md and "Actor: **unknown**" in md
-    assert "not a recommendation" in md and "**not ranked**" in md
+    assert "not determinable from evidence" in md
     assert "Destructive: **yes**" in md and "destructive confirmation required" in md
     assert "Execution allowed: **no**. Automatic apply: **no**." in md
-    assert "recommended" not in md.lower().replace("not a recommendation", "")
+    # resource_removed: the plan deletes one object, so policy v1 (R2) recommends nothing for it; the added object
+    # follows the plan (R4)
+    assert "Decision: **human\\_decision\\_required** (rule R2" in md
+    assert "Decision: **recommended** (rule R4" in md and md.count("recommended by policy v1") == 1
 
 
 @requires_ai
@@ -408,7 +429,7 @@ def test_md_helpers_neutralize_untrusted_text():
 
 def _cause(address, path):
     return {"address": address, "cited_paths": [path], "hypothesis": "out_of_band_change",
-            "possible_channels": ["unknown"], "actor": "unknown", "confirmed": False,
+            "possible_channels": ["unknown"],
             "explanation": "Azure differs from the recorded state.", "basis": "inference"}
 
 
@@ -447,7 +468,7 @@ def test_deterministic_report_parts_identical_with_and_without_llm(llm_kind):
     llm = {"ok": ScriptedLLM(envelope()), "failed": ScriptedLLM(error=TimeoutError("x")),
            "invalid": ScriptedLLM("nope")}[llm_kind]
     with_llm = run_analysis(copy.deepcopy(drift_report), llm=llm)["report"]
-    for key in ("report_version", "generated_from", "summary", "resources", "remediation", "attribution", "cost"):
+    for key in ("report_version", "provenance", "summary", "investigation", "resources", "remediation", "cost"):
         assert with_llm[key] == without[key]
 
 
@@ -487,11 +508,13 @@ def test_remediation_plan_and_report_are_write_once(field, mode):
         return {field: {"options": []}}
 
     from ai_engine.nodes.analyze_drift import make_analyze_drift
+    from ai_engine.nodes.investigation_facts import derive_investigation
     from ai_engine.nodes.report_generator import generate_report
 
     graph = StateGraph(AiState)
     steps = [("parse_drift", parse_drift), ("classify_drift", classify_drift), ("route_cost_config",
-             route_cost_config), ("derive_origin_risk", derive_origin_risk), ("plan_remediation", plan_remediation),
+             route_cost_config), ("derive_origin_risk", derive_origin_risk),
+             ("derive_investigation", derive_investigation), ("plan_remediation", plan_remediation),
              ("analyze_drift", make_analyze_drift(None)), ("generate_report", generate_report), ("later", later)]
     for name, node in steps:
         graph.add_node(name, node)
@@ -538,8 +561,14 @@ def test_fenced_blocks_outgrow_backtick_runs():
 
 @requires_ai
 def test_table_rows_survive_pipes_in_values(tmp_path):
-    md = write_report(run_analysis(report("report_plans", "markdown_html_injection"), config=load_config({})),
-                      tmp_path)["markdown"].read_text(encoding="utf-8")
+    drift = report("report_plans", "markdown_html_injection")
+    # the fixture's note holds an email, which the public report withholds (Task 9B.4A): plant pipes without one
+    for resource in drift["resources"]:
+        for change in resource["attribute_changes"]:
+            if change["path"][0] == "tags" and change["real"]["status"] in ("value", "withheld"):
+                change["real"] = {"status": "value", "value": "a | b || c"}
+    md = write_report(run_analysis(drift, config=load_config({})), tmp_path)["markdown"].read_text(encoding="utf-8")
+    assert "a \\| b \\|\\| c" in md
     rows = [line for line in md.splitlines() if line.startswith("| ") and "tags" in line]
     assert rows
     for row in rows:

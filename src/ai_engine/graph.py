@@ -17,10 +17,15 @@
   routing of `route_cost_config` (Task 6.4), incl. a deterministic configuration
   summary. Write-once, frozen.
 - `origin_facts` is the deterministic origin category and risk factors per
-  change, written by `derive_origin_risk` (Task 6.5), with `actor = "unknown"`
-  and `confirmed = false` until Phase 7. Write-once, frozen.
+  change, written by `derive_origin_risk` (Task 6.5). Write-once, frozen.
+- `investigation` (optional, Task 9B.4) is the **public** drift investigation
+  (`drift_investigation.json`, drift_engine.investigation_public), read-only
+  like `drift_report`. `investigation_facts` are the deterministic WHAT / WHEN /
+  WHO / correlation facts and statements of `derive_investigation`; the
+  investigation is authoritative and nothing later can change them. Write-once.
 - `remediation_plan` holds the deterministic remediation options of
-  `plan_remediation` (Task 6.6): never ranked, never executed. Write-once.
+  `plan_remediation` (Task 6.6) and the recommendation of policy v1 per
+  resource (Task 9B.4); nothing is ever executed. Write-once.
 - `report` is the deterministic report (JSON form) of `generate_report`
   (Task 6.6); `ai_engine.nodes.report_generator.write_report` writes it with its
   Markdown rendering. Write-once.
@@ -34,13 +39,14 @@
 - `warnings` collects non-fatal problems such as an unreachable endpoint.
 
 The graph runs START -> `initialize` -> `parse_drift` -> `classify_drift` ->
-`route_cost_config` -> `derive_origin_risk` -> `plan_remediation` ->
-`analyze_drift` -> `generate_report` -> END. Every deterministic node runs
+`route_cost_config` -> `derive_origin_risk` -> `derive_investigation` ->
+`plan_remediation` -> `analyze_drift` -> `generate_report` -> END. Every deterministic node runs
 before the LLM. `analyze_drift` is the only node that receives the LLM client
 and makes **at most one logical LLM call per run** (security, cost and
-configuration, root-cause and risk sections in one reply); it writes AI output
-only to `inferences` (`analyze_security`, `analyze_cost`,
-`analyze_configuration`, `analyze_root_cause`, `assess_risk`). Every LLM call
+configuration, root-cause, risk and investigation sections in one reply); it
+writes AI output only to `inferences` (`analyze_security`, `analyze_cost`,
+`analyze_configuration`, `analyze_root_cause`, `assess_risk`,
+`analyze_investigation`). Every LLM call
 goes through `invoke_llm`, which turns a missing, unreachable or failing LLM
 into a result object instead of an exception, so the graph always completes
 with deterministic data.
@@ -63,6 +69,7 @@ from ai_engine.nodes.remediation import plan_remediation
 from ai_engine.nodes.report_generator import generate_report
 from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.analyze_drift import make_analyze_drift
+from ai_engine.nodes.investigation_facts import derive_investigation
 from ai_engine.nodes.cost_analysis import route_cost_config
 from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.logs import log_event
@@ -152,6 +159,8 @@ write_once_llm_call = _write_once("llm_call")
 write_once_origin_facts = _write_once("origin_facts")
 write_once_remediation_plan = _write_once("remediation_plan")
 write_once_report = _write_once("report")
+write_once_investigation = _write_once("investigation")
+write_once_investigation_facts = _write_once("investigation_facts")
 write_once_llm = _write_once("llm")
 
 
@@ -183,6 +192,8 @@ class AiState(TypedDict, total=False):
     cost_targets: Annotated[dict[str, Any], write_once_cost_targets]
     config_targets: Annotated[dict[str, Any], write_once_config_targets]
     origin_facts: Annotated[dict[str, Any], write_once_origin_facts]
+    investigation: Annotated[dict[str, Any], write_once_investigation]
+    investigation_facts: Annotated[dict[str, Any], write_once_investigation_facts]
     remediation_plan: Annotated[dict[str, Any], write_once_remediation_plan]
     report: Annotated[dict[str, Any], write_once_report]
     llm_call: Annotated[dict[str, Any], write_once_llm_call]
@@ -229,6 +240,7 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_node("classify_drift", classify_drift)
     graph.add_node("route_cost_config", route_cost_config)
     graph.add_node("derive_origin_risk", derive_origin_risk)
+    graph.add_node("derive_investigation", derive_investigation)
     graph.add_node("plan_remediation", plan_remediation)
     graph.add_node("analyze_drift", make_analyze_drift(llm, limits))  # the only node holding the LLM client
     graph.add_node("generate_report", generate_report)
@@ -237,7 +249,8 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_edge("parse_drift", "classify_drift")
     graph.add_edge("classify_drift", "route_cost_config")
     graph.add_edge("route_cost_config", "derive_origin_risk")
-    graph.add_edge("derive_origin_risk", "plan_remediation")
+    graph.add_edge("derive_origin_risk", "derive_investigation")
+    graph.add_edge("derive_investigation", "plan_remediation")
     graph.add_edge("plan_remediation", "analyze_drift")
     graph.add_edge("analyze_drift", "generate_report")
     graph.add_edge("generate_report", END)
@@ -245,10 +258,18 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
 
 
 def run_analysis(drift_report: Mapping[str, Any], config: AiConfig | None = None, llm: Any | None = None,
-                 limits: EvidenceLimits = EvidenceLimits()) -> AiState:
-    """Run the graph over a parsed `drift_report.json` and return the final state.
+                 limits: EvidenceLimits = EvidenceLimits(),
+                 investigation: Mapping[str, Any] | None = None) -> AiState:
+    """Run the graph over a parsed `drift_report.json` (and optionally the public drift investigation bound to
+    it) and return the final state.
 
-    The caller's object is never shared with the graph: the `drift_report`
-    reducer deep-copies it into read-only containers on input.
+    The caller's objects are never shared with the graph: the reducers deep-copy them into read-only
+    containers on input. `derive_investigation` re-checks the investigation (leak scan, public contract,
+    binding to this drift report, scope) and raises InvestigationInputError otherwise.
     """
-    return build_graph(config=config, llm=llm, limits=limits).invoke({"drift_report": drift_report})
+    inputs: dict[str, Any] = {"drift_report": drift_report}
+    if investigation is not None:
+        if not isinstance(investigation, Mapping) or not investigation:  # an empty one would read as "not given"
+            raise ValueError("investigation must be the parsed drift_investigation.json object")
+        inputs["investigation"] = investigation
+    return build_graph(config=config, llm=llm, limits=limits).invoke(inputs)

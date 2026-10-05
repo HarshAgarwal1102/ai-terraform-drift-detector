@@ -177,7 +177,16 @@ def report_of(paths) -> dict:
 
 
 def report_bytes(paths) -> bytes:
+    """The internal drift report (what `investigate --report` reads)."""
     return (json.dumps(report_of(paths), indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def public_report_bytes(paths) -> bytes:
+    """The public drift report (Task 9B.4A): what a drift-report artifact, and so an anchor candidate, holds."""
+    from drift_engine.report_public import publish_report
+    evaluation = evaluate(*paths)
+    return publish_report(DriftReport.model_validate(evaluation.report).model_dump(mode="json"),
+                          evaluation.plan or {}).encode("utf-8")
 
 
 @unittest.skipIf(inv is None, "drift_engine is not installed (pip install -e '.[dev]')")
@@ -224,7 +233,7 @@ class _Base(unittest.TestCase):
         with open(os.path.join(directory, "run.json"), "w", encoding="utf-8") as fh:
             json.dump(meta, fh)
         if report is None:
-            report = report_bytes(self.plan(entries if entries is not None else in_sync(),
+            report = public_report_bytes(self.plan(entries if entries is not None else in_sync(),
                                             run_id=f"github-{run}-{attempt}", started=started, finished=finished,
                                             plan_ts=plan_ts, environment=environment))
         with open(os.path.join(directory, "drift_report.json"), "wb") as fh:
@@ -799,16 +808,19 @@ class AnchorTests(_Base):
                 self.assertEqual(self.rejection(**meta), "metadata_invalid")
         self.assertEqual(self.rejection(report=b"not json"), "report_invalid")
         self.assertEqual(self.rejection(report=b'{"a": 1, "a": 2}'), "report_invalid")
-        failed = report_bytes(self.plan(nsg_drift(), run_id="github-400-1", outcome="failed"))
+        failed = public_report_bytes(self.plan(nsg_drift(), run_id="github-400-1", outcome="failed"))
         self.assertEqual(self.rejection(report=failed), "report_failed")
-        other_binding = report_bytes(self.plan(in_sync(), run_id="github-401-1", plan_ts="2026-10-02T06:00:30Z",
+        internal = report_bytes(self.plan(in_sync(), run_id="github-400-1", plan_ts="2026-10-02T06:00:30Z",
+                                          started="2026-10-02T06:00:00Z", finished="2026-10-02T06:01:00Z"))
+        self.assertEqual(self.rejection(report=internal), "report_invalid")  # internal format: never an anchor
+        other_binding = public_report_bytes(self.plan(in_sync(), run_id="github-401-1", plan_ts="2026-10-02T06:00:30Z",
                                                started="2026-10-02T06:00:00Z", finished="2026-10-02T06:01:00Z"))
         self.assertEqual(self.rejection(report=other_binding), "run_binding_mismatch")
         del good_report
 
     def test_the_current_report_can_never_be_an_anchor(self):
         paths = self.plan(nsg_drift())
-        current = report_bytes(paths)
+        current = public_report_bytes(paths)
         anchors = self.dir("anchors")
         self.anchor(anchors, "a-same-id", run=500, report=current)
         self.anchor(anchors, "b-other-id", run=501, report=current)
@@ -899,6 +911,16 @@ class ReportBindingTests(_Base):
         result = self.inv_run(paths=paths, source=NoCallSource(), rows=None)
         self.assertEqual(result.document.failure.reason, "report_failed")
 
+    def test_public_projection_failure_is_report_invalid(self):  # Task 9B.4A: fail closed, no binding hash
+        from drift_engine import report_public
+        paths = self.plan(nsg_drift())
+        with mock.patch.object(report_public, "publish_report",
+                               side_effect=report_public.PublicReportError("identifier_in_structure")):
+            result = self.inv_run(paths=paths, source=NoCallSource(), rows=None, anchors=None)
+        document = result.document
+        self.assertEqual((document.outcome, document.failure.reason, document.binding.drift_report_sha256),
+                         ("failed", "report_invalid", None))
+
     def test_hash_matches_ai_engine(self):
         try:
             from ai_engine.nodes.report_generator import drift_report_sha256
@@ -906,7 +928,11 @@ class ReportBindingTests(_Base):
             self.skipTest("needs the ai extra")
         paths = self.plan(nsg_drift())
         result = self.inv_run(paths=paths, rows=self.log.tags(at_time(8)))
-        self.assertEqual(result.document.binding.drift_report_sha256, drift_report_sha256(json.loads(report_bytes(paths))))
+        # Task 9B.4A: the binding is the public drift report's hash, never the internal report's
+        public = json.loads(public_report_bytes(paths))
+        self.assertEqual(result.document.binding.drift_report_sha256, drift_report_sha256(public))
+        self.assertNotEqual(result.document.binding.drift_report_sha256,
+                            drift_report_sha256(json.loads(report_bytes(paths))))
 
 
 class ContractTests(_Base):

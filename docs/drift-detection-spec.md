@@ -449,8 +449,9 @@ engine, read it and never re-derive it, so they never need `plan.json`. A failed
 no resources and no summary, so it carries no severity: drift status stays unknown, never
 `INFO`.
 - Non-sensitive identifiers (e.g. resource `id` values containing the subscription ID)
-  are emitted as values. Like every evidence artifact, the output stays outside the
-  repository (§4.1).
+  are emitted as values in this (internal) report. Like every evidence artifact, the output
+  stays outside the repository (§4.1). Anything that leaves the runner uses the public
+  projection of §8.3 instead.
 
 ### 8.3 Handling Sensitive Data
 
@@ -470,6 +471,33 @@ otherwise persisted by this workflow. The published report is the contract repor
 (sensitive values redacted by the engine). Values Terraform does not flag sensitive are not
 redacted: when a resource `id` changes, its before/after values (which contain the
 subscription ID) can appear in the report.
+
+**Public drift report (Task 9B.4A; CI wiring Task 9B.5):** the report above is the
+**internal** document. It is unchanged, but it stays on the runner. Everything that leaves
+the runner uses its deterministic public projection: the drift artifact, the investigation's
+binding and anchors, GitHub issues, the cost binding and AI analysis.
+- **Producing it**: `drift-engine analyze --public-output <file>` (`src/drift_engine/report_public.py`,
+  `schemas/drift_report.public.schema.json`). The document has the same fields plus
+  `public_version: "1"`.
+- **What is withheld**: a value holding an ARM/resource ID or subscription/provider path, a GUID,
+  or a UPN/email-like identity becomes the typed view `{"status": "withheld", "kinds": [...],
+  "resource": <Terraform address> | null, "ref": "id-<n>" | null}`.
+  - An ARM ID owned by exactly one resource of the same plan names that resource's address.
+  - Any other withheld value gets a per-report ordinal `ref`; the same value always gets the same ref.
+  - A list or map holding one is withheld whole.
+  - An identifier map key in a path becomes `withheld-key-<n>`.
+- **What stays**: configured IP addresses, CIDRs and URLs are Terraform evidence and are kept.
+- **Fail closed**: an identifier in any other field (address, notes, run, plan, ...), a failed
+  independent verification or a failed identifier scan (report and run manifest) means exit 70
+  with `public_projection_failed:<code>`. Nothing is written, drift status is UNKNOWN, and the
+  internal report is never published instead.
+- **Hash**: the only drift report hash a public artifact may carry is the public report's
+  canonical SHA-256.
+- **CI (Task 9B.5)**: `Analyze Drift` writes the internal report to the runner-only
+  `$RUNNER_TEMP/drift-internal/` (0700) and the public report to `$RUNNER_TEMP/drift/drift_report.json`,
+  beside the manifest. The `drift-report-<run_id>` artifact therefore holds exactly the public
+  `drift_report.json` and `detection_run.json`. Validity (`drift_detected`) is read from the public file. A
+  projection failure is UNKNOWN and nothing is uploaded.
 
 **Issue publication (Task 8.1):** for a valid drifted run (`drift_detected` literally
 `"true"`), the workflow's `issues` job (`contents: read`, `issues: write`; no `id-token`, no
@@ -507,7 +535,11 @@ report must validate with `outcome == "succeeded"` and a boolean `has_drift` (`t
 binding as for issues applies (`run.run_id == github-<run_id>-<run_attempt>`, branch `main`,
 event `schedule` or `workflow_dispatch`); otherwise the job fails without an artifact. The
 output is the `ai-analysis-report-<source run id>` artifact (`ai_analysis_report.json` and
-`ai_analysis_report.md` only, 30-day retention), with the **same exposure profile as the drift
+`ai_analysis_report.md` only, 30-day retention; from Task 9B.4A `ai-analysis` accepts only the
+public drift report, so values withheld there stay withheld. From Task 9B.5, a present report that is
+invalid or not the public contract fails the job with no result artifact, while a valid public report
+with `outcome: failed` stays UNKNOWN. The run's `drift-investigation-<run id>` artifact is passed to
+`ai-analysis --investigation` when present), with the **same exposure profile as the drift
 report artifact** (accepted 2026-10-04): real non-sensitive attribute values, HCL value
 fragments, remediation command templates with addresses and the deterministic summary can
 appear; values Terraform flags sensitive stay redacted, and no Activity Log data or caller
@@ -543,6 +575,39 @@ re-verifies both files with `sanitize_infracost.py --check` against this run's d
 writes a totals-only summary. A cost failure fails the `cost` job and the run, but never changes
 `drift_detected`, the drift report or artifact, issues or the `report` verdict. Infracost's
 pricing queries and its usage telemetry are the only accepted egress.
+
+**Drift investigation (Task 9B.5; PROJECT_PLAN.md Phase 9B G8-G13, G10):**
+- **Where and when**: after `Upload Drift Report` and before the cost step (which runs `az logout`),
+  only for a valid classification. The `Drift Investigation` step runs
+  `scripts/investigation_analysis.sh` with the job's Azure CLI session (Reader; Activity Log reads
+  only).
+- **Install**: a separate venv, `.[azure]` pinned exactly by `ci/azure-constraints.txt`, with an
+  exact-pin check.
+- **Anchors**: for a drifted run only, `scripts/fetch_prior_drift_reports.py` fetches anchor
+  candidates. It lists the newest 50 completed `main` runs from `schedule` or `workflow_dispatch`
+  within 30 days (excluding the current run), using `actions: read` and `GH_TOKEN`, which reaches only
+  this script. It extracts one `drift_report.json` (at most 10 MB) per run and never forwards the
+  token across the download redirect. A listing failure fails closed (`anchor_fetch_failed`;
+  `investigate` does not run). A single bad candidate is recorded as `report_invalid`.
+- **Investigation**: `drift-engine investigate` reads the internal report and writes the restricted
+  investigation and evidence to `$RUNNER_TEMP/investigation/restricted/` (0700). Its public
+  `drift_investigation.json` is checked against the PUBLIC drift report (`investigation-check`) before
+  anything is uploaded.
+- **Status**: the step always exits 0 (the second documented D5 exception) and records
+  `investigation_status` (`succeeded` / `incomplete` / `failed`), a fixed `investigation_failure`
+  code, `investigation_detail` (counts by fixed Activity Log failure code only) and
+  `investigation_publishable`.
+- **Upload**: `drift-investigation-<run_id>` (public file only, 30 days; the second documented
+  `continue-on-error` upload) when the result is publishable: succeeded, incomplete, or failed but
+  bindable.
+- **`investigation` job** (`contents: read` only): verifies the downloaded investigation against the
+  downloaded public drift report and writes a counts-only summary. It then fails unless the
+  investigation succeeded, its upload succeeded and the verification passed.
+- **Unaffected**: `drift_detected`, the drift report and artifact, issues, cost and the `report` job.
+- **Bounds**: there is no step-level timeout (one would fail the plan job). The script bounds itself
+  (`timeout 1500` / `300`), and `plan-and-analyze` has a 45-minute limit. The AI workflow downloads the
+  investigation by pattern (missing means `not_investigated`) and `ai-analysis` binds it to the public
+  drift report.
 
 ## 9. Future Extensibility
 

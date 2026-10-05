@@ -57,6 +57,12 @@ ARM_ID = f"/subscriptions/{GUID}/resourceGroups/rg-dev/providers/Microsoft.Netwo
 
 # --------------------------------------------------------------------------- report helpers
 
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 def fixture_dirs() -> list[str]:
     dirs = []
     for d in sorted(glob.glob(os.path.join(FIXTURES, "*", "*", ""))):
@@ -71,7 +77,7 @@ def fixture_report(name: str, run_id: str = RUN) -> dict:
     d = matches[0]
     plan = next(os.path.join(d, f) for f in ("plan.sanitized.json", "plan.synthetic.json")
                 if os.path.exists(os.path.join(d, f)))
-    report = evaluate(plan, os.path.join(d, "detection_run.json")).report
+    report = _public(evaluate(plan, os.path.join(d, "detection_run.json")))
     if report["run"] is not None:
         report["run"]["run_id"] = run_id
     return report
@@ -289,8 +295,8 @@ class GatingTests(_Base):
                 self.assertEqual(fake.requests, [])
 
     def test_report_failures(self):
-        failed = evaluate(os.path.join(self.tmp, "absent-plan.json"),
-                          os.path.join(FIXTURES, "plan_evidence", "failed_run", "detection_run.json")).report
+        failed = _public(evaluate(os.path.join(self.tmp, "absent-plan.json"),
+                          os.path.join(FIXTURES, "plan_evidence", "failed_run", "detection_run.json")))
         self.assertEqual(failed["outcome"], "failed")
         in_sync = fixture_report("in_sync")
         cases = {
@@ -1165,7 +1171,7 @@ class CliTests(_Base):
         calls = []
 
         def flaky(name, *args, **kwargs):
-            if name == "drift_engine.models" and not calls:
+            if name == "drift_engine.report_public" and not calls:
                 calls.append(name)
                 raise ImportError("simulated: package not installed")
             return real_import(name, *args, **kwargs)
@@ -1181,7 +1187,7 @@ class CliTests(_Base):
             builtins.__import__ = real_import
             sys.path[:] = saved_path
             sys.modules.pop(spec.name, None)
-        self.assertEqual(calls, ["drift_engine.models"])
+        self.assertEqual(calls, ["drift_engine.report_public"])
         self.assertIs(module.DriftReport, ga.DriftReport)
 
     def test_automation_error_rejects_unknown_codes(self):
@@ -1236,7 +1242,7 @@ class BoundaryTests(unittest.TestCase):
         imported = [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
         imported += [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
         self.assertEqual(sorted(m for m in imported if m.startswith("drift_engine")),
-                         ["drift_engine.models", "drift_engine.models", "drift_engine.severity", "drift_engine.severity"])
+                         ["drift_engine.report_public"] * 4 + ["drift_engine.severity"] * 2)
         for name in ("ai_engine", "activity_logs", "attribution"):
             self.assertFalse([m for m in imported if name in m], name)
 
@@ -1256,9 +1262,13 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertEqual(self.wf["permissions"], {"id-token": "write", "contents": "read"})
         self.assertEqual(self.wf["concurrency"], {
             "group": "drift-detection-${{ github.event.inputs.environment || 'dev' }}", "cancel-in-progress": False})
-        self.assertEqual(sorted(self.jobs), ["cost", "issues", "plan-and-analyze", "preflight", "report"])  # Task 10.1
-        for name in ("preflight", "plan-and-analyze", "report"):
+        self.assertEqual(sorted(self.jobs), ["cost", "investigation", "issues", "plan-and-analyze", "preflight",
+                                             "report"])  # Task 10.1, Task 9B.5
+        for name in ("preflight", "report"):
             self.assertNotIn("permissions", self.jobs[name])
+        # Task 9B.5 (G10): plan-and-analyze adds actions: read for the anchor fetch, nothing else
+        self.assertEqual(self.jobs["plan-and-analyze"]["permissions"],
+                         {"id-token": "write", "contents": "read", "actions": "read"})
         self.assertEqual(self.jobs["report"]["needs"], ["preflight", "plan-and-analyze"])
 
     def test_issues_job(self):
@@ -1293,7 +1303,8 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertEqual(self.text.count("secrets.GITHUB_TOKEN"), 1)
         code_lines = [ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#")]
         self.assertEqual(sum("issues: write" in ln for ln in code_lines), 1)
-        self.assertEqual(sum("permissions:" in ln for ln in code_lines), 3)  # workflow default + issues + cost (Task 10.1)
+        # workflow default + plan-and-analyze (9B.5) + issues + cost (10.1) + investigation (9B.5)
+        self.assertEqual(sum("permissions:" in ln for ln in code_lines), 5)
         self.assertNotIn("pull_request_target", self.text)
         self.assertNotIn("issue_comment", self.text)
 

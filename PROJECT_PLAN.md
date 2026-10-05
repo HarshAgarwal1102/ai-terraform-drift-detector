@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.4 — AI Report v2, Deterministic Investigation Narrative & Recommendation Policy (not started; begins with its design review)
+- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete; the approval-gated real CI proof is pending: commit and push 9B.4 + 9B.4A + 9B.5 together first, item 8). Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
 - **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -1425,6 +1425,11 @@ Phase 5 automates drift scanning in GitHub Actions on a schedule and manual disp
   - Artifacts serve as input for Phase 6 AI analysis. Phase 6 consumes `drift_report.json`, not raw plans.
   - **Scope revision (2026-10-02, user-approved)**: "raw plan" removed from the published artifact because the repository is public and plan files can contain clear-text sensitive and state values (spec §8.3). The published report is the contract report (sensitive values redacted by the engine).
   - **Known limitation**: the report is not free of identifiers. Values Terraform does not flag sensitive are not redacted, so when a resource's `id` attribute changes (deletion, replacement, removal) its before/after values, including the subscription ID, appear in `attribute_changes`.
+  - **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: the known limitation above is resolved by an internal/public split, not by changing this report.
+    - The engine's `drift_report.json` (the Phase 3/4 contract) is unchanged, but it becomes **internal**: runner-only (or local), never uploaded, and never hashed into anything public.
+    - The `drift-report-<run_id>` artifact carries the deterministic, verified **public** drift report (`public_version: "1"`, still named `drift_report.json`) plus `detection_run.json`.
+    - If the public report cannot be produced and verified, `drift-engine analyze` fails (fixed code, exit 70). The existing Task 5.5 mapping makes the result UNKNOWN, and nothing is uploaded.
+    - Wiring: Task 9B.5. The record below is historical.
 - **Progress Notes (2026-10-02)**:
   - **Workflow**: one new step, `Upload Drift Report`, between Analyze Drift and Run Summary.
     - `actions/upload-artifact@v4`; `name: drift-report-${{ github.run_id }}`.
@@ -1546,7 +1551,7 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
 >   - the report has no WHEN (event time vs detection time);
 >   - remediation options are deliberately unranked (no recommended action);
 >   - without an LLM there is no investigation narrative.
-> - **Ownership**: Phase 9B (Tasks 9B.4–9B.6) owns the remaining work. The task records below are kept unchanged as history; amendment lines point to the superseding 9B task.
+> - **Ownership**: Phase 9B (Tasks 9B.4–9B.6, incl. 9B.4A) owns the remaining work. The task records below are kept unchanged as history; amendment lines point to the superseding 9B task.
 > - **Closure**: Phase 6 returns to 🟢 when Task 9B.6 passes.
 
 #### Task 6.1 — LangGraph Infrastructure & LLM Configuration
@@ -1921,6 +1926,7 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 - **Completed**: 2026-10-03
 - **Objective**: For a valid drifted detection run, deterministically create or update one structured GitHub Issue per drifted resource from the run's drift report artifact. *(Reworded 2026-10-03 per the approved Task 8.1 design review: the drift report is the only input; "AI security analysis", "cost impact" and "recommended HCL fix" are removed — the AI report is not produced in CI (Phase 9A) and Task 6.6 options are never ranked or recommended.)*
 - **Dependencies**: Task 4.6 (drift report contract), Task 5.4 (`drift-report-<run_id>` artifact), Task 5.5 (`drift_detected` output)
+- **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: the issue job's input becomes the **public** drift report of the `drift-report-<run_id>` artifact. `scripts/github_automation.py` validates it against the public model and renders the new S/R/D status `withheld` like any other status. The issue profile is unchanged (never values; GUID/ARM-ID masking stays as a second layer). Issue fingerprints are unchanged. An issue whose canonical content changes (a status becoming `withheld`) is updated once. The record below is historical.
 - **Files/Areas**: new `scripts/github_automation.py` (not in `src/drift_engine/`: that package must not call the network), new `tests/test_github_automation.py` (incl. workflow structure tests), `.github/workflows/drift-detection.yml` (one new issues job; other jobs unchanged; workflow change requires explicit approval), `README.md`, `docs/drift-detection-spec.md` §8.3. **Unchanged**: `src/drift_engine/`, `src/ai_engine/`, `schemas/`, Terraform, `pyproject.toml` / `requirements.txt` (no new dependency), other workflows. *(Expanded 2026-10-03 per the approved Task 8.1 detailed design review.)*
 - **Acceptance Criteria** *(revised 2026-10-03 per the approved Task 8.1 detailed design review and marker-semantics review)*:
   - [x] **Gating**: acts only when the workflow output `drift_detected` is the literal `'true'` and the report validates with `DriftReport` (`drift_engine.models`) with `outcome = succeeded` and `has_drift = true`; no action for `false`, `unknown`, failed or invalid reports.
@@ -1975,6 +1981,7 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 - **Design**: 🔒 locked 2026-10-03 (Task 8.3 design review + edge-case review, user-approved).
 - **Objective**: Close 8.1-owned open drift issues, based on evidence, when a later valid detection run of the same environment reports the issue's resource as present and no longer drifted. *(Reframed 2026-10-03 per the approved Phase 8 restructuring: executes second, after 8.1; deduplication is owned by 8.1; PR lifecycle/closure moved to 8.2. Matching, gating, closing and failure scope revised 2026-10-03 per the Task 8.3 design and edge-case reviews; the earlier "closing comment" and "resolution line" are removed.)*
 - **Dependencies**: Task 8.1 (fingerprint/marker/label contract, GitHub client, issues job)
+- **Amendment (2026-10-05, Task 9B.4A)**: the lifecycle gate validates the **public** drift report (same script and input as Task 8.1's amendment). Closure semantics and the fingerprint are unchanged. The record below is historical.
 - **Files/Areas**: `scripts/github_automation.py` (lifecycle gate, resolvable set, close decision, close request, summary field `closed`, new codes), new `tests/test_github_issue_lifecycle.py` (reuses the 8.1 test fakes; mutants added to the existing safeguard harness), `.github/workflows/drift-detection.yml` (existing `issues` job condition and step name/comments only; workflow change requires explicit approval), `README.md`, `docs/drift-detection-spec.md` §8.3. **Unchanged**: marker v1, `src/`, schemas, Terraform, dependencies, triggers, permissions, concurrency, other jobs.
 - **Interaction with completed Task 8.1** (planned extension, not a change to 8.1's record): the `issues` job condition is widened from `'true'` to `'true' || 'false'` (anticipated in this task's original Files/Areas). A `'false'` run may **only close** issues; 8.1 create/update gating (`'true'`, `has_drift = true`) is unchanged. 8.1 matching stays open-issues-only. The closing run is not recorded in the marker (the 8.1 contract allows but does not require it).
 - **Acceptance Criteria**:
@@ -2731,6 +2738,10 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 - **Completed**: 2026-10-04
 - **Objective**: Provide an `ai-analysis` CLI over `run_analysis` / `write_report`, and run it without an LLM in a separate CI workflow after every valid drift-detection run. It publishes the AI report as its own artifact for downstream consumers. The deterministic drift result is never changed.
 - **Amendment (2026-10-04, Phase 9B)**: D5's "No Activity Log data or caller identity: `ai_engine` never reads Phase 7 output" is superseded by Phase 9B's public investigation profile (G11), integrated in Task 9B.5. The caller identity, subscription/tenant/resource/event IDs, IPs and raw Activity Log content remain excluded from every public artifact. `AI_LLM_PROVIDER=none` in CI stays unchanged (G14). The record below is historical.
+- **Amendment (2026-10-05, Task 9B.5 decision 6)**: D4's "an invalid report is unknown" is narrowed, effective with Task 9B.5:
+  - a valid public report with `outcome: failed` (or a missing artifact) is still UNKNOWN with no AI analysis;
+  - a present report that is invalid or not the public contract fails the job, with no result artifact.
+- **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: the AI workflow's input is the **public** drift report. The AI report's "same exposure profile as the drift report artifact" now means the public drift report profile: Terraform configuration values (incl. configured IPs/CIDRs and URLs) can appear, while ARM/resource IDs, subscription/provider paths, GUIDs and UPN/email-like identities are `withheld`. The AI report's `drift_report_sha256` is the public report's canonical SHA-256. The record below is historical.
 - **Dependencies**: Task 6.6, Task 5.4 (Phase 6's evidence-vs-inference checks are also complete)
 - **Downstream consumers**: Task 10.3 (AI cost explanation), Task 13.1 (consumes real AI report artifacts).
 - **Locked decisions (2026-10-04)**:
@@ -2890,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.3 complete; Task 9B.4 next)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally, awaiting the approval-gated real CI proof)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -2928,7 +2939,7 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
 
 #### Phase 9B locked decisions (user-approved 2026-10-04)
 
-- **G1 — Ownership and status**: Phase 9B owns the requirement end to end. Phase 6 and Phase 7 are 🟡 with requirement-gap amendments; their completed task records stay unchanged as history. Phase 10 is 🔴 BLOCKED (on hold) until Phase 9B is completed and verified. Tasks run strictly one at a time: 9B.1 → 9B.2 → 9B.3 → 9B.4 → 9B.5 → 9B.6. Each task starts with a design review that refines details inside these locked rules; changing a G-decision needs user approval.
+- **G1 — Ownership and status**: Phase 9B owns the requirement end to end. Phase 6 and Phase 7 are 🟡 with requirement-gap amendments; their completed task records stay unchanged as history. Phase 10 is 🔴 BLOCKED (on hold) until Phase 9B is completed and verified. Tasks run strictly one at a time: 9B.1 → 9B.2 → 9B.3 → 9B.4 → 9B.4A → 9B.5 → 9B.6 (9B.4A added 2026-10-05, user-approved P4). Each task starts with a design review that refines details inside these locked rules; changing a G-decision needs user approval.
 - **G2 — Sources of truth**:
   - **Terraform** (the drift report) owns resource, attribute path, expected value and actual value.
   - **The Azure Activity Log** owns the recorded operation, its timestamps and status, the recorded caller and the event context.
@@ -2959,7 +2970,7 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
     - `unclassified_operation`, `during_observation`, `unresolved_operation`, `automated_activity`;
     - `unreadable_events_in_scope` (a verdict that would otherwise be `sole` or `latest`).
   - `no_capable_operation_found`: the investigation completed and found no candidate and no signal in the window. It is always qualified by completeness (G8) and never phrased as "no change happened". It is not allowed when the target's scope has unreadable events: that case is `not_investigated`.
-  - `not_investigated`: no usable evidence for the resource, with a fixed reason code: collection failed or incomplete for its scope, no or invalid or unsupported resource ID, evidence binding failure, failed evidence, unknown detection time, the artifact missing (Task 9B.4), or `unreadable_events_in_scope` instead of `no_capable_operation_found`.
+  - `not_investigated`: no usable evidence for the resource, with a fixed reason code: collection failed or incomplete for its scope, no or invalid or unsupported resource ID, evidence binding failure, failed evidence, unknown detection time, the artifact missing (Task 9B.4), or `unreadable_events_in_scope` instead of `no_capable_operation_found`. In the AI report (Task 9B.4) the artifact missing is `investigation_not_provided` and a bindable failed investigation is `investigation_failed` (D3).
   - **Window membership and ordering (user-approved 2026-10-04, rule details 1 and 3)**:
     - A group is in a resource's window when its **end** is at or after the window start. Groups that straddle the start are included, which only adds candidates.
     - `latest_capable_operation` needs a well-defined latest group. If any other successful candidate overlaps the latest one in time (its end is at or after the latest's start), the verdict is `ambiguous`: `multiple_capable_operations` when that other group is capable, else `unclassified_operation`.
@@ -3025,7 +3036,7 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
   - **Definition**: the latest earlier valid drift report of the same workflow and environment, within artifact retention (≤ 30 days, ≤ 50 runs examined), in which the address was `in_sync`.
   - **Trust checks**:
     - the run belongs to this repository's `drift-detection.yml`, on head branch `main`, with event `schedule` or `workflow_dispatch`;
-    - the report validates as `DriftReport` with `outcome: succeeded`;
+    - the report validates as `DriftReport` with `outcome: succeeded` (amended 2026-10-05, Task 9B.4A: as the **public** drift report contract, since candidates are public artifacts; older internal-format artifacts are `report_invalid`);
     - `run.run_id` is bound to that run id and attempt;
     - the environment is equal;
     - its `run.finished_at` is before this run's `run.started_at`.
@@ -3041,6 +3052,14 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
       - `run.json` is a strict object `{id, run_attempt, repository, workflow_path, head_branch, event}`. The candidate's `drift_report.json` sits beside it.
       - Any other entry (a file, or a subdirectory without `run.json`) is not a candidate: it is recorded as `not_a_candidate`, does not count toward the limit and is never read as a report.
       - Candidates are examined in ascending directory-name order (deterministic). The first 50 are examined; the rest are rejected as `candidate_limit`.
+    - **Anchor fetch (user-approved 2026-10-05, Task 9B.5 design review)**: `scripts/fetch_prior_drift_reports.py` writes that directory.
+      - **When**: only when `drift_detected == 'true'`. A no-drift run has no drifted address to anchor; the fetch is skipped and `investigate` runs without `--anchors`.
+      - **Which runs**: `GET /repos/{repo}/actions/workflows/drift-detection.yml/runs?branch=main&status=completed&per_page=100` (one page). Kept: `event` ∈ {`schedule`, `workflow_dispatch`}, `head_branch == main`, not the current run id, created within the last 30 days (artifact retention). At most the newest **50**, equal to G9's limit, so `candidate_limit` never arises from the fetch.
+      - **Downloads**: only the non-expired artifact named exactly `drift-report-<id>`; zip ≤ 10 MB; only `drift_report.json` is extracted, as a single regular file (no paths, no symlinks), ≤ 10 MB; 30 s per request; up to 3 retries on 5xx/429.
+      - **Layout**: each candidate is written to `<dir>/run-<id>-<attempt>/` as `run.json` (`{id, run_attempt, repository, workflow_path, head_branch, event}` from the API; attempt = the run's latest) plus `drift_report.json`.
+      - **Failures (decision 2)**: a listing failure (authentication, permission, 5xx after retries, invalid JSON, timeout) → exit ≠ 0 → investigation failure `anchor_fetch_failed`. Fail closed: `investigate` is **not** run without the required fetch, and nothing is uploaded.
+        - A single candidate whose artifact is missing, expired, oversized, corrupt or fails to download still gets its `run.json`, without a report. `investigate` records it as `report_invalid` (visible in the public anchor counts); losing a candidate only makes verdicts more conservative.
+      - **Output**: counts and fixed skip reasons only.
   - **Deletion anchor (amended 2026-10-04, issue 6)**: for a deletion, the same anchor is accepted as existence anchor B (`prior_detection_run`, G5).
   - **Window**: from anchor `run.started_at − 60 s` (conservative: it can only add candidates) to the observation start.
   - **No anchor**: lookback window (default 30 days, max 89); `sole_capable_operation` is then impossible.
@@ -3052,12 +3071,37 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
   - **Placement**: new steps in `plan-and-analyze` after `Upload Drift Report` and **before** the cost step (the cost step runs `az logout`). They run only for a valid drift result (`drift_detected` literal `true`/`false`).
   - **Install**: `.[azure]` in a separate venv, exactly pinned through `ci/azure-constraints.txt`.
   - **Status capture**: the step records its status and a fixed failure code as outputs and exits 0, the same documented exception as Task 10.1 D5.
-  - **Upload**: `drift-investigation-<run_id>` (public file only, 30 days) uses `continue-on-error: true` as a second documented exception. This amends Task 10.1 D5's "no other step may use `continue-on-error`".
+  - **Exact names and boundaries (user-approved 2026-10-05, Task 9B.5 design review)**:
+    - `plan-and-analyze` steps in order:
+      1. `Generate Plan Evidence` (unchanged);
+      2. `Analyze Drift`;
+      3. `Upload Drift Report`;
+      4. **`Drift Investigation`** (`id: investigation`): one step running `scripts/investigation_analysis.sh` (always exits 0);
+      5. **`Upload Drift Investigation`** (`id: investigation_upload`);
+      6. `Infracost Cost Estimate` (its `az logout` stays after the investigation);
+      7. `Upload Infracost Report`.
+    - New `plan-and-analyze` outputs: `investigation_status`, `investigation_failure`, `investigation_detail`, `investigation_publishable`, `investigation_upload_outcome`.
+    - `Drift Investigation` env:
+      - `GH_TOKEN` (used only by the anchor fetch);
+      - `DRIFT_ENGINE_PIPELINE_PRINCIPAL: ${{ secrets.AZURE_CLIENT_ID }}` (compared on the runner, never written; G13);
+      - the repository, the run id and the paths.
+    - **No step-level `timeout-minutes` on `Drift Investigation`**: a step timeout would fail `plan-and-analyze`, and the issues and cost jobs (whose `if:` adds an implicit `success()`) would be skipped. The script bounds itself instead: `timeout 1500` around `investigate`, `timeout 300` around the anchor fetch.
+    - **Runner isolation**: pinned venv `${RUNNER_TEMP}/investigation-venv`; the restricted investigation and evidence live in `${RUNNER_TEMP}/investigation/restricted/` (0700). Only `${RUNNER_TEMP}/investigation/public/drift_investigation.json` is uploaded.
+    - **Job `investigation`**: `name: "Drift Investigation (<env>)"`, `needs: [preflight, plan-and-analyze]`, `if: !cancelled() && drift_detected ∈ {'true','false'}`, `permissions: contents: read`, `timeout-minutes: 10`. Steps:
+      1. `Download Drift Report`;
+      2. `Download Drift Investigation` (if the upload succeeded);
+      3. `Verify Drift Investigation` (`investigation-check --public … --report <downloaded public drift report>`);
+      4. `Investigation Summary` (counts only);
+      5. **`Require Investigation Success`** (last, so the summary still renders): it fails unless `investigation_status == succeeded`, `investigation_upload_outcome == success` and verification passed.
+  - **Upload**: `drift-investigation-<run_id>` (public file only, 30 days; `if: investigation_publishable == 'true'`, `if-no-files-found: error`, `overwrite: true`) uses `continue-on-error: true` as a second documented exception. This amends Task 10.1 D5's "no other step may use `continue-on-error`".
   - **Job settings for `plan-and-analyze`**: permissions `id-token: write`, `contents: read`, `actions: read` (anchor lookup); timeout 30 → 45 min.
-  - **New `investigation` check job**: `contents: read` only, no Azure, no secrets. It fails the run on any investigation failure, while `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are unaffected.
+  - **Public drift report (amended 2026-10-05, P1/P3)**: `Upload Drift Report` uploads only the public drift report (Task 9B.4A) and `detection_run.json`. A failed projection or verification means `analyze` exit 70, UNKNOWN and no upload, never the internal report.
+  - **New `investigation` check job**: `contents: read` only, no Azure, no secrets. It downloads `drift-investigation-<run_id>` and `drift-report-<run_id>` and binds the investigation to the downloaded **public** drift report (amended 2026-10-05, Task 9B.5 item 3). It fails the run on any investigation failure, while `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are unaffected.
   - **Logs and step summaries**: counts and fixed codes only.
 - **G11 — Public privacy profile** (every public artifact, workflow log, step summary and LLM input):
   - **Never**: caller identity in any form (UPN, name, object ID, app ID, hash), subscription/tenant IDs, ARM resource IDs, event/correlation/operation IDs, IP addresses, claims, HTTP request data, raw Activity Log content or free text (`description`, `properties.*`).
+    - **Clarified (2026-10-05, user-approved P2)**: "IP addresses" means sensitive Activity Log / caller identity data (e.g. a caller's client IP or claims). IP addresses, CIDRs and URLs that are Terraform configuration values are Terraform evidence and may appear in the public drift report and the AI report (e.g. an NSG rule opened to `0.0.0.0/0`).
+    - This does not relax anything else: ARM/resource IDs, subscription/provider paths, GUIDs and UPN/email-like identities stay forbidden in every public artifact, including inside Terraform values, where they are `withheld` (Task 9B.4A).
   - **Allowed**:
     - Terraform address and type;
     - operation name, status, category and event phase;
@@ -3067,12 +3111,17 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
     - verdict, property link and attribution status with reason codes;
     - completeness, and counts.
   - Public operation references are ordinals (`op-<n>`).
-  - Raw evidence and the restricted investigation exist only on the runner (0600) and are never uploaded or printed. An allowlist plus a fail-closed leak scan (GUID, `@`, IPv4/IPv6, `/subscriptions/`, `/providers/` path, URL) guard every public file.
+  - Raw evidence and the restricted investigation exist only on the runner (0600) and are never uploaded or printed. An allowlist plus a fail-closed leak scan (GUID, `@`, IPv4/IPv6, `/subscriptions/`, `/providers/` path, URL) guard every public investigation file.
+  - **Public drift report profile (added 2026-10-05, P1/P2, Task 9B.4A)**: the internal drift report is a restricted runner-only document; anything leaving the runner uses its public projection.
+    - Values of the withheld classes (ARM/resource IDs, subscription/provider paths, GUIDs, UPN/email-like identities) become typed `withheld` views.
+    - Structural fields are never rewritten: an identifier in an address or other structural field fails the projection (P3).
+    - An independent verification and a fail-closed identifier scan guard it. Configured IPs/CIDRs and URL values are allowed (clarification above).
+    - **Hash contract**: the only drift report hash in any public artifact is the canonical SHA-256 (sorted keys, compact separators, UTF-8) of the **public** drift report. The internal report and any hash of it are never public.
   - **Public investigation schema (user-approved 2026-10-04, Task 9B.3 design review, decision C)**: strict and allowlist-based; any field not listed is dropped.
     - **Top level**:
       - `public_version`, `rules`, `outcome`, `failure`;
       - `exposure` (`caller_identity`, `resource_id`, `event_id`, `correlation_id` all `withheld`; `who_path: local_only`);
-      - `binding` (run id, plan timestamp, drift report SHA-256, evidence outcome, observation window);
+      - `binding` (run id, plan timestamp, **public** drift report SHA-256 (amended 2026-10-05), evidence outcome, observation window);
       - `completeness`;
       - `anchors` (examined count, accepted count, rejected **counts by reason only**).
     - **Per resource**: address, drift action, relevant areas; window (kind, start; for an anchor its GitHub run id, plan timestamp, started/finished and report SHA-256); verdict, reason, `decisive_operation`, property link and reason, `unreadable_events_in_scope`, descendant counts and operation names.
@@ -3082,9 +3131,10 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
     - **Actor attribution**: status, rule, claim; no caller.
     - **Never public**, even indirectly:
       - `evidence_sha256` or any hash of the restricted evidence or investigation (they hash content that contains callers);
+      - any hash of the internal drift report (it can contain ARM IDs; amended 2026-10-05, Task 9B.4A);
       - correlation ids and event ids;
       - anchor candidate directory names and per-candidate rejection detail.
-    - The anchor's GitHub run id and report SHA-256 are safe references: they derive from public drift artifacts.
+    - The anchor's GitHub run id and report SHA-256 are safe references: they derive from public drift artifacts (public drift reports, from Task 9B.4A on).
     - `op-<n>` / `auto-<n>` are per-resource ordinals in a deterministic order (start, end, then event ids as tie-break) and encode no identifier.
   - **Restricted-data CLI hardening (user-approved 2026-10-04, decision D)**:
     - In GitHub Actions (`GITHUB_ACTIONS=true`), `drift-engine activity-logs`, `attribute` and `investigate` refuse to write their restricted document to standard output (usage error, exit 2); `--output` is required there. Local use is unchanged.
@@ -3112,7 +3162,8 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
   - **`pipeline_identity`**: `true` / `false` when the event's principal can be compared on the runner with the running job's own principal (never written); otherwise `null`.
 - **G14 — AI boundary**:
   - **Module boundary (user-approved 2026-10-04, decision F)**: `drift_engine.investigation_public` is the only investigation-related module `ai_engine` may import. An AST test forbids any `ai_engine` import of `investigation`, `who`, `activity_logs` or `attribution`; a subprocess test checks that importing `investigation_public` loads none of them.
-  - **LLM input**: only the sanitized deterministic investigation model (G11 fields plus the Terraform evidence already allowed); never raw Activity Log data, identities or IDs.
+  - **LLM input**: only the sanitized deterministic investigation model (G11 fields plus the Terraform evidence already allowed, taken from the **public** drift report from Task 9B.4A on); never raw Activity Log data, identities or IDs.
+  - **Module boundary addendum (2026-10-05, Task 9B.4A)**: `ai_engine` may also import the public drift report module (`drift_engine.report_public`); the allowlist test is extended accordingly.
   - **CI**: the LLM stays disabled (`AI_LLM_PROVIDER=none`, CLI refusal unchanged). Enabling a real LLM is a later, separate user decision and not part of Phase 9B.
   - **Limits on the LLM**: it may explain consistency, impact and risk. It may not change a verdict, property link, attribution, recommendation, severity or option, and may not cite an operation or timestamp absent from the model.
   - **Guards** reject actor naming, identity-like strings and claims stronger than the deterministic verdict (e.g. "X changed tags.owner", "this operation caused the drift").
@@ -3120,7 +3171,7 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
 - **G16 — AI report v2 and recommendation policy v1**: see the outline below. Report v2 replaces v1's constant `attribution.pending`. The policy replaces "options are never ranked or recommended" (Task 6.6) and adds a recommended option or an explicit "human decision required". Approval stays required and nothing executes.
 - **G17 — Unchanged**:
   - Terraform configuration and RBAC (Reader covers Activity Log reads);
-  - the drift report contract and `drift-engine analyze`;
+  - the drift report contract and `drift-engine analyze`. **Amended (2026-10-05, P1)**: this means the **internal** drift report contract and `analyze`'s internal output and Phase 3/4 semantics. `analyze` gains `--public-output`, and the published artifact contract becomes the public drift report (Task 9B.4A);
   - `drift_detected`/`drift_status` semantics;
   - GitHub issues (Phase 8 profile);
   - `security-scan.yml`, `terraform-auth-test.yml`;
@@ -3129,35 +3180,45 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
 
 #### Data flow (target)
 
-1. `plan-and-analyze` (OIDC, Reader): `plan.json` and the manifest → `drift-engine analyze` → upload `drift-report-<run_id>` (unchanged).
-2. `drift-engine investigate`, in the same job:
+1. `plan-and-analyze` (OIDC, Reader): `plan.json` and the manifest → `drift-engine analyze --public-output` (amended 2026-10-05, Task 9B.4A):
+   - writes the internal report (runner only);
+   - projects, verifies and scans the public report;
+   - upload `drift-report-<run_id>` (public report + `detection_run.json`). A projection failure gives UNKNOWN and no upload.
+2. `drift-engine investigate`, in the same job (internal report + `plan.json`; binds the public investigation to the **public** report hash):
    1. targets (address → ARM ID, drift action, drifted path families) from `plan.json`;
    2. observation window from the manifest/report;
-   3. last-in-sync anchor from earlier drift reports (G9);
+   3. last-in-sync anchor from earlier public drift reports (G9; fetched only for a drifted run, fail-closed `anchor_fetch_failed`);
    4. Activity Log query and normalization v2 with settle/poll (G8);
    5. correlation v2 → restricted investigation (runner only);
    6. public projection (`investigate --public-output`);
    7. verification (projection ⊂ restricted ⊂ evidence) and leak scan, all before the public file is written.
-3. Upload `drift-investigation-<run_id>` (`drift_investigation.json`). Then the cost step (unchanged).
-4. `investigation` check job: `--check` and a counts-only summary.
+3. Upload `drift-investigation-<run_id>` (`drift_investigation.json`) when publishable (succeeded, incomplete, or failed but bindable; decision 1). Then the cost step (bound to the public drift report).
+4. `investigation` check job: downloads the public investigation and the public drift report, runs `investigation-check` against that report (amended 2026-10-05, Task 9B.5 item 3), and writes a counts-only summary. Before this, still in `plan-and-analyze`, `scripts/investigation_analysis.sh` has already checked the same binding against `${RUNNER_TEMP}/drift/drift_report.json` before upload (item 2).
 5. `ai-analysis.yml` (`workflow_run`, no Azure):
-   - downloads and binds the drift report and the investigation;
+   - downloads and binds the public drift report and the investigation;
    - runs AI engine v2: deterministic WHAT/WHEN/WHO/correlation, fallback narrative, recommendation policy, and LLM interpretation only when enabled (never in CI in Phase 9B);
    - uploads `ai-analysis-report-<run_id>` (`ai_analysis_report.json` / `.md`, report v2).
 6. Maintainer, locally: `drift-engine who` gives the recorded identity, kept local only (G12).
 
 #### Report v2 outline (locked; field names finalised in Task 9B.4)
 
-- **`report_version: "2"`, `provenance`**: run id; drift report and investigation canonical SHA-256; versions (report, investigation, capable-operations table, statements, recommendation policy); LLM record (status, provider, `evidence_sent`).
+- **`report_version: "2"`, `provenance`**: run id; **public** drift report (amended 2026-10-05) and investigation canonical SHA-256; versions (report, investigation, capable-operations table, statements, recommendation policy); LLM record (status, provider, `evidence_sent`).
 - **`investigation`**: status; window (anchor or lookback); completeness (G8); exposure (`caller_identity: withheld`, `resource_id: withheld`, `event_id: withheld`, `who_path: local_only`).
 - **`resources[]`**, per drifted resource:
-  - `what` (basis `terraform_evidence`): classification, severity, changes with path, expected, actual;
+  - `what` (basis `terraform_evidence`): classification, severity, changes with path, expected, actual. Taken from the **public** drift report (amended 2026-10-05, Task 9B.4A): withheld-class values appear as `withheld` views;
   - `operations[]` (basis `activity_log_evidence`): `op-<n>`, operation name, status, relation, phase, start, end, availability, timing (G7), capable family or `unclassified`, caller type, client app, `pipeline_identity`, `caller_identity: withheld`;
   - `when`: the decisive operation's start/end and availability, last-in-sync observation, observation window, plan timestamp, gap in seconds;
   - `who`:
     - `recorded_caller` {status `recorded` | `not_recorded` | `multiple_operations` | `not_investigated`, type, client app, `pipeline_identity`, identity `withheld`}. It describes the **decisive operation**, which exists only for `sole_capable_operation` / `latest_capable_operation` (or a confirmed deletion). `ambiguous` with several candidate operations is `multiple_operations`, and each operation's caller data stays in `operations[]` *(amended 2026-10-04, Task 9B.2 design review, issue 9)*;
+    - **Amended (2026-10-04, Task 9B.4 design review, user-approved D1)**: the status set is `recorded` | `not_recorded` | `multiple_operations` | `no_decisive_operation` | `not_investigated` (plus `not_applicable`, D2).
+      - `multiple_operations` is retained for `ambiguous` with two or more candidate operations.
+      - `no_decisive_operation` (with a `candidate_operations` count) covers `no_capable_operation_found` and `ambiguous` with fewer than two candidates.
+      - `not_recorded` carries a reason: `caller_missing` or `caller_inconsistent` (the decisive operation's public `caller_status`).
     - `actor_attribution` {status `confirmed` | `not_confirmed_by_available_evidence`, rule};
   - `correlation`: verdict (G4), reason, property link (G5), counts (capable, unclassified, child, after-observation), fixed statement text;
+  - **Non-drift changed resources (amended 2026-10-04, Task 9B.4 design review, user-approved D2)**: `config_change`, `resource_added` and `resource_removed` resources (no `drift_actions`) stay in `resources[]` with `investigation_scope = not_drift`. Their investigation, `when`, `who` and `correlation` are `not_applicable` (no verdict), and their existing remediation options are preserved. Drifted resources have `investigation_scope = drift`.
+  - **Failed investigations (amended 2026-10-04, Task 9B.4 design review, user-approved D3)**: a bindable public investigation with `outcome: failed` gives report-level `investigation.status = failed` (with its failure stage and reason), and every drifted resource `not_investigated` with reason `investigation_failed`. An unbindable one (`report_invalid` / `report_mismatch`: no drift report hash) cannot produce an AI report (exit 1, nothing written); Task 9B.5 must fail such an investigation before upload.
+  - **`gap_seconds`**: `observation.started_at − decisive_operation.end`, only when a decisive operation exists; otherwise the fixed wording "not confirmed by available evidence".
   - `analysis`: deterministic narrative (statement templates) plus optional AI interpretation labelled `inference`;
   - `remediation`: options (unchanged catalogue) plus `recommendation` {option or `null`, decision `recommended` | `human_decision_required` | `no_options`, policy rule, rationale code, notes}, approval required, execution not allowed.
 - **Run-level**: the five Phase 6 analysis sections (inference); `limitations` (fixed, including "Activity Log records operations, not property values"; "caller identities are withheld in public reports; WHO is available locally via `drift-engine who`"; the `azure_cli` channel caveat; completeness caveats).
@@ -3260,6 +3321,11 @@ In addition:
 - **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-04
 - **Completed**: 2026-10-04
+- **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: `investigate` keeps reading the internal drift report and `plan.json`, and still verifies the report against the recomputed classification. Changes:
+  - the public investigation's `binding.drift_report_sha256` becomes the canonical SHA-256 of the **public** projection of that report, recomputed deterministically on the runner;
+  - the restricted document may keep the internal hash, which never leaves the runner;
+  - anchor candidates (G9) are public drift reports, validated against the public contract. Older internal-format artifacts are rejected as `report_invalid`.
+  The record below is historical.
 - **Objective**: Deterministically relate Terraform drift to Activity Log evidence. This covers the capable-operations table, operation grouping, timing, anchor selection, verdicts, property link and actor attribution (G3–G9), and produces the restricted investigation document.
 - **Dependencies**: Task 9B.1
 - **Files/Areas**: new `src/drift_engine/investigation.py`; `src/drift_engine/attribution.py` (`external_deletion_v1` re-parameterized to G7/G8, rules version 2, reused by the investigation); `src/drift_engine/cli.py` (`investigate` subcommand: plan, manifest, drift report, anchor-candidates directory, comparison principal, lookback, M/C/skew from the locked defaults); new `tests/test_investigation.py`; `tests/test_attribution.py`, `tests/test_attribution_fallback.py` (updated)
@@ -3350,6 +3416,7 @@ In addition:
 - **Status**: 🟢 COMPLETED
 - **Started**: 2026-10-04
 - **Completed**: 2026-10-04
+- **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: the public investigation's binding and anchor references, `investigation-check --report` and `who --report` all use the **public** drift report and its canonical SHA-256. The public investigation schema and leak scan are unchanged. The record below is historical.
 - **Objective**: Produce the public `drift_investigation.json` under the G11 profile, verify it against the restricted document, and provide the local-only WHO path (G12).
 - **Dependencies**: Task 9B.2
 - **Files/Areas** *(amended 2026-10-04, design review decisions A–F)*:
@@ -3433,54 +3500,353 @@ In addition:
     - (d) the public document's GitHub run ids and report hashes are public by design (they reference public drift artifacts).
 
 #### Task 9B.4 — AI Report v2, Deterministic Investigation Narrative & Recommendation Policy
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-04
+- **Completed**: 2026-10-05
+- **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: only the input contract changes; 9B.4 is otherwise complete and is not reopened.
+  - `ai-analysis` / `run_analysis` accept only the **public** drift report.
+  - WHAT renders `withheld` views; a `withheld` view never produces an HCL fragment (gap reason `withheld`).
+  - `verify_report` and the provenance hash use the public report.
+  - The AI import allowlist gains the public drift report module.
+  - These changes are implemented and tested in Task 9B.4A. Open issue (e) below is resolved there.
 - **Objective**: Make the AI engine consume the public investigation model and produce report v2 (G16). This covers the WHAT/WHEN/WHO/correlation sections, the mandatory deterministic narrative (G15), recommendation policy v1, the sanitized LLM evidence model and guards (G14), and verification.
 - **Dependencies**: Task 9B.3
 - **Files/Areas**: `src/ai_engine/cli.py` (`--investigation`), `src/ai_engine/graph.py` (state input), `src/ai_engine/evidence.py` (sanitized investigation evidence for the LLM), `src/ai_engine/nodes/analyze_drift.py` (prompt: explain consistency/impact/risk only), `src/ai_engine/nodes/common.py` (guards), `src/ai_engine/nodes/root_cause.py` (deterministic attribution source replaces the constants), `src/ai_engine/nodes/remediation.py` (recommendation policy v1), `src/ai_engine/nodes/report_generator.py` (report v2, Markdown), `src/ai_engine/verify.py`, `src/ai_engine/config.py` (the disabled reason says "explicitly none" when the provider is set to `none`); tests: `tests/test_ai_report.py`, `tests/test_ai_engine.py`, `tests/test_ai_root_cause.py`, `tests/test_ai_cli.py`, new `tests/test_ai_investigation.py`, `tests/corpora/`, `tests/mutation/mutants.json`
+  - **Added (2026-10-04, design review)**:
+    - new `src/ai_engine/nodes/investigation_facts.py` (deterministic WHAT/WHEN/WHO/correlation, statement templates, policy v1);
+    - `src/ai_engine/__init__.py` (docstring);
+    - the tests that depend on report v1 structures: `tests/test_ai_config.py`, `tests/test_ai_cost_config.py`, `tests/test_ai_parse_drift.py`, `tests/test_ai_security.py`, `tests/test_attribution_fallback.py`;
+    - `tests/test_investigation_public.py` (the AI boundary test becomes an allowlist).
 - **Acceptance Criteria**:
-  - [ ] **Report v2**: implements the locked outline. Without `--investigation` the report records `investigation.status = not_available` and every drifted resource `not_investigated` (`investigation_not_provided`). An invalid or unbound investigation file → exit 1, nothing written.
-  - [ ] **Deterministic fallback (no LLM)**: answers WHAT/WHEN/WHO/correlation and the recommendation with versioned statement templates. Every unprovable fact renders "not confirmed by available evidence".
-  - [ ] **Recommendation policy v1**: rules R0–R4 exactly, with approval and execution constants unchanged.
-  - [ ] **LLM evidence model**: only public-model fields plus allowed Terraform evidence; `evidence_sent` records the investigation keys sent. Guards reject identity-like strings, actor naming, verdict-upgrade wording, and operations or timestamps not in the model. AI cannot change any deterministic field.
-  - [ ] **`verify_report` v2**: independently checks the investigation sections against the public investigation file and the drift report.
-  - [ ] LLM stays disabled in CI (unchanged CLI refusal).
+  - [x] **Report v2**: implements the locked outline. Without `--investigation` the report records `investigation.status = not_available` and every drifted resource `not_investigated` (`investigation_not_provided`). An invalid or unbound investigation file → exit 1, nothing written.
+  - [x] **D1–D3 (design review)**: the caller statuses of D1, the `not_drift` scope of D2, and the failed-investigation handling of D3, as locked in the report v2 outline.
+  - [x] **D4 (design review)**: `ai-analysis` runs `verify_report` v2 on the generated report (against the drift report and the investigation) before writing. Any problem → exit 70, nothing written.
+  - [x] **AI boundary**: `drift_engine.investigation_public` is the only investigation module `ai_engine` imports. The AST test is an allowlist (`drift_engine.logs`, `drift_engine.models`, `drift_engine.investigation_public`). A subprocess test checks that importing `ai_engine.cli` / `ai_engine.graph` loads no restricted module.
+  - [x] **Deterministic fallback (no LLM)**: answers WHAT/WHEN/WHO/correlation and the recommendation with versioned statement templates. Every unprovable fact renders "not confirmed by available evidence".
+  - [x] **Recommendation policy v1**: rules R0–R4 exactly, with approval and execution constants unchanged.
+  - [x] **LLM evidence model**: only public-model fields plus allowed Terraform evidence; `evidence_sent` records the investigation keys sent. Guards reject identity-like strings, actor naming, verdict-upgrade wording, and operations or timestamps not in the model. AI cannot change any deterministic field.
+  - [x] **`verify_report` v2**: independently checks the investigation sections against the public investigation file and the drift report.
+  - [x] LLM stays disabled in CI (unchanged CLI refusal).
 - **Validation**:
-  - [ ] Report v2 on every fixture: the verified tag scenario, the no-anchor, ambiguous, none, not-investigated and deletion-confirmed scenarios, and no drift.
-  - [ ] Markdown order and escaping.
-  - [ ] Policy table over all option fixtures.
-  - [ ] Fake-model tests: a valid explanation accepted; actor naming, identity strings, "caused" / "confirmed" upgrades and an invented time or operation rejected; deterministic state byte-identical with and without the LLM.
-  - [ ] Guard and injection corpora extended.
-  - [ ] Mutation harness extended (verdict, policy and guard mutants caught).
-  - [ ] Network guard active; no real LLM.
+  - [x] Report v2 on every fixture: the verified tag scenario, the no-anchor, ambiguous, none, not-investigated and deletion-confirmed scenarios, and no drift.
+  - [x] Markdown order and escaping.
+  - [x] Policy table over all option fixtures.
+  - [x] Fake-model tests: a valid explanation accepted; actor naming, identity strings, "caused" / "confirmed" upgrades and an invented time or operation rejected; deterministic state byte-identical with and without the LLM.
+  - [x] Guard and injection corpora extended.
+  - [x] Mutation harness extended (verdict, policy and guard mutants caught).
+  - [x] Network guard active; no real LLM.
 - **Implementation Notes**:
   - Starts with a design review (field names, statement templates, guard patterns, prompt changes within the one-logical-call guarantee of Phase 6).
+  - **Design review (2026-10-04, user-approved D1–D4)**:
+    - D1–D3 are recorded in the report v2 outline above. D4 is the CLI self-verification criterion.
+    - Before implementation, the completed Tasks 9B.1–9B.3 were committed as checkpoint `573d5ec`.
+  - **Design details (settled inside the locked rules)**:
+    - **Authority**: the public investigation is authoritative for verdict, property link, actor attribution, operations and timestamps. The LLM only adds labelled inference and can change no deterministic field.
+    - **One logical LLM call**: a sixth section, `investigation_analysis`, in the same reply. Per drifted resource it has:
+      - `cited_operations` (`op-<n>` sent for that address);
+      - a structured `consistency` (`consistent_with_drift` | `not_consistent_with_drift` | `undetermined`) that is checked against the operations' deterministic roles;
+      - an explanation (impact / risk).
+    - **LLM investigation evidence**: an allowlisted subset of the public model.
+      - Per resource: address, drift action, relevant areas, verdict, reason, property link and reason, actor attribution status, window kind, decisive operation, unreadable flag, operations (no caller status), automated events, descendant count.
+      - Run-level: observation and completeness (`queried_at`, `settled`).
+      - Excluded: binding hashes, anchor run ids and report hashes, the exposure block.
+      - The public leak scan runs again on it before sending. `llm.investigation_sent` records the addresses and refs sent.
+    - **Guards** (in addition to the Phase 6 guards):
+      - identity-like strings (the public leak-scan kinds);
+      - verdict-upgrade wording ("caused", "responsible for", "proves", "confirms/confirmed", "definitely", "conclusively", ...);
+      - any timestamp, Azure operation name or `op-<n>` / `auto-<n>` reference not in the evidence sent.
+    - **Root-cause findings**: they lose `actor` / `confirmed` / `confirmation_requires`. The deterministic `who.actor_attribution` is the only place attribution appears.
+    - **Field-name finalisation**:
+      - the LLM record stays the top-level `llm` object and `generated_from` becomes `provenance`;
+      - the top-level `remediation.options` list and the `analysis` section map are kept, so the 9A.1 workflow summary keeps working until Task 9B.5;
+      - the public schema v1 has no per-row event phase, so `operations[]` shows the group outcome;
+      - WHAT keeps Terraform's three views: expected = `desired`, actual = `real`, recorded = `state`.
 - **Completion Notes**:
-  - None.
+  - **Checkpoint**: Tasks 9B.1–9B.3 committed as `573d5ec` before implementation (clean tree; full suite 2118 passed at that commit).
+  - **Files**:
+    - new `src/ai_engine/nodes/investigation_facts.py`: load and bind the public investigation; deterministic WHAT/WHEN/WHO/correlation facts; statement templates v1; the LLM `investigation_analysis` section schema and validator;
+    - changed `src/ai_engine/`: `cli.py`, `graph.py`, `evidence.py`, `config.py`, `verify.py`, `__init__.py` (docstring), and `nodes/`: `analyze_drift.py`, `common.py`, `remediation.py`, `report_generator.py`, `root_cause.py`, `security_analysis.py`, `cost_analysis.py` (guard references only);
+    - new `tests/test_ai_investigation.py`;
+    - updated tests: `tests/test_ai_cli.py`, `test_ai_config.py`, `test_ai_cost_config.py`, `test_ai_engine.py`, `test_ai_parse_drift.py`, `test_ai_report.py`, `test_ai_root_cause.py`, `test_ai_security.py`, `test_attribution_fallback.py`, `test_investigation_public.py`;
+    - extended `tests/corpora/guards.json`, `tests/corpora/injection.json`, `tests/mutation/mutants.json`.
+    - **Unchanged**: `drift_engine` (incl. `investigation_public`), the drift report contract, workflows, scripts, Terraform, dependencies.
+  - **Report v2** (`report_version: "2"`):
+    - `provenance`: both canonical SHA-256 hashes and every version;
+    - run-level `investigation`: status, failure, observation, completeness, anchors, rules, exposure;
+    - `resources[]` (every changed resource, in drift report order):
+      - `investigation_scope` (`drift` / `not_drift`, D2);
+      - `what` (basis `terraform_evidence`; expected = `desired`, actual = `real`, recorded = `state`);
+      - `operations[]` / `automated_events[]` (basis `activity_log_evidence`, `caller_identity: withheld`);
+      - `when` (incl. `gap_seconds`);
+      - `who` (`recorded_caller` per D1, `actor_attribution`);
+      - `correlation` (verdict, reason incl. `investigation_not_provided` / `investigation_failed`, property link, deletion rule, counts, descendant operations);
+      - `analysis.narrative` (all fixed statements in order);
+      - `remediation` {`option_ids`, `recommendation`};
+    - top-level `analysis` (six sections: the five Phase 6 sections plus `investigation`), `remediation` (catalogue options, policy version), `cost`, `llm` (+ `investigation_sent`), `limitations`.
+    - The top-level `remediation.options`, `analysis` map and `llm.provider/status` keep the Task 9A.1 workflow summary working until Task 9B.5 (its executed-step test now shows "0 of 6" sections).
+  - **Statements v1**: 39 fixed templates (`what.*`, `operations.*`, `correlation.*`, `link.*`, `when.*`, `who.*`, `recommendation.*`). Missing slots render "not confirmed by available evidence", as do all unknown event times, callers, attribution and correlation. The verifier matches every statement against its template.
+  - **Policy v1**: implemented in `remediation.recommend` (R0–R4, first match). It is stored per resource and restated independently in `verify.py`. Approval and execution constants are unchanged (`approval_required: true`, `execution_allowed: false`, `automatic_apply: false`). `ranking: none` was removed, since policy v1 now recommends.
+  - **LLM** (still one logical call):
+    - sixth section `investigation_analysis` (cited `op-<n>`, `consistency` checked against the deterministic operation roles and verdict, explanation);
+    - evidence: the allowlisted public subset, leak-scanned again before sending; no caller status, binding, anchor run id or report hash;
+    - `llm.investigation_sent` records the addresses and refs sent (field name finalised here; `evidence_sent` keeps the Terraform keys);
+    - new guards on all sections: `identity_like_string`, `verdict_upgrade`, `unsupported_timestamp` / `unsupported_operation` (references not in the evidence sent);
+    - root-cause findings no longer carry `actor` / `confirmed`.
+  - **D4**: `ai-analysis` runs `verify_report(report, drift_report, investigation)` before writing. Any problem → exit 70 with a count only, nothing written. An invalid, leaky, contract-breaking, unbound (incl. `report_invalid` / `report_mismatch`) or out-of-scope investigation → exit 1, nothing written. `run_analysis` re-checks the investigation inside the graph.
+  - **AI boundary**: AST allowlist test (`drift_engine.logs`, `drift_engine.models`, `drift_engine.investigation_public`). Subprocess test: importing `ai_engine.cli` / `graph` / `verify` loads no `azure.*`, `activity_logs`, `attribution`, `investigation` or `who`.
+  - **Config**: `AI_LLM_PROVIDER=none` set explicitly → disabled reason "AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)". The GitHub Actions refusal is unchanged.
+  - **Validation** (session-scratchpad venv, Python 3.13, `ci/ai-constraints.txt`; no Azure, network or real LLM; `tests/conftest.py` network guard active):
+    - `tests/test_ai_investigation.py`: **53 passed** (86 subtests). Scenarios come from the real 9B.2 investigation and 9B.3 projection over fake Activity Log sources:
+      - the verified portal tag edit: sole, op-1 `Microsoft.Resources/tags/write`, event 11:04:56.093597–11:04:58.187357Z, gap 100.812643 s, caller `user` / `azure_portal`, identity withheld, attribution not confirmed, `inferred_not_provable`, R4 `restore_declared` with the accept-remote note;
+      - no anchor (latest, azure_cli caveat); ambiguous with 2 candidates (`multiple_operations`) and with 1 (`no_decisive_operation`); none; unreadable scope;
+      - caller missing / inconsistent (`not_recorded`); confirmed deletion (R2); deletion not confirmed; rule-confirmed deletion under an ambiguous verdict (stays inferred, Option A);
+      - bindable failed investigations (evidence failure; input failure with no resources) → `investigation_failed`; the unbindable one rejected;
+      - no drift; a `config_change` next to drift (`not_drift`); no investigation.
+      - Also: the Markdown heading order, determinism, the policy table over every option fixture, every load and CLI rejection, the D4 exit 70, 26 investigation tamper cases plus AI-finding and investigation-file tampering, fake-model accept/reject (actor, identity, causal/proof upgrades, invented time/operation/reference, consistency upgrade), deterministic parts identical with and without the LLM, and prompt allowlist / no restricted data.
+    - **Full suite 2230 passed** (3,747 subtests); coverage 98.83% (gate 85%); `unittest discover` OK (919); `./scripts/validate.sh` passed.
+    - **Mutation**: 188/188 caught (`scripts/run_mutation_checks.py`): 16 Phase 6 mutants retargeted to the v2 code, 34 new (facts/verdict, binding, evidence, guards, the investigation section, policy, report, verifier, CLI).
+    - **Scans**: gitleaks over every changed file shows only the pre-existing synthetic `PROJECT_PLAN.md:1651` finding. No identifier from the local raw Activity Log capture appears in any change (41 identifier-like raw values checked). Test identities use `example.com` / `.invalid` and documentation IP ranges only.
+  - **Not done / limitations**:
+    - (a) no real LLM was run (fake models only; CI keeps `AI_LLM_PROVIDER=none`);
+    - (b) CI integration is Task 9B.5: until then `ai-analysis.yml` runs report v2 without `--investigation` (every drifted resource `investigation_not_provided`);
+    - (c) guard trade-offs (documented in `guards.json`):
+      - negated proof wording ("not confirmed") is rejected;
+      - a clock-like number reads as a time;
+      - an IP or URL is accepted only when quoted verbatim from the Terraform evidence sent;
+      - a plain personal name still cannot be recognised without NER;
+    - (d) D4 is fail-closed: a verifier false positive blocks the AI report (exit 70);
+    - (e) **resolved by Task 9B.4A (2026-10-05, P1–P4)**; original note: `what` copies the drift report's Terraform views unchanged, as report v1 did. For object-level changes (e.g. a deletion) those views include the resource's ARM ID, so the existing drift report and the AI report then carry `/subscriptions/…` paths. The investigation-derived sections pass the leak scan in every scenario, and the verified tag-edit scenario is leak-free end to end. This conflicts with the broad reading of G11 ("every public artifact") and with Task 9B.6's leak-scan criterion for deletion cases. Resolving it touches the drift report contract (G17) or the G11 / 9B.6 wording.
+
+#### Task 9B.4A — Public Drift Report Projection
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-05
+- **Completed**: 2026-10-05
+- **Objective**: Everything that leaves the runner uses a deterministic, independently verified **public projection** of the drift report. The internal drift report, its contract and the Phase 3/4 detection, classification and severity semantics stay unchanged. This resolves Task 9B.4's open issue (e): ARM IDs in public deletion reports.
+- **Dependencies**: Task 9B.4; the internal drift report contract (Tasks 3.5, 4.3, 4.6; unchanged)
+- **Locked decisions (user-approved 2026-10-05)**:
+  - **P1 — Internal/public split**:
+    - The existing `drift_report.json` (schema `schemas/drift_report.schema.json`, `drift_engine.models.DriftReport`) stays the internal deterministic document: runner-only in CI (or local), never uploaded, never hashed into anything public.
+    - A deterministic public projection is the contract consumed by the investigation's public binding and anchors, AI analysis, GitHub issues, the cost binding and every public artifact.
+    - Phase 3 detection semantics and its historical acceptance criteria are not modified.
+  - **P2 — Public exposure rules**:
+    - Withheld: ARM/resource IDs, subscription/provider paths, GUIDs, UPN/email-like identities, and Activity Log / caller IPs (the drift report never carries Activity Log data; the class is listed for completeness).
+    - Kept as Terraform configuration evidence: configured IPs/CIDRs and URLs that are Terraform values.
+    - G11 is clarified accordingly. Identifiers become deterministic typed `withheld` views; the final AI report is never regex-cleaned.
+  - **P3 — Fail closed**: if the projection cannot be produced safely or independently verified:
+    - publication fails and nothing is uploaded;
+    - `analyze` exits 70 with a fixed code, so the existing Task 5.5 mapping gives UNKNOWN;
+    - the internal report is never published in its place.
+  - **P4**: this task owns the items below; CI wiring is Task 9B.5.
+- **Design (locked; field names finalised in the task's own design review)**:
+  - **Public document**: `drift_report.json` in the artifact.
+    - It has the internal report's fields, structure, order, classification, severity, counts, addresses, run and plan blocks and notes, plus top-level `public_version: "1"` and the extra view status `withheld`. Nothing else is added or dropped.
+    - Strict, frozen models in new `src/drift_engine/report_public.py`, which imports no restricted module.
+    - JSON schema: new `schemas/drift_report.public.schema.json`.
+  - **Withheld view**: `{"status": "withheld", "kinds": [...], "resource": <Terraform address> | null, "ref": "id-<n>" | null}`.
+    - A scalar ARM ID equal to the ID of exactly one managed resource in the same plan names that resource's Terraform address.
+    - Any other withheld scalar gets a per-report ordinal `ref`: deterministic order of first occurrence; the same raw value gives the same ref, so S/R/D inequality stays visible; refs encode nothing.
+    - A list/map value containing any withheld-class leaf or key is withheld as a whole view (`kinds` lists the classes; no `resource`/`ref`).
+    - `withheld` is distinct from Terraform's `redacted`; the `redacted` flag and redaction (§8.3) are unchanged.
+  - **Structure**:
+    - A withheld-class map key in a change `path` or in `attributes[].name` becomes a positional placeholder, and that change's views are withheld.
+    - A withheld-class value in any structural field fails the projection (P3), never a rewrite. Structural fields: address, `module_address`, `index`, `previous_address`, `resource_types[].addresses`, output names, `run`, `plan`, `notes`.
+    - `detection_run.json` is scanned the same way before upload.
+  - **Address/ID index**: built on the runner from the same `plan.json` (`prior_state`, planned values and change before/after `id`) and never published. An ID matching several addresses gets a `ref`.
+  - **Independent verification**: `verify_public_report(public, internal, index)` re-derives the projection field by field.
+    - Every non-view field is equal.
+    - Every view is either byte-identical (no withheld class inside) or a correct `withheld` view.
+    - Refs are consistent.
+  - **Fail-closed identifier scan** over the whole public document and `detection_run.json`: GUID, `/subscriptions/` and `/providers/` paths (case-insensitive), UPN/email-like strings. Configured IPs/CIDRs and URLs are not flagged (P2).
+  - **Hash contract**: the canonical SHA-256 (sorted keys, compact separators, UTF-8; Task 9A.1 convention) of the public document. It is the only drift report hash in public artifacts (G11).
+  - **CLI**: `drift-engine analyze --public-output PATH`.
+    - Projection, verification and scan all complete before the public file is written.
+    - Any failure: exit 70, a fixed code `public_projection_failed:<code>`, no public file, no value or `str(exc)` printed.
+    - Without the flag, `analyze` is unchanged.
+    - Fixed codes: `identifier_in_structure`, `index_invalid`, `verification_failed`, `scan_failed`, `write_failed`.
+  - **Consumers switched to the public contract (in this task)**:
+    - `ai_engine`:
+      - `ai-analysis` and `run_analysis` accept only the public model;
+      - `withheld` views render in WHAT, never produce HCL fragments (gap `withheld`), and are sent to the LLM as statuses only;
+      - `verify_report` and provenance use the public report;
+      - the import allowlist adds `drift_engine.report_public`.
+    - `scripts/github_automation.py` validates the public model and renders `withheld`.
+    - `drift_engine.investigation`: the public binding hash is the public projection's; anchor candidates are validated as public reports.
+    - `investigation_public.check_binding`, `investigation-check --report` and `who --report` take the public report.
+    - `scripts/sanitize_infracost.py` refuses a report without `public_version` (fail closed) and binds to its hash.
+- **Files/Areas**:
+  - new `src/drift_engine/report_public.py` and `schemas/drift_report.public.schema.json`;
+  - `src/drift_engine/cli.py` (`analyze --public-output`), `src/drift_engine/investigation.py`, `src/drift_engine/investigation_public.py` (binding input only), `src/drift_engine/who.py` (`--report`);
+  - `src/ai_engine/` (`cli.py`, `nodes/parse_drift.py`, `nodes/remediation.py`, `nodes/report_generator.py`, `evidence.py`, `verify.py`);
+  - `scripts/github_automation.py`, `scripts/sanitize_infracost.py`;
+  - `docs/drift-detection-spec.md` §8.3 (CI publication, issue and AI publication paragraphs; the 9A.1 "same exposure profile" sentence), `README.md` (publication wording);
+  - tests:
+    - new `tests/test_public_report.py`;
+    - `tests/test_cli.py`, `tests/test_models.py` (and schema tests);
+    - `tests/test_investigation.py`, `tests/test_investigation_public.py`, `tests/test_who.py`;
+    - `tests/test_github_automation.py`, `tests/test_github_issue_lifecycle.py`, `tests/test_infracost.py`;
+    - the AI tests (report helpers project fixture reports), `tests/test_ai_investigation.py`;
+    - `tests/mutation/mutants.json`.
+  - **Not here**: workflows (Task 9B.5), Terraform, the internal contract, Phase 3/4 classification.
+- **Acceptance Criteria**:
+  - [x] Internal report byte-identical to before for every fixture; Phase 3/4 tests unchanged and passing.
+  - [x] Public projection deterministic (byte-identical), with exactly the P2 withheld classes. Configured IPs/CIDRs and URL values are unchanged, and only withheld-class content changes.
+  - [x] Address mapping, ordinal refs, containers, keys/paths and structural failures as designed; fixed failure codes; nothing written on failure.
+  - [x] Independent verification and a fail-closed scan; a planted ARM ID, GUID, subscription/provider path or UPN/email in every value, key and structural position is caught (or withheld, for values).
+  - [x] Every public consumer uses the public contract and hash; no public artifact or binding carries an internal report hash.
+  - [x] The deletion, removal and replace fixtures and the AI report v2 built from them are leak-free (identifier classes) end to end.
+  - [x] 9B.4's AI behaviour is otherwise unchanged (deterministic parts identical apart from `withheld` views and the hash).
+- **Validation**:
+  - [x] `tests/test_public_report.py`: projection, mapping, refs, containers, keys, structural failures, scan, verification tampering, hash, CLI.
+  - [x] Leak mutants in every public string position.
+  - [x] Consumer tests: issues, cost guard, investigation binding/anchors, `who`, AI.
+  - [x] Full suite, coverage gate, mutation corpus extended (projection, verification and scan mutants caught).
+  - [x] gitleaks; no real identifier in fixtures or changes.
+- **Implementation Notes**:
+  - Starts with its own short design review inside these locked rules (exact field names, placeholder format, fixed codes).
+- **Completion Notes**:
+  - **Files**:
+    - new `src/drift_engine/report_public.py` (models, identifier classes, address/ID index, projection, independent verification, identifier scan, hash, `publish_report`);
+    - new `schemas/drift_report.public.schema.json`, generated from the internal schema (differences: `public_version`, the `withheld` view);
+    - new `tests/test_public_report.py`;
+    - changed:
+      - `src/drift_engine/cli.py` (`analyze --public-output`; fixed codes; help texts), `src/drift_engine/investigation.py` (public binding hash; public anchor contract), `src/drift_engine/__init__.py` (docstring);
+      - `src/ai_engine/cli.py`, `nodes/parse_drift.py` (public contract only), `nodes/remediation.py` (gap `withheld`), `nodes/report_generator.py` (Markdown for `withheld`);
+      - `scripts/github_automation.py` (public model), `scripts/sanitize_infracost.py` (public-only guard), `scripts/run_mutation_checks.py` (copies `scripts/` into mutation sandboxes);
+      - `docs/drift-detection-spec.md` §8.3, `README.md`;
+      - tests: the consumer tests read public reports (`_public` / `public_report_bytes` helpers); anchors are public; the internal report is kept where the current workflow or `investigate` reads it; `tests/mutation/mutants.json` (+3).
+    - **Unchanged**: classifier, comparator, severity, parser, models, formatters, `schemas/drift_report.schema.json`, `scripts/detect_drift.py`, workflows, Terraform.
+    - `investigation_public.py`, `who.py`, `ai_engine/evidence.py` and `verify.py` needed no code change: they already take whatever report bytes they are given and hash or verify it, and `evidence.py` sends non-value views as statuses only.
+  - **Behaviour**:
+    - **Withheld views**: an ARM ID owned by exactly one resource of the same plan names that address; ambiguous or foreign IDs, GUIDs and UPN/email-like identities get `id-<n>` refs (stable per raw value); containers are withheld whole; identifier map keys become `withheld-key-<n>` in `path`, `attribute`, `attributes[].name` and the matching severity-reason prefix (exact match), with that change's views withheld.
+    - **Kept**: configured IPs/CIDRs and URLs.
+    - **Fail closed**: an identifier in any other field, a failed verification, a failed scan (report and run manifest), an unexpected error or a write failure each give exit 70 `public_projection_failed:<code>`, nothing written, no value echoed.
+    - `investigate` binds the public investigation to the public hash; a projection failure there is `report_invalid` with no binding hash.
+  - **Validation** (scratchpad venv, Python 3.13, AI constraints):
+    - `tests/test_public_report.py`: **29 passed** (172 subtests):
+      - internal output byte-identical with and without `--public-output` for all fixtures;
+      - every fixture projects deterministically, verifies, validates the public schema and is identifier-free;
+      - deletion, removal and replace IDs: their address, or a ref when the synthetic fixture shares one ID between two addresses;
+      - classes and kept evidence; key placeholders; structural failures;
+      - 28 verification tampering cases; an identifier planted in every value and key position (5 samples × 150+ positions) caught;
+      - model and schema exclusion and agreement; the hash contract; CLI success, every failure code, real structural failure and write failures;
+      - consumers: issues (internal rejected, `withheld` rendered), cost guard, AI report v2 from identifier drift leak-free with gap `withheld` and the public provenance hash;
+      - **in-process safeguard mutants 18/18 caught**.
+    - Consumer suites:
+      - `test_ai_investigation.py`: the confirmed-deletion AI report is now identifier-free end to end;
+      - `test_investigation.py`: internal-format anchor rejected; binding = public hash, never internal; projection failure;
+      - `test_who.py` / `test_investigation_public.py`: the internal report never binds.
+    - **Full suite 2261 passed** (3,931 subtests); coverage 98.84% (`report_public.py` 99%); `unittest discover` OK; `./scripts/validate.sh` passed.
+    - **AI mutation corpus 191/191 caught**: the full run caught 190; `g-table-pipes-unescaped` was caught after its test was strengthened (the fixture value it relied on is now withheld).
+    - **Scans**: gitleaks shows only the two pre-existing synthetic findings (`tests/test_infracost.py:45`, the plan's long-standing false positive). None of the 41 identifier-like values of the local raw Activity Log capture appear in any change.
+  - **Not done / limitations**:
+    - (a) **Transitional CI blocker, owned by Task 9B.5**: the workflows still upload and consume the internal report. Once this code reaches `main` without 9B.5's wiring, `ai-analysis`, the issues job and the cost check refuse that report and fail (fail-closed by design). Do not push 9B.4A to `main` alone; land it together with 9B.5.
+    - (b) Withholding is conservative: any email-like string (e.g. an owner tag) and every GUID-valued attribute is withheld, even when harmless.
+    - (c) The workflow executed-step tests in `tests/test_ai_cli.py` still model today's gate (internal report) until 9B.5 changes it.
+    - (d) `drift-engine analyze` still prints `str(exc)` for an internal-contract violation (pre-existing Phase 4 behaviour, outside this task); projection errors print fixed codes only.
 
 #### Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows)
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05); the approval-gated real CI proof is pending (needs the 9B.4 + 9B.4A + 9B.5 commit and push, item 8)
+- **Started**: 2026-10-05
 - **Objective**: Run the investigation in `plan-and-analyze` and publish `drift-investigation-<run_id>` (G10), add the `investigation` check job, and feed the public investigation into `ai-analysis.yml`. Detection, issues, report and cost results stay unchanged.
-- **Dependencies**: Task 9B.4; Task 10.1 (step order and D5 exception pattern); Task 9A.1 (binding conventions)
-- **Files/Areas**: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`, new `ci/azure-constraints.txt`, new `scripts/investigation_analysis.sh` (orchestrates install check, anchor fetch, `investigate`, projection, check; fixed status codes; counts-only output), new `scripts/fetch_prior_drift_reports.py` (GitHub API, `actions: read`, G9 metadata and download into a runner directory), new `tests/test_investigation_workflow.py`, `tests/test_infracost.py` (exception list), `tests/test_ai_cli.py` (workflow structure); `README.md`, `docs/drift-detection-spec.md` (§8.3 and a new investigation section), `docs/architecture.md`
+- **Dependencies**: Task 9B.4A (and 9B.4); Task 10.1 (step order and D5 exception pattern); Task 9A.1 (binding conventions)
+- **Files/Areas**: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`, new `ci/azure-constraints.txt`, new `scripts/investigation_analysis.sh` (orchestrates install check, anchor fetch, `investigate`, projection, check; fixed status codes; counts-only output), new `scripts/fetch_prior_drift_reports.py` (GitHub API, `actions: read`, G9 metadata and download into a runner directory; rules in G9 "Anchor fetch"); runner-only paths `${RUNNER_TEMP}/drift-internal/`, `${RUNNER_TEMP}/investigation/restricted/` (0700) and `${RUNNER_TEMP}/investigation-venv` (G10), new `tests/test_investigation_workflow.py`, `tests/test_infracost.py` (step order and exception list; amended 2026-10-05, item 5), `tests/test_ai_cli.py` (workflow structure; executed-step gate tests move to the public report); `README.md`, `docs/drift-detection-spec.md` (§8.3 and a new investigation section), `docs/architecture.md`
 - **Acceptance Criteria**:
-  - [ ] **Workflow structure**: steps after `Upload Drift Report` and before the cost step; separate pinned venv with an exact-pin check; outputs `investigation_status` / `investigation_failure` / `investigation_upload_outcome`; the documented exit-0 capture; exactly two `continue-on-error` uploads in the workflow; `plan-and-analyze` permissions `id-token: write`, `contents: read`, `actions: read` and timeout 45; the `investigation` job (`contents: read`, no Azure or secrets) with `--check` and a counts-only summary.
-  - [ ] **Isolation**: for every investigation failure (install, anchor fetch, Azure auth/authorization/throttling/timeout, correlation, projection, leak scan, upload), `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are identical to a run without Phase 9B, and the `investigation` job fails.
-  - [ ] **AI workflow**: downloads `drift-investigation-<source run id>` by pattern. Missing → report v2 with `not_investigated`. Present → validated and bound, else the job fails with no artifact. `AI_LLM_PROVIDER: none` unchanged; counts-only summary.
-  - [ ] **Hygiene**: no public log or summary carries a G11-forbidden value (scanned in executed-step tests). Raw and restricted files are never uploaded.
+  - [x] **Workflow structure**: steps after `Upload Drift Report` and before the cost step; separate pinned venv with an exact-pin check; outputs `investigation_status` / `investigation_failure` / `investigation_detail` / `investigation_publishable` / `investigation_upload_outcome` (amended 2026-10-05); the documented exit-0 capture; exactly two `continue-on-error` uploads in the workflow; `plan-and-analyze` permissions `id-token: write`, `contents: read`, `actions: read` and timeout 45; the `investigation` job (`contents: read`, no Azure or secrets) with `--check` and a counts-only summary. **Inputs (amended 2026-10-05, item 3)**: it downloads both `drift-investigation-<run_id>` and `drift-report-<run_id>`, and runs `drift-engine investigation-check --public <file> --report <downloaded public drift_report.json>` (binding against the downloaded public report).
+  - [x] **Isolation**: for every investigation failure (install, anchor fetch, Azure auth/authorization/throttling/timeout, correlation, projection, leak scan, upload), `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are identical to the same run with the investigation steps removed (artifact = the public drift report; amended 2026-10-05, item 4), and the `investigation` job fails.
+  - [x] **Investigation outcome mapping (user-approved 2026-10-05, decisions 1 and 2)**: `scripts/investigation_analysis.sh` always exits 0 and writes `investigation_status` / `investigation_failure` / `investigation_publishable`.
+    - Required input file missing → `failed` / `inputs_missing` / false.
+    - pip install fails / installed pins differ → `failed` / `install_failed` / `pin_mismatch` / false.
+    - Anchor fetch exit ≠ 0 or timeout → `failed` / `anchor_fetch_failed` / false; `investigate` is not run (decision 2).
+    - `investigate` exit 0 and the public check passes → `succeeded` / `none` / true.
+    - Exit 1, public `outcome: incomplete`, check passes → `incomplete` / `incomplete` / true (decision 1).
+    - Exit 1, public `outcome: failed` at the evidence / binding / input stage, check passes → `failed` / `evidence_failed` / `evidence_binding_failed` / `input_failed` / true (decision 1).
+    - Exit 1 with an unbindable document (null binding hash) → `failed` / `public_check_failed` / false (Task 9B.4 D3).
+    - Exit 2 / 70 / 73 / other → `failed` / `investigate_usage` / `investigate_internal_error` / `write_failed` / `investigate_internal_error` / false.
+    - Killed by `timeout` (124) → `failed` / `timeout` / false.
+    - Public check fails (leak, contract, binding) → `failed` / `public_check_failed` / false.
+    - **`investigation_detail`**: counts by fixed code only (e.g. `throttled=1`, `authorization_failed=1`), from the runner-only evidence's per-scope query-failure and limit codes. This is how authentication, authorization, throttling and timeouts become distinguishable without exposing values.
+    - **Decision 1**: an `incomplete` or failed-but-bindable investigation is uploaded unchanged. The public document keeps its own `outcome` and `failure` (stage/reason), so the AI report shows per-resource reasons or `investigation_failed` (D3). The `investigation` job still **fails**.
+  - [x] **`investigation` job result**: passes only when `investigation_status == succeeded`, `investigation_upload_outcome == success` and `Verify Drift Investigation` passes; fails in every other case, including an upload failure and decision 1's uploaded-but-not-succeeded cases.
+  - [x] **AI workflow drift report gate (decision 6, user-approved 2026-10-05)**: the `ai-analysis.yml` gate validates the public drift report contract.
+    - A valid public report with `outcome: failed` → UNKNOWN, no AI analysis, no artifact (job succeeds, as today).
+    - A present report that is invalid or not the public contract (e.g. an internal-format report) → the CI job **fails**, with no result artifact (a wiring/privacy violation, not a detection result).
+    - A missing artifact → UNKNOWN, no AI (unchanged).
+  - [x] **AI workflow** (amended 2026-10-05: no separate investigation gate step; `ai-analysis` validates and binds the investigation itself, exit 1 → job fails with no artifact; `--investigation` is passed only when the file is present): downloads `drift-investigation-<source run id>` by pattern. Missing → report v2 with `not_investigated`. Present → validated and bound, else the job fails with no artifact. An unbindable investigation (`report_invalid` / `report_mismatch`) fails in the drift workflow before upload (Task 9B.4 D3). `AI_LLM_PROVIDER: none` unchanged; counts-only summary.
+  - [x] **Hygiene**: no public log or summary carries a G11-forbidden value (scanned in executed-step tests) in any step 9B.5 adds or changes. The pre-existing Phase 5 diagnostic output is a Phase 12 known limitation (amended 2026-10-05). Raw and restricted files are never uploaded.
+  - [x] **Public drift report wiring (Task 9B.4A, P1/P3)**:
+    - **Runner layout (amended 2026-10-05, item 1)**:
+      - the public report stays at today's path `${RUNNER_TEMP}/drift/drift_report.json`, beside `detection_run.json`, so the artifact root is unchanged (`upload-artifact` roots a multi-path artifact at the paths' common ancestor) and the upload paths, the cost step's `DRIFT_REPORT` and the `test_infracost.py` path assertion are unchanged;
+      - the internal report is written to a separate runner-only directory (e.g. `${RUNNER_TEMP}/drift-internal/drift_report.json`, created 0700) that no upload lists;
+      - `Analyze Drift` runs `drift-engine analyze --output <internal> --public-output <public>` and derives `has_drift` and the classification counts from the public file, which must exist (engine exit 0, public present and valid; else UNKNOWN);
+    - **Investigation binding check (amended 2026-10-05, item 2)**: `scripts/investigation_analysis.sh` runs `drift-engine investigation-check --public <public investigation> --report ${RUNNER_TEMP}/drift/drift_report.json` (the public drift report, never the internal one) before any upload. A failure means no upload and the fixed failure code `binding_check_failed`. This also enforces Task 9B.4 D3 in CI: an unbindable investigation (null binding hash) fails here;
+    - `drift-report-<run_id>` contains exactly the public `drift_report.json` and `detection_run.json`;
+    - `investigate` receives the internal report, while every downstream job (issues, report, cost check, AI) receives the public one;
+    - the `ai-analysis.yml` gate step validates the public drift report contract (it currently validates `DriftReport`; Task 9A.1 amendment);
+    - the cost step binds to the public report;
+    - a projection failure gives `drift_detected=unknown` with no artifact uploaded (executed-step test).
 - **Validation**:
-  - [ ] Workflow-structure tests and executed-step tests (runner-realistic, as in Task 10.1).
-  - [ ] Synthetic gate tests for every failure code and the missing/invalid investigation paths.
-  - [ ] Pin closure test for `ci/azure-constraints.txt`.
+  - [x] Workflow-structure tests and executed-step tests (runner-realistic, as in Task 10.1).
+  - [x] Synthetic gate tests for every failure code and the missing/invalid investigation paths.
+  - [x] Executed-step tests (amended 2026-10-05) for:
+    - every row of the investigation outcome mapping, incl. decision 1 (uploaded, job fails) and decision 2 (no `investigate` after a failed fetch);
+    - the anchor-fetch filters, limits, size caps and per-candidate failures (fake GitHub API);
+    - the no-drift path skipping the fetch;
+    - the `investigation` job's pass/fail condition;
+    - the absence of any step-level timeout on `Drift Investigation`.
+  - [x] Pin closure test for `ci/azure-constraints.txt`.
   - [ ] Real CI proof (approval-gated): one no-drift `workflow_dispatch`. Before it, the user removes any leftover test tag from `aitdd-dev-main-rg` (e.g. `owner` from the 2026-10-04 test), so the resource group is in sync; this run later serves as the Task 9B.6 anchor. The investigation step runs with no Azure query, the artifact is present, the `investigation` job passes, and the AI report v2 shows no drifted resources and no investigation claims.
+    - **Also verified (amended 2026-10-05, item 7)**:
+      - `drift-report-<run_id>` contains only the public `drift_report.json` (with `public_version`) and `detection_run.json`, and no internal report is present in any artifact;
+      - the issues and cost jobs pass on the public report;
+      - the cost binding hash (`cost_run.json`), the public investigation's `binding.drift_report_sha256` and the AI report's `provenance.drift_report_sha256` all equal the canonical SHA-256 of the downloaded public drift report.
 - **Implementation Notes**:
-  - Starts with a design review (step and job names, the exact exit-code mapping, the anchor-fetch limits).
-- **Completion Notes**:
-  - None.
+  - Starts with a design review (step and job names, the exact exit-code mapping, the anchor-fetch limits). Done 2026-10-05 (below).
+  - **Pre-implementation review (2026-10-05, items 1–8 and decision 6 user-approved)**: recorded in the criteria above.
+    - **Sequencing (item 8)**: Task 9B.4A cannot reach `main` alone (its limitation (a)). Tasks 9B.4, 9B.4A and 9B.5 are committed and pushed together before the approval-gated real CI proof.
+    - **Scope**: the existing Phase 5 diagnostic-log exposure (`plan.log` tail, `az account show`) is out of 9B.5's scope and recorded as a Phase 12 known limitation. 9B.5's hygiene criterion covers the steps 9B.5 adds or changes.
+    - Unchanged by design: the issues job and `scripts/github_automation.py`, the cost job and the `Infracost Cost Estimate` report path, the `report` job, the AI CLI and the investigation binding code.
+  - **Design review (2026-10-05, user-approved: decisions 1 and 2 and the remaining design)**: job/step boundaries and names, runner isolation and time bounds (G10); anchor fetch (G9); the outcome mapping and the `investigation` job result (criteria above); upload sequencing (upload drift report → investigation → upload investigation if publishable → cost, unchanged and independent of the investigation); the AI gate (decision 6); the D5 always-exit-0 pattern with a final `Require Investigation Success` step.
+- **Completion Notes** (implementation and local validation, 2026-10-05; real CI proof pending):
+  - **Files**:
+    - workflows: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`;
+    - new: `ci/azure-constraints.txt` (23 exact pins, resolved for CPython 3.12 linux x86_64, equal to `ci/ai-constraints.txt` on every shared package), `scripts/investigation_analysis.sh`, `scripts/fetch_prior_drift_reports.py` (stdlib only), `tests/test_investigation_workflow.py`;
+    - changed tests: `tests/test_infracost.py` (step order, two `continue-on-error` uploads), `tests/test_ai_cli.py` (public gate, decision 6, investigation download/argument, summary row), `tests/test_github_automation.py` (job list and permission blocks);
+    - docs: `README.md` (investigation section, AI workflow, known limitations), `docs/drift-detection-spec.md` (§8.3 CI layout, a drift investigation paragraph, AI gate), `docs/architecture.md` (workflow access table).
+  - **As designed**:
+    - item 1: runner layout (internal in `drift-internal/` 0700; public at the old path; validity read from the public file);
+    - item 2: the in-job public check;
+    - item 3: the `investigation` job verifies against the downloaded public report;
+    - the G10 names, outputs and permissions (`plan-and-analyze` 45 min, `actions: read`);
+    - no step-level timeout (`timeout 1500` / `300` inside the script);
+    - the G9 fetch rules (the token is never forwarded across the storage redirect; per-candidate failures → `report_invalid`);
+    - decisions 1, 2 and 6.
+  - **Implementation details within the design**:
+    - the step block maps an unexpected crash of the orchestration script to `investigation_failure=script_error` (still exit 0, file removed);
+    - the `investigation` job adds `Checkout Code` / `Setup Python` / `Install drift-engine` (runtime only, as the issues job) before verification;
+    - `investigation_detail` also counts the evidence's own failure reason (e.g. `all_queries_failed`);
+    - an archive entry is rejected only when it declares a non-regular file type (archivers may record none).
+  - **Validation** (scratchpad venv, Python 3.13, AI and Azure constraints installed; no Azure, no real GitHub; loopback fake API; subprocesses without `az` and with an unroutable proxy):
+    - `tests/test_investigation_workflow.py` **54 passed**, covering:
+      - the workflow structure;
+      - the executed `Analyze Drift` step (layout for drift, no drift and deletion; projection failure → UNKNOWN with nothing written; failed evidence);
+      - every row of the outcome mapping, run through the real script with a scripted engine on real public documents;
+      - the detail codes; the timeout bound (1500); setup failures with no `investigate`; the pinned install command; stale directories;
+      - two real `investigate` runs: no drift (succeeded, no fetch, no Azure) and drifted with three fetched candidates (one accepted, two `report_invalid`) and no Azure credential (failed but bindable, uploaded);
+      - fetch failure fails closed (no `investigate`); fetch filters, newest 50, archive rules, skips, retries, usage errors; fetched candidates fed to the real G9 trust checks;
+      - `Require Investigation Success` matrix; counts-only summary; the step's `script_error` mapping;
+      - Azure pins exact, aligned with the AI pins, equal to the installed `drift-engine[azure]` closure.
+    - Full suite **2317 passed** (3,931 subtests); coverage 98.84%; `unittest discover` OK; `./scripts/validate.sh` passed.
+    - `actionlint` (incl. shellcheck on every `run:` block) clean on both workflows; `shellcheck` clean on `scripts/investigation_analysis.sh`.
+    - gitleaks: only the two pre-existing synthetic findings. None of the 41 identifier-like values of the local raw Activity Log capture appears in any change.
+  - **Not done / limitations**:
+    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8), then one no-drift `workflow_dispatch` after the user removes any leftover test tag. Isolation and the hash equality across cost, investigation and AI are verified structurally and in executed steps, not yet on GitHub-hosted runners.
+    - (b) The Azure pins were resolved for CPython 3.12 linux x86_64 with pip's resolver report; locally they were installed and checked on 3.13. The CI exact-pin check is the 3.12 confirmation.
+    - (c) The AI mutation corpus was not re-run (no `ai_engine` source changed in 9B.5).
 
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Prove the product requirement with real Azure evidence through CI. Then close Phase 9B and return Phases 6 and 7 to 🟢; Phase 10 resumes.
-- **Dependencies**: Task 9B.5
+- **Dependencies**: Task 9B.5 (and 9B.4A)
 - **Files/Areas**: `.artifacts/task-9B.6-ci-proof/` (gitignored; downloaded artifacts and local WHO output), `PROJECT_PLAN.md`, `README.md` (limitations)
 - **Acceptance Criteria**:
   - [ ] **Primary scenario** (user actions, Execution Rule 10): the user adds a tag to `aitdd-dev-main-rg` in the Azure Portal and dispatches drift detection. A valid in-sync drift report within retention is required; the Task 9B.5 no-drift proof run serves as that anchor.
@@ -3488,7 +3854,12 @@ In addition:
     - The public AI report v2 meets every item of "Phase 9B end-to-end acceptance": WHAT; operation `Microsoft.Resources/tags/write` Succeeded; WHEN matching the Azure record to the second; WHO type `user`, client `azure_portal`, `pipeline_identity: false`, identity withheld; actor attribution not confirmed; verdict `sole_capable_operation`; property link `inferred_not_provable`; completeness; deterministic narrative; recommendation `restore_declared` with the accept-remote note and approval required.
   - [ ] **Control A**: a second portal tag change on the same resource group, then dispatch → `ambiguous` (two capable operations since the anchor).
   - [ ] **Control B**: the user removes the test tags (portal), then dispatch → no drift and no investigation claims; the AI report v2 has no drifted resources.
-  - [ ] **Leak scan**: every downloaded public artifact (`drift-report`, `drift-investigation`, `ai-analysis-report`) contains no UPN, email, GUID, IP, `/subscriptions/` or ARM ID. The public job logs show counts and codes only.
+  - [ ] **Leak scan** (amended 2026-10-05, P2): every downloaded public artifact (`drift-report`, `drift-investigation`, `ai-analysis-report`) contains:
+    - no UPN, email or other caller identity; no GUID; no `/subscriptions/` or `/providers/` path or other ARM/resource ID; no Activity Log or caller IP address;
+    - the public investigation also passes its full G11 leak scan;
+    - Terraform-configured IPs/CIDRs and URL values in the drift and AI reports are Terraform evidence and allowed;
+    - the public job logs show counts and codes only;
+    - the deletion scenario's public projection is leak-free (fixture-verified in Task 9B.4A, as the deletion path has no safe real producer).
   - [ ] **Local WHO**: `drift-engine who` on the primary run's public investigation reproduces the identity Azure recorded (checked by the user locally; never committed).
   - [ ] **Determinism**: regenerating the AI report locally from the downloaded drift report and investigation gives byte-identical JSON and Markdown.
   - [ ] **Closure**: Phase 9B 🟢; Phase 6 and Phase 7 headers back to 🟢 with closure notes referencing this task; Phase 10 → 🟡 WORK IN PROGRESS and Task 10.2 → ⬜ NOT STARTED; Current Active Task → Task 10.2.
@@ -3519,6 +3890,11 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
 - **Completed**: 2026-10-04
 - **Objective**: Produce a deterministic, sanitised Infracost cost estimate from the **same refreshed `plan.json`** that each valid drift-detection run classifies, and publish it as a separate artifact for Task 10.2, without ever changing the drift result.
 - **Dependencies**: Task 5.3 (plan evidence), Task 5.4 (artifact), Task 5.5 (failure reporting/outputs), Task 2.6 (OIDC job context it must de-privilege); Task 9A.1 (same-run binding and canonical report hash conventions).
+- **Amendment (2026-10-05, Task 9B.4A (public drift report projection, user-approved P1–P4, 2026-10-05))**: the cost binding's `drift_report_sha256` and the check job's `--drift-report` input are the **public** drift report: it is the only drift report in the artifact, and the internal report's hash is never published.
+  - `scripts/sanitize_infracost.py` gains a fail-closed guard that refuses a report without `public_version` (Task 9B.4A).
+  - The workflow wiring is Task 9B.5.
+  - The cost estimate, its sanitisation and the D1–D9 decisions are unchanged.
+  - The real CI proof recorded below predates this and stays historical.
 - **Downstream consumers**: Task 10.2 (`src/drift_engine/cost.py` parses the sanitised `infracost.json`), Task 10.3, Task 13.1.
 - **Pre-lock verification (2026-10-04, session scratchpad, isolated `HOME`, no API key, no live pricing call)**:
   - v0.10.46 (`infracost/infracost`, 2026-09-25, stable). Linux amd64 SHA-256 matched three ways (release `.sha256` sidecar, GitHub asset digest, local `shasum`). Tarball holds one file, `infracost-linux-amd64`.
@@ -3537,6 +3913,11 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
   - **D3 — Cost-difference definition**: `diffTotalMonthlyCost` = `totalMonthlyCost` (desired, `planned_values`) − `pastTotalMonthlyCost` (actual, refreshed `prior_state`) = cost of *reverting* to the desired configuration. **Drift cost = −`diffTotalMonthlyCost`.** No committed cost baseline. Task 10.2 must use this sign convention.
   - **D4 — Thresholds**: none. No cost increase, decrease or total fails anything; cost is informational. Only failures of the cost process itself (D5) fail.
   - **D5 — Placement and failure isolation (Option A)**:
+    - **Amendment (2026-10-05, Phase 9B G10 / Task 9B.5 design review)**: the cost step stops being the *single* exit-0 exception.
+      - `Drift Investigation` is a second documented always-exit-0 step with the same status-capture pattern.
+      - `Upload Drift Investigation` is a second `continue-on-error` upload.
+      - The workflow then has exactly two of each. Placement (after `Upload Drift Report`, before the cost step), the cost step's condition and the `cost` job are unchanged.
+      - The record below is historical.
     - **Placement**: new steps at the end of `plan-and-analyze` in `drift-detection.yml`, after `Upload Drift Report`, running only when the drift classification is valid (`steps.analyze.outputs.drift_detected` is the literal `true` or `false`) and the drift artifact uploaded. A detection failure or `unknown` result runs no cost step (the run is already red; cost is "not run", not a cost failure).
     - **Failure capture**: the cost step captures the script's exit code and publishes `cost_status` = `succeeded` / `failed` (plus `cost_failure`, a fixed reason code) as step and job outputs, and **exits 0 itself**. This is the single, documented exception to the "no exit-code remapping" rule (**approved by the user 2026-10-04**). It exists only so a cost failure cannot alter `plan-and-analyze`'s result, the drift outputs, the `issues` job (implicit `success()`) or the `report` job's VALID/UNKNOWN verdict. It never hides the failure: see `cost` job below.
     - **New `cost` job** (`needs: [preflight, plan-and-analyze]`; `if: !cancelled()` and `drift_detected` literal `true`/`false`; permissions exactly `contents: read`; no `id-token`, no Azure, no secrets; `persist-credentials: false`): fails (exit 1) unless `cost_status == succeeded`, `cost_upload_outcome == success`, the `infracost-report-<run_id>` artifact downloads, both files pass the sanitiser's `--check` (allowlist schema, binding to this run attempt, CLI version), and then writes a **totals-only** step summary. A cost failure therefore makes the **overall workflow run red** while `drift_detected`, `drift_status`, the drift report and artifact, issues and the `report` job stay exactly as they would be without Phase 10.
@@ -3677,7 +4058,7 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
   - [ ] Test parsing against sample Infracost output.
 - **Implementation Notes**:
   - Accurate cost metrics provided to AI engine.
-  - Input is the sanitised `infracost.json` + `cost_run.json` from `infracost-report-<run_id>` (Task 10.1 D8), correlated to the drift report by `run_id` and `drift_report_sha256`; drift cost = −`diffTotalMonthlyCost` (Task 10.1 D3).
+  - Input is the sanitised `infracost.json` + `cost_run.json` from `infracost-report-<run_id>` (Task 10.1 D8), correlated to the drift report by `run_id` and `drift_report_sha256` (the **public** drift report's canonical hash; amended 2026-10-05, Task 9B.4A); drift cost = −`diffTotalMonthlyCost` (Task 10.1 D3).
 - **Completion Notes**:
   - None.
 
@@ -3769,6 +4150,11 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
 > **Scope deferred into Phase 12 (recorded 2026-10-04):**
 > - **Super-Linter / Docker-based code-quality enforcement** from Task 9.4 (🔴 BLOCKED — deferred). Its locked design (D1–D10) is in Task 9.4 and must be re-validated before use.
 > - **GitHub Actions workflow linting (actionlint, zizmor) and pinning actions by commit SHA**, already deferred to Phase 12 by Tasks 9.1–9.4.
+>
+> - **Known limitation: Phase 5 diagnostic-log exposure (recorded 2026-10-05, user decision during the Task 9B.5 review)**:
+>   - on a failed detection, `Generate Plan Evidence` prints the last 50 lines of `plan.log`, and `Verify Azure OIDC Authentication` prints `az account show` on every run;
+>   - GitHub masks the secret values (subscription and tenant ID), so they show as `***`, but `/subscriptions/***/…` paths, resource names and other Terraform error text can still reach the public workflow log;
+>   - this predates Phase 9B and is outside Task 9B.5's scope (G11's log rule is enforced there only for the steps 9B.5 adds or changes). Phase 12 decides the fix (e.g. a redacted or summarised diagnostic).
 >
 > How these are scheduled within Phase 12 (for example as their own task) is decided in a Phase 12 design review. No task is added here.
 

@@ -8,8 +8,17 @@ single LLM call, and nothing the model writes can create or alter an option.
 - **The option set** comes from a fixed table over the resource classification,
   the planned action and the attribute classes. The first option always
   mirrors the current Terraform plan (`plan_default = true`). `plan_default`
-  means only "this is what the current plan would do"; it is **not** a
-  recommendation, and options are never ranked.
+  means only "this is what the current plan would do".
+- **Recommendation policy v1** (Task 9B.4, PROJECT_PLAN.md Phase 9B; first
+  matching rule wins, per resource): R0 no options -> `no_options`; R1 any
+  option needs a human decision -> `human_decision_required`
+  (`ambiguous_intent`); R2 the plan-direction option is destructive or does not
+  restore data -> `human_decision_required` (`plan_direction_destructive`); R3
+  `converged_drift` -> recommend `refresh_state_only`
+  (`record_converged_state`); R4 otherwise -> recommend the plan-direction
+  option (`terraform_is_source_of_truth`), with the fixed accept-remote note
+  when `accept_remote_value` exists. Investigation verdicts and caller data
+  never change a recommendation, and a recommendation never executes anything.
 - **Commands** come only from COMMAND_CATALOGUE. Values substituted into them
   (working directory, resource address) are taken from the report and
   shell-quoted. The var file is not in the evidence, so it stays the literal
@@ -21,7 +30,8 @@ single LLM call, and nothing the model writes can create or alter an option.
 - **HCL value fragments** are built only from the `real` view of a changed
   path, with `${` / `%{` escaped so a value cannot become an interpolation. No
   fragment is produced for redacted, unknown-until-apply, absent or
-  object-level values. A fragment never says where the value is defined
+  object-level values, nor for a value withheld from the public drift report
+  (Task 9B.4A: an ARM ID, GUID or identity). A fragment never says where the value is defined
   (`location = "not_determined"`): resource block, module input or tfvars is
   not in the evidence. File edits are Phase 8.
 """
@@ -43,6 +53,9 @@ from drift_engine.logs import log_event
 logger = logging.getLogger(__name__)
 
 CATALOGUE_VERSION = "1"
+POLICY_VERSION = "1"
+ACCEPT_REMOTE_NOTE = ("If the recorded Azure change was intended, choose accept_remote_value instead and update the "
+                      "configuration.")
 NOISE = "noise"
 DRIFT_CLASSES = ("drifted", "drifted_and_config_changed")
 MAX_FRAGMENT_CHARS = 4000
@@ -130,6 +143,8 @@ def value_fragment(change: Mapping[str, Any]) -> tuple[dict[str, Any] | None, st
         return None, "object_level"
     if change["redacted"] or change["real"]["status"] == "redacted":
         return None, "redacted"
+    if change["real"]["status"] == "withheld":  # an identifier withheld from the public report (Task 9B.4A)
+        return None, "withheld"
     status = change["real"]["status"]
     if status == "unknown" or change["class"] == "unknown_until_apply":
         return None, "unknown_until_apply"
@@ -172,7 +187,7 @@ class Fragment(Strict):
 
 class FragmentGap(Strict):
     path: Annotated[list[str], Field(min_length=1)]
-    reason: Literal["object_level", "redacted", "unknown_until_apply", "value_absent", "value_too_large"]
+    reason: Literal["object_level", "redacted", "withheld", "unknown_until_apply", "value_absent", "value_too_large"]
 
 
 class EvidenceRef(Strict):
@@ -202,7 +217,7 @@ class RemediationOption(Strict):
     address: str
     kind: Kind
     direction: Direction
-    plan_default: bool  # matches the current Terraform plan direction; NOT a recommendation
+    plan_default: bool  # matches the current Terraform plan direction (the recommendation is policy v1's)
     terraform_plan_action: str | None
     destructive: bool
     data_not_restored: bool
@@ -218,12 +233,27 @@ class RemediationOption(Strict):
     execution: Execution
 
 
+class Recommendation(Strict):
+    address: str
+    decision: Literal["recommended", "human_decision_required", "no_options"]
+    option_id: str | None
+    kind: Kind | None
+    policy_rule: Literal["R0", "R1", "R2", "R3", "R4"]
+    rationale: Literal["no_options", "ambiguous_intent", "plan_direction_destructive", "record_converged_state",
+                       "terraform_is_source_of_truth"]
+    notes: list[str]
+    approval_required: Literal[True]
+    execution_allowed: Literal[False]
+    automatic_apply: Literal[False]
+
+
 class RemediationPlan(Strict):
     catalogue_version: Literal["1"]
+    recommendation_policy_version: Literal["1"]
     options: list[RemediationOption]
+    recommendations: list[Recommendation]  # one per changed resource (policy v1)
     approval_required: Literal[True]
     automatic_apply: Literal[False]
-    ranking: Literal["none"]  # options are never ranked or recommended
     reason: str | None
 
 
@@ -343,12 +373,34 @@ def resource_options(resource: Mapping[str, Any], origins: Mapping, working_dir:
     return options
 
 
+def recommend(resource: Mapping[str, Any], options: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Recommendation policy v1 for one resource and its options (first matching rule wins)."""
+    base = {"address": resource["address"], "option_id": None, "kind": None, "notes": [],
+            "approval_required": True, "execution_allowed": False, "automatic_apply": False}
+    if not options:
+        return base | {"decision": "no_options", "policy_rule": "R0", "rationale": "no_options"}
+    if any(option["human_decision_required"] for option in options):
+        return base | {"decision": "human_decision_required", "policy_rule": "R1", "rationale": "ambiguous_intent"}
+    plan = next(option for option in options if option["plan_default"])
+    if plan["destructive"] or plan["data_not_restored"]:
+        return base | {"decision": "human_decision_required", "policy_rule": "R2",
+                       "rationale": "plan_direction_destructive"}
+    refresh = next((option for option in options if option["kind"] == "refresh_state_only"), None)
+    if resource["classification"] == "converged_drift" and refresh is not None:
+        return base | {"decision": "recommended", "policy_rule": "R3", "rationale": "record_converged_state",
+                       "option_id": refresh["option_id"], "kind": refresh["kind"]}
+    notes = [ACCEPT_REMOTE_NOTE] if any(option["kind"] == "accept_remote_value" for option in options) else []
+    return base | {"decision": "recommended", "policy_rule": "R4", "rationale": "terraform_is_source_of_truth",
+                   "option_id": plan["option_id"], "kind": plan["kind"], "notes": notes}
+
+
 def plan_remediation(state: Mapping[str, Any]) -> dict[str, Any]:
     """LangGraph node: deterministic remediation options for every changed resource."""
     parsed = state["parsed_drift"]
     facts = state["origin_facts"]
     reason = None
     options: list[dict[str, Any]] = []
+    recommendations: list[dict[str, Any]] = []
     if parsed["outcome"] != "succeeded":
         reason = "drift detection failed: drift status unknown; no remediation options"
     else:
@@ -356,11 +408,15 @@ def plan_remediation(state: Mapping[str, Any]) -> dict[str, Any]:
         working_dir = run.get("working_dir")
         origins = {(c["address"], tuple(c["path"])): c for c in facts["changes"]}
         for resource in parsed["resources"]:
-            options += resource_options(resource, origins, working_dir)
+            resource_opts = resource_options(resource, origins, working_dir)
+            options += resource_opts
+            recommendations.append(recommend(resource, resource_opts))
     plan = RemediationPlan.model_validate_json(json.dumps({  # strict JSON semantics, as for the LLM sections
-        "catalogue_version": CATALOGUE_VERSION, "options": options, "approval_required": True,
-        "automatic_apply": False, "ranking": "none", "reason": reason,
+        "catalogue_version": CATALOGUE_VERSION, "recommendation_policy_version": POLICY_VERSION,
+        "options": options, "recommendations": recommendations, "approval_required": True,
+        "automatic_apply": False, "reason": reason,
     })).model_dump(mode="json")
     log_event(logger, logging.INFO, "remediation_planned", "deterministic remediation options built",
-              options=len(options), destructive=sum(o["destructive"] for o in options))
+              options=len(options), destructive=sum(o["destructive"] for o in options),
+              recommended=sum(r["decision"] == "recommended" for r in recommendations))
     return {"remediation_plan": plan}

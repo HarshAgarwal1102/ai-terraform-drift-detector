@@ -430,9 +430,14 @@ failure can never change the detection run's result. It:
 - checks that the source run is on `main` and was triggered by `schedule` or
   `workflow_dispatch`;
 - analyses only a **valid** detection result: the `drift-report-<run_id>` artifact must exist
-  and hold a report with `outcome: succeeded` and a boolean `has_drift` (drift and no drift
-  are both analysed). A failed or unknown run has no valid report, so the job writes
-  "detection result unknown: no AI analysis" to the summary and ends without an AI artifact;
+  and hold the **public** drift report with `outcome: succeeded` and a boolean `has_drift` (drift
+  and no drift are both analysed). A missing artifact or a valid public report with
+  `outcome: failed` writes "detection result unknown: no AI analysis" to the summary and ends
+  without an AI artifact. A present report that is invalid or not the public contract fails the
+  job (Task 9B.5);
+- passes the run's `drift-investigation-<run_id>` artifact, when present, to
+  `ai-analysis --investigation`, which validates it and binds it to the public drift report
+  (report v2; missing means every drifted resource is `not_investigated`);
 - requires the report's `run.run_id` to be `github-<source run id>-<source run attempt>`;
   a report from another run or attempt fails the job;
 - installs the AI stack only through [`ci/ai-constraints.txt`](ci/ai-constraints.txt),
@@ -441,10 +446,39 @@ failure can never change the detection run's result. It:
   status) and publishes nothing to issues.
 
 **Artifact.** `ai-analysis-report-<source run id>` (the two report files, 30 days). It has the
-same public-exposure profile as `drift-report-<run_id>`: it can contain real non-sensitive
-attribute values, HCL value fragments, remediation command templates with resource addresses,
-and the deterministic summary. Sensitive values stay redacted, as in the source report. It
+same public-exposure profile as the public drift report (Task 9B.4A: `ai-analysis` accepts only
+the public report, in which ARM/resource IDs, GUIDs and UPN/email-like identities are `withheld`):
+it can contain real non-sensitive attribute values (incl. configured IPs/CIDRs and URLs), HCL
+value fragments, remediation command templates with resource addresses, and the deterministic
+summary. Sensitive values stay redacted, as in the source report. It
 never contains Activity Log data or caller identity.
+
+---
+
+## 🔎 Drift Investigation (Phase 9B)
+
+After a valid drift classification, `plan-and-analyze` investigates every drifted resource against
+the Azure Activity Log (read-only, Reader). Steps:
+1. `Drift Investigation` runs [`scripts/investigation_analysis.sh`](scripts/investigation_analysis.sh).
+2. `Upload Drift Investigation` uploads `drift-investigation-<run_id>` (the **public**
+   `drift_investigation.json` only).
+3. The `investigation` job verifies it and reports the result.
+
+The investigation never changes `drift_detected`, the drift report, issues, cost or the run summary.
+- **Anchors**: for a drifted run, [`scripts/fetch_prior_drift_reports.py`](scripts/fetch_prior_drift_reports.py)
+  fetches up to 50 earlier public drift reports (last 30 days) as last-in-sync anchors. A listing
+  failure fails closed (`anchor_fetch_failed`).
+- **Privacy**: the restricted investigation and Activity Log evidence (recorded callers, ARM IDs) stay
+  on the runner (0700). The public file carries caller *type*, client application and verdicts, never
+  an identity; `drift-engine who` reproduces the recorded identity locally.
+- **Status**: `investigation_status` / `investigation_failure` / `investigation_detail` (fixed codes
+  and counts only).
+  - An incomplete or failed-but-bindable investigation is still uploaded (the AI report then shows
+    why).
+  - The `investigation` job passes only when the investigation succeeded, was uploaded and binds to
+    the public drift report.
+- **Install**: the Azure SDK is installed in a separate venv pinned exactly by
+  [`ci/azure-constraints.txt`](ci/azure-constraints.txt).
 
 ---
 
@@ -1033,8 +1067,13 @@ registration holds zero credentials.
 - Scheduled detection (`drift-detection.yml`, daily 02:00 UTC) uploads only the contract report
   (sensitive values redacted by the engine) and run manifest as `drift-report-<run_id>` (30 days).
   Raw plan evidence (`tfplan`, `plan.json`, `plan.log`) is kept only on the ephemeral runner and is
-  not uploaded or otherwise persisted. The report can contain resource identifiers (e.g. the
-  subscription ID) when an `id` attribute changes.
+  not uploaded or otherwise persisted. The internal report can contain resource identifiers (e.g.
+  the subscription ID) when an `id` attribute changes, so it stays on the runner. Only its public
+  projection (Task 9B.4A, `drift-engine analyze --public-output`; identifiers withheld) is uploaded
+  (Task 9B.5).
+- Phase 5 diagnostic output (`plan.log` tail on a failed detection, `az account show`) can reach the
+  public log; GitHub masks the subscription and tenant IDs, but paths and resource names can
+  remain. This is a recorded Phase 12 known limitation.
 - Drift issues (Task 8.1) are public: a reduced body still shows the resource type, address and
   severity. Values, paths of security-relevant drift and callers are never published.
 - Issues for resources removed from the configuration or moved to a new address are not closed

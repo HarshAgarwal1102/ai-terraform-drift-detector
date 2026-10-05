@@ -151,7 +151,8 @@ pipeline.
 | Workflow | Trigger | Azure access | GitHub permissions |
 |---|---|---|---|
 | `terraform-auth-test.yml` (Phase 2) | push / PR to `main` (or `master`), manual | OIDC; `terraform fmt`, `validate`, read-only `plan` | `id-token: write`, `contents: read` |
-| `drift-detection.yml` (Phases 5, 8) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only; never `apply` | workflow: `id-token: write`, `contents: read`; `issues` job: `contents: read`, `issues: write`, no Azure |
+| `drift-detection.yml` (Phases 5, 8, 9B, 10) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only (Terraform plan and read-only Activity Log queries for the drift investigation); never `apply` | `plan-and-analyze`: `id-token: write`, `contents: read`, `actions: read` (anchor fetch); `issues`: `contents: read`, `issues: write`; `cost` and `investigation`: `contents: read`; none of these three has Azure access |
+| `ai-analysis.yml` (Phases 9A, 9B) | after each completed drift-detection run on `main` (`workflow_run`) | **None** | `contents: read`, `actions: read`; only `github.token`, to download the source run's public drift report and investigation |
 | `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC; TruffleHog uses `--no-verification`, so no candidate secret is sent anywhere) | `contents: read` only; no token |
 
 Only the `main` branch has a federated credential, so `terraform-auth-test.yml` runs on pull

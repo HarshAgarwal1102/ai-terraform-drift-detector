@@ -23,6 +23,13 @@ from ai_engine.nodes.parse_drift import (
 )
 from drift_engine.classifier import evaluate
 
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
 if HAS_AI_EXTRA:
@@ -38,8 +45,8 @@ RG = 'module.resource_group.azurerm_resource_group.this["main"]'
 
 def report_for(scenario: str) -> dict:
     # failed_run has no plan: evaluate() then reports the manifest's failure.
-    return evaluate(str(EVIDENCE / scenario / "plan.sanitized.json"),
-                    str(EVIDENCE / scenario / "detection_run.json")).report
+    return _public(evaluate(str(EVIDENCE / scenario / "plan.sanitized.json"),
+                            str(EVIDENCE / scenario / "detection_run.json")))
 
 
 @pytest.fixture
@@ -192,7 +199,7 @@ SENSITIVE = "s3cr3t-value-must-not-leak"
 def test_contract_violations_rejected_without_values(corrupt):
     report = report_for("external_drift")
     corrupt(report)
-    with pytest.raises(DriftReportError, match="does not match the drift_engine report contract") as info:
+    with pytest.raises(DriftReportError, match="does not match the public drift report contract") as info:
         parse_drift({"drift_report": report})
     assert SENSITIVE not in str(info.value)
     assert info.value.__cause__ is None and info.value.__suppress_context__
@@ -228,7 +235,8 @@ class _CountingLLM:
         self.calls += 1
         empty = {"findings": [], "summary": ""}
         return json.dumps({"security_analysis": empty, "cost_analysis": empty, "configuration_analysis": empty,
-                           "root_cause_analysis": empty, "risk_assessment": empty})
+                           "root_cause_analysis": empty, "risk_assessment": empty,
+                           "investigation_analysis": empty})
 
 
 @requires_ai
@@ -242,7 +250,7 @@ def test_graph_runs_parse_drift(scenario, report_file):
     assert state["drift_report"] == report
     # Deterministic data never lands in the AI output channel; only the AI node writes there.
     assert set(state["inferences"]) == {"analyze_security", "analyze_cost", "analyze_configuration",
-                                        "analyze_root_cause", "assess_risk"}
+                                        "analyze_root_cause", "assess_risk", "analyze_investigation"}
     assert state["llm"]["available"] is True
     # At most one LLM call per run (Task 6.4), and only when some section was routed.
     routed = any(state[k]["changes"] for k in ("security_targets", "cost_targets", "config_targets")) \
@@ -299,5 +307,6 @@ def test_compiled_graph_order():
     edges = {(e.source, e.target) for e in build_graph(config=load_config({})).get_graph().edges}
     assert edges == {(START, "initialize"), ("initialize", "parse_drift"), ("parse_drift", "classify_drift"),
                      ("classify_drift", "route_cost_config"), ("route_cost_config", "derive_origin_risk"),
-                     ("derive_origin_risk", "plan_remediation"), ("plan_remediation", "analyze_drift"),
+                     ("derive_origin_risk", "derive_investigation"), ("derive_investigation", "plan_remediation"),
+                     ("plan_remediation", "analyze_drift"),
                      ("analyze_drift", "generate_report"), ("generate_report", END)}

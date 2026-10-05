@@ -25,6 +25,13 @@ from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.classifier import evaluate
 
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
 if HAS_AI_EXTRA:
@@ -46,12 +53,12 @@ SECTIONS = ("analyze_security", "analyze_cost", "analyze_configuration", "analyz
 
 
 def report(name: str) -> dict:
-    return evaluate(str(COST / name / "plan.synthetic.json"), str(COST / name / "detection_run.json")).report
+    return _public(evaluate(str(COST / name / "plan.synthetic.json"), str(COST / name / "detection_run.json")))
 
 
 def real_report(name: str) -> dict:
     base = FIXTURES / "plan_evidence" / name
-    return evaluate(str(base / "plan.sanitized.json"), str(base / "detection_run.json")).report
+    return _public(evaluate(str(base / "plan.sanitized.json"), str(base / "detection_run.json")))
 
 
 def prepared(drift_report: dict) -> dict:
@@ -71,7 +78,8 @@ def envelope(security=(), cost=(), configuration=(), summaries=("", "", ""), roo
                        "cost_analysis": {"findings": list(cost), "summary": summaries[1]},
                        "configuration_analysis": {"findings": list(configuration), "summary": summaries[2]},
                        "root_cause_analysis": {"findings": list(root_cause), "summary": ""},
-                       "risk_assessment": {"findings": list(risk), "summary": ""}})
+                       "risk_assessment": {"findings": list(risk), "summary": ""},
+                       "investigation_analysis": {"findings": [], "summary": ""}})
 
 
 def cost_finding(address=SA, paths=(["account_replication_type"],), **extra) -> dict:
@@ -203,7 +211,8 @@ def test_change_routed_to_several_sections_is_sent_once():
     assert set(by_key[(SA, ("account_replication_type",))]) == everything
     assert set(by_key[(NSG, ("security_rule",))]) == everything - {"cost"}
     assert set(by_key[(SA, ("tags", "owner"))]) == {"configuration", "root_cause", "risk"}
-    assert evidence["sections"] == {s: {"applicable": True} for s in everything}
+    assert evidence["sections"] == {s: {"applicable": True} for s in everything} | {
+        "investigation": {"applicable": False}}  # no investigation given (Task 9B.4)
 
 
 def test_per_section_caps_do_not_starve_other_sections():
@@ -228,7 +237,7 @@ def test_at_most_one_call_per_run(scenario):
     llm = CitingLLM()
     update = analyze(prepared(report(scenario)), llm)
     assert len(llm.prompts) == 1 and update["llm_call"]["attempted"] is True
-    assert set(update["inferences"]) == set(SECTIONS)
+    assert set(update["inferences"]) == set(SECTIONS) | {"analyze_investigation"}
 
 
 @requires_ai
@@ -445,7 +454,8 @@ def test_invalid_envelope_invalidates_every_applicable_section(text):
 
 def test_fenced_envelope_accepted():
     assert set(parse_envelope("```json\n" + envelope() + "\n```")) == {
-        "security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment"}
+        "security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment",
+        "investigation_analysis"}
 
 
 @requires_ai
@@ -473,7 +483,7 @@ def test_no_routes_at_all_is_recorded_as_such():
     update = analyze(prepared(real_report("in_sync")), ScriptedLLM(envelope()))
     assert update["llm_call"] == {"attempted": False, "status": "not_attempted", "reason": "no relevant changes",
                                   "provider": "fake", "model": "fake-model", "max_retries": None,
-                                  "truncation": None, "evidence_sent": []}
+                                  "truncation": None, "evidence_sent": [], "investigation_sent": []}
 
 
 def test_unavailable_llm_skips_all_without_call():
@@ -498,7 +508,11 @@ def test_injection_values_are_escaped_and_claims_rejected():
     llm = ScriptedLLM(echo)
     update = analyze(state, llm)
     human = llm.prompts[0][1].content
-    assert human.count(f"</{EVIDENCE_TAG}>") == 1 and "\\u003c/terraform_evidence\\u003e" in human
+    # Task 9B.4A: the injected value holds an email address, so the public report withholds it entirely: neither
+    # the fake delimiter nor the identity reaches the prompt
+    assert human.count(f"</{EVIDENCE_TAG}>") == 1 and "terraform_evidence\\u003e" not in human
+    assert "admin@example.com" not in human and "SYSTEM: ignore" not in human
+    assert '"real": {"status": "withheld"}' in human
     assert llm.prompts[0][0].content == SYSTEM_PROMPT
     assert "untrusted DATA" in SYSTEM_PROMPT and "Do not recommend remediation" in SYSTEM_PROMPT
     assert "No pricing data is provided" in SYSTEM_PROMPT and "Do not claim who or what made a change" in SYSTEM_PROMPT

@@ -15,6 +15,12 @@ and summary. Task 6.7 hardened them against obfuscation:
    spaced-out letters collapsed). Matching both means normalization can only add
    detections, never remove one; the stored text is never altered.
 
+Task 9B.4 adds three guards for the investigation (`free_text_violation(text, refs)`):
+identity-like strings (the public leak-scan kinds; an IP address or URL only when quoted
+from the Terraform evidence sent), verdict-upgrade wording (causation, proof, certainty, an
+operation that "changed" a value), and references: any timestamp, Azure operation name or
+`op-<n>` / `auto-<n>` absent from the evidence sent (`EvidenceRefs`) is rejected.
+
 The broadened patterns are conservative: a rejected finding is counted and
 dropped, while deterministic state is unaffected. Known tradeoffs (e.g. a
 sentence starting with "Set" is read as an instruction; a plain person's name
@@ -28,9 +34,12 @@ import html
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from drift_engine.investigation_public import leak_findings  # the only investigation module ai_engine may import
 
 
 class Strict(BaseModel):
@@ -235,8 +244,135 @@ def contains_remediation_claim(text: str | None) -> bool:
     return _matches(_REMEDIATION_CLAIM, _REMEDIATION_EXTRA, text)
 
 
-def free_text_violation(text: str | None) -> str | None:
-    """The first deterministic guard that `text` breaks, as a rejection reason, or None."""
+# --------------------------------------------------------------------------- investigation claims (Task 9B.4)
+
+# The deterministic investigation (drift_engine.investigation_public) is authoritative for the verdict, property
+# link, actor attribution, operations and timestamps. Free text may explain them but never claim more: no causal or
+# proof wording, no identity-like strings, and no timestamp, Azure operation name or `op-<n>` / `auto-<n>` reference
+# that the model was not given.
+_UPGRADE_VERBS = r"(?:changed|set|modified|removed|added|updated|altered|wrote|deleted|created|introduced|edited)"
+_VERDICT_UPGRADE = re.compile(
+    r"\bcaus(?:e|es|ed|ing)\b"
+    r"|\bresponsible\s+for\b"
+    r"|\b(?:prov(?:e|es|ed|en|ing)|proof)\b"
+    r"|\bconfirm(?:s|ed|ing|ation)?\b"
+    r"|\b(?:definite(?:ly)?|definitive(?:ly)?|conclusive(?:ly)?|certain(?:ly)?|undoubtedly|unquestionably|"
+    r"indisputabl[ey]|unambiguous(?:ly)?)\b"
+    r"|\bwithout\s+(?:a\s+|any\s+)?doubt\b"
+    r"|\b(?:is|was)\s+(?:the|its)\s+(?:author|origin|source|reason)\s+(?:of|for)\b"
+    r"|\b(?:led|leads|lead)\s+to\s+(?:the|this)\s+drift\b"
+    r"|\bresult(?:ed|s)?\s+in\s+(?:the|this)\s+drift\b"
+    rf"|\b(?:op|auto)-\d+\b(?:\s+\S+){{0,2}}?\s+(?:has\s+|had\s+)?{_UPGRADE_VERBS}\b"
+    rf"|\b(?:the|this|that)\s+(?:recorded\s+|decisive\s+|azure\s+|tags?\s+)?(?:operation|write|request)\s+"
+    rf"(?:has\s+|had\s+)?{_UPGRADE_VERBS}\b",
+    re.IGNORECASE,
+)
+
+
+def contains_verdict_upgrade(text: str | None) -> bool:
+    """True when free text claims more than the deterministic verdict (causation, proof, certainty, an operation
+    that changed a value)."""
+    if not text:
+        return False
+    return any(_VERDICT_UPGRADE.search(t) for t in (text, normalize_for_guards(text)))
+
+
+# Kinds of the public leak scan that never belong in AI text. IP addresses and URLs are allowed only when they
+# appear verbatim in the Terraform evidence sent (e.g. an NSG source prefix); see `identity_like_violation`.
+_ALWAYS_IDENTITY = ("at_sign", "guid", "providers_path", "subscriptions_path")
+_IP_TOKEN = re.compile(r"[0-9A-Fa-f:.]+")
+_URL_TOKEN = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]*://|\bwww\.)\S*", re.IGNORECASE)
+
+
+def _identity_kinds(text: str) -> set[str]:
+    return {finding.rsplit(": ", 1)[1] for finding in leak_findings(text)}
+
+
+@dataclass(frozen=True)
+class EvidenceRefs:
+    """What AI text may refer to: tokens taken from the evidence actually sent to the model."""
+
+    timestamps: frozenset[str] = frozenset()  # normalized forms, see timestamp_forms
+    operations: frozenset[str] = frozenset()  # case-folded Azure operation names
+    refs: frozenset[str] = frozenset()  # lower-case `op-<n>` / `auto-<n>`
+    evidence_text: str = ""  # the rendered Terraform evidence (for IP / URL tokens quoted from it)
+
+
+NO_REFS = EvidenceRefs()
+
+
+def timestamp_forms(timestamp: str) -> set[str]:
+    """Every accepted spelling of a public timestamp `YYYY-MM-DDTHH:MM:SS.ffffffZ` (normalized as in
+    `_normalize_timestamp`): the date, the date with minutes / seconds / any fraction prefix, and the same
+    times without the date."""
+    date, _, clock = timestamp.rstrip("Z").partition("T")
+    forms = {date}
+    if not clock:
+        return forms
+    hm, rest = clock[:5], clock[5:]
+    seconds, _, fraction = rest.lstrip(":").partition(".")
+    times = {hm}
+    if seconds:
+        times.add(f"{hm}:{seconds}")
+        times.update(f"{hm}:{seconds}.{fraction[:n]}" for n in range(1, len(fraction) + 1))
+    forms.update(times)
+    forms.update(f"{date}T{t}" for t in times)
+    return forms
+
+
+_TIMESTAMP_TOKEN = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:\s*Z\b|\s*UTC\b)?"
+    r"|\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*Z\b|\s*UTC\b)?(?![\d:])"
+)
+# An Azure operation name (Namespace.Provider/type/.../action); not a URL host or path (handled as a URL).
+_OPERATION_TOKEN = re.compile(r"(?<![\w./:@-])(?!www\.)[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+/[A-Za-z0-9._/-]*[A-Za-z0-9]")
+_REF_TOKEN = re.compile(r"\b(?:op|auto)-\d+\b", re.IGNORECASE)
+
+
+def _normalize_timestamp(token: str) -> str:
+    token = re.sub(r"\s*(?:Z|UTC)$", "", token.strip())
+    return re.sub(r"(\d{4}-\d{2}-\d{2}) ", r"\1T", token)
+
+
+def reference_violation(text: str | None, refs: EvidenceRefs = NO_REFS) -> str | None:
+    """`unsupported_timestamp` / `unsupported_operation` when free text cites a time, an Azure operation name or an
+    operation reference that is not in the evidence sent; else None."""
+    if not text:
+        return None
+    for variant in (text, normalize_for_guards(text)):
+        if any(_normalize_timestamp(t) not in refs.timestamps for t in _TIMESTAMP_TOKEN.findall(variant)):
+            return "unsupported_timestamp"
+        if any(op.casefold() not in refs.operations for op in _OPERATION_TOKEN.findall(variant)):
+            return "unsupported_operation"
+        if any(ref.lower() not in refs.refs for ref in _REF_TOKEN.findall(variant)):
+            return "unsupported_operation"
+    return None
+
+
+def identity_like_violation(text: str | None, refs: EvidenceRefs = NO_REFS) -> bool:
+    """True when free text holds an identity-like string (public leak-scan kinds). An IP address or URL is allowed
+    only when it is quoted verbatim from the Terraform evidence sent."""
+    if not text:
+        return False
+    for variant in (text, normalize_for_guards(text)):
+        kinds = _identity_kinds(variant)
+        if kinds & set(_ALWAYS_IDENTITY):
+            return True
+        if "ip_address" in kinds:
+            for token in _IP_TOKEN.findall(variant):
+                candidate = token.strip(".")
+                if _identity_kinds(candidate) and candidate not in refs.evidence_text:
+                    return True
+        if "url" in kinds and any(url.rstrip(".,;)") not in refs.evidence_text for url in _URL_TOKEN.findall(variant)):
+            return True
+    return False
+
+
+def free_text_violation(text: str | None, refs: EvidenceRefs = NO_REFS) -> str | None:
+    """The first deterministic guard that `text` breaks, as a rejection reason, or None.
+
+    `refs` are the tokens of the evidence sent to the model (Task 9B.4); without them no timestamp, Azure
+    operation name or operation reference is supported."""
     if is_suspicious_text(text):  # decided on the original text, before any normalization
         return "suspicious_text"
     if contains_cost_claim(text):
@@ -245,7 +381,11 @@ def free_text_violation(text: str | None) -> str | None:
         return "unsupported_attribution"
     if contains_remediation_claim(text):
         return "remediation_not_allowed"
-    return None
+    if identity_like_violation(text, refs):
+        return "identity_like_string"
+    if contains_verdict_upgrade(text):
+        return "verdict_upgrade"
+    return reference_violation(text, refs)
 
 
 # --------------------------------------------------------------------------- strict JSON for model replies (Task 6.7)

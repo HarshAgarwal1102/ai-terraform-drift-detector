@@ -1,8 +1,11 @@
 """`parse_drift`: deterministic state preparation from `drift_report.json` (Task 6.2).
 
-The node validates `AiState.drift_report` against the drift_engine report
-contract (`drift_engine.models.DriftReport`, mirroring
-schemas/drift_report.schema.json) and writes `AiState.parsed_drift`:
+The node validates `AiState.drift_report` against the **public** drift report
+contract (`drift_engine.report_public.PublicDriftReport`, Task 9B.4A: the
+internal report with identifiers withheld; schemas/drift_report.public.schema.json)
+and writes `AiState.parsed_drift`. The internal report is rejected: the AI engine
+only ever sees what may leave the runner.
+
 
 - `resources`: every resource that is not `in_sync`, exactly as the contract's
   `DriftItem` JSON (type, address, actions, attribute changes with their
@@ -37,7 +40,8 @@ from typing import Any, TypedDict
 from pydantic import ValidationError
 
 from drift_engine.logs import log_event
-from drift_engine.models import DriftItem, DriftReport
+from drift_engine.report_public import PublicDriftItem as DriftItem
+from drift_engine.report_public import PublicDriftReport as DriftReport
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +78,7 @@ def _contract_error(exc: ValidationError) -> DriftReportError:
     # pydantic's own message quotes input values; report only locations and error types.
     locations = sorted({".".join(str(part) for part in error["loc"]) or "<root>" for error in exc.errors()})
     shown = ", ".join(locations[:10]) + (f" (+{len(locations) - 10} more)" if len(locations) > 10 else "")
-    return DriftReportError(f"drift_report does not match the drift_engine report contract "
+    return DriftReportError(f"drift_report does not match the public drift report contract "
                             f"({exc.error_count()} error(s) at: {shown})")
 
 

@@ -37,6 +37,18 @@ dropped is recorded in `truncation`, overall and per section.
 
 `render_evidence` serializes the evidence for the prompt with `<` and `>`
 escaped, so a Terraform or Azure value cannot close the evidence delimiters.
+
+Investigation evidence (Task 9B.4): `build_investigation_evidence` adds an
+allowlisted subset of the **public** investigation (drift_engine.investigation_public,
+never the restricted document) for the `investigation` section: per investigated
+drifted resource the verdict, reason, property link, actor attribution status, window
+kind and start, decisive operation, operations (`op-<n>`, name, outcome, relations,
+times, timing, role, capable areas, caller type, client application, pipeline
+identity), automated events and the descendant count; run-level the observation window
+and completeness (`queried_at`, `settled`). Binding hashes, anchor run ids and report
+hashes, caller status and the exposure block are never sent. The public leak scan runs
+again over it, fail closed. `evidence_refs` lists the timestamps, operation names and
+references the model was given, so free text citing anything else is rejected.
 """
 
 from __future__ import annotations
@@ -45,6 +57,9 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from ai_engine.nodes.common import EvidenceRefs, timestamp_forms
+from drift_engine.investigation_public import leak_findings
 
 SEVERITY_ORDER = ("INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL")  # ascending, as in the report contract
 _RANK = {level: i for i, level in enumerate(SEVERITY_ORDER)}
@@ -73,6 +88,9 @@ class EvidenceLimits:
     max_configuration_changes: int = 30
     max_root_cause_changes: int = 30
     max_risk_changes: int = 30
+    max_investigation_resources: int = 20
+    max_investigation_operations: int = 30  # per resource
+    max_investigation_chars: int = 20000
 
     def section_cap(self, section: str) -> int:
         return getattr(self, f"max_{section}_changes")
@@ -237,5 +255,112 @@ def render_evidence(evidence: Mapping[str, Any]) -> str:
     """Deterministic JSON for the prompt; `<`/`>` escaped so values cannot spoof the delimiters."""
     payload = {"resources": evidence["resources"], "sections": evidence["sections"],
                "truncated": evidence["truncation"]["truncated"]}
+    investigation = evidence.get("investigation")
+    if investigation is not None and investigation["resources"]:
+        payload["investigation"] = {key: investigation[key] for key in ("resources", "run", "truncated")}
     text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return text.replace("<", "\\u003c").replace(">", "\\u003e")
+
+
+# --------------------------------------------------------------------------- investigation evidence (Task 9B.4)
+
+INVESTIGATION_RESOURCE_FIELDS = ("address", "drift_action", "relevant_areas", "verdict", "reason", "property_link",
+                                 "property_link_reason", "unreadable_events_in_scope", "descendant_events")
+INVESTIGATION_OPERATION_FIELDS = ("op_id", "operation_name", "outcome", "relations", "start", "end", "available_at",
+                                  "timing", "in_window", "role", "capable_areas", "caller_type", "client_app",
+                                  "pipeline_identity")
+INVESTIGATION_AUTOMATED_FIELDS = ("ref", "operation_name", "category", "event_timestamp", "timing", "in_window",
+                                  "signal")
+
+
+def build_investigation_evidence(facts: Mapping[str, Any] | None,
+                                 limits: EvidenceLimits = EvidenceLimits()) -> dict[str, Any]:
+    """Allowlisted, size-bounded public investigation evidence for the `investigation` section.
+
+    `facts` is `AiState.investigation_facts` (ai_engine.nodes.investigation_facts). Only drifted resources that
+    were investigated (any verdict except `not_investigated`) are sent. Raises EvidenceIntegrityError if the
+    public leak scan finds anything (fail closed: nothing is sent)."""
+    empty = {"resources": [], "run": None, "truncated": False, "omitted": [], "operations_omitted": {}}
+    if not facts or facts["status"] not in ("complete", "incomplete"):
+        return empty
+    picked, omitted, ops_omitted = [], [], {}
+    for resource in facts["resources"]:
+        correlation = resource["correlation"]
+        if resource["investigation_scope"] != "drift" or correlation["verdict"] == "not_investigated":
+            continue
+        if len(picked) >= limits.max_investigation_resources:
+            omitted.append(resource["address"])
+            continue
+        item = {field: correlation[field] for field in INVESTIGATION_RESOURCE_FIELDS if field in correlation}
+        item["address"] = resource["address"]
+        item["drift_action"] = resource["drift_action"]
+        item["descendant_events"] = correlation["counts"]["child"]
+        item["actor_attribution"] = resource["who"]["actor_attribution"]["status"]
+        item["decisive_operation"] = resource["when"]["decisive_operation"]
+        window = resource["when"]["window"]
+        item["window"] = {"kind": window["kind"], "start": window["start"]} if window else None
+        operations = resource["operations"]
+        item["operations"] = [{field: op[field] for field in INVESTIGATION_OPERATION_FIELDS}
+                              for op in operations[:limits.max_investigation_operations]]
+        if len(operations) > limits.max_investigation_operations:
+            ops_omitted[resource["address"]] = len(operations) - limits.max_investigation_operations
+        item["automated_events"] = [{field: event[field] for field in INVESTIGATION_AUTOMATED_FIELDS}
+                                    for event in resource["automated_events"]]
+        picked.append(item)
+    run = facts["run"]
+    evidence = {"resources": picked,
+                "run": {"observation": run["observation"],
+                        "completeness": ({"queried_at": run["completeness"]["queried_at"],
+                                          "settled": run["completeness"]["settled"]}
+                                         if run["completeness"] else None)},
+                "omitted": omitted, "operations_omitted": ops_omitted}
+    while picked and len(json.dumps(evidence, sort_keys=True)) > limits.max_investigation_chars:
+        omitted.append(picked.pop()["address"])
+    evidence["truncated"] = bool(omitted or ops_omitted)
+    if not picked:
+        evidence["run"] = None
+    findings = leak_findings({k: evidence[k] for k in ("resources", "run")})
+    if findings:
+        # Name the locations only: the offending value must not travel even in an error.
+        raise EvidenceIntegrityError(f"investigation evidence failed the public leak scan ({len(findings)} "
+                                     "finding(s)); refusing to build LLM evidence")
+    return evidence
+
+
+def investigation_sent(evidence: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """The investigation keys sent to the model: per address the operation and automated-event references."""
+    investigation = (evidence or {}).get("investigation") or {"resources": []}
+    return [{"address": r["address"], "operations": [op["op_id"] for op in r["operations"]],
+             "automated_events": [event["ref"] for event in r["automated_events"]]}
+            for r in investigation["resources"]]
+
+
+def refs_from_investigation(investigation: Mapping[str, Any] | None, evidence_text: str = "") -> EvidenceRefs:
+    """EvidenceRefs from the investigation evidence sent (timestamps, operation names, references)."""
+    timestamps: set[str] = set()
+    operations: set[str] = set()
+    refs: set[str] = set()
+    investigation = investigation or {"resources": [], "run": None}
+    run = investigation.get("run") or {}
+    stamps = list((run.get("observation") or {}).values())
+    stamps += [(run.get("completeness") or {}).get("queried_at")]
+    for resource in investigation["resources"]:
+        stamps.append((resource.get("window") or {}).get("start"))
+        for op in resource["operations"]:
+            stamps += [op["start"], op["end"], op["available_at"]]
+            operations.add(op["operation_name"].casefold())
+            refs.add(op["op_id"].lower())
+        for event in resource["automated_events"]:
+            stamps.append(event["event_timestamp"])
+            operations.add(event["operation_name"].casefold())
+            refs.add(event["ref"].lower())
+    for stamp in stamps:
+        if stamp:
+            timestamps |= timestamp_forms(stamp)
+    return EvidenceRefs(timestamps=frozenset(timestamps), operations=frozenset(operations), refs=frozenset(refs),
+                        evidence_text=evidence_text)
+
+
+def evidence_refs(evidence: Mapping[str, Any]) -> EvidenceRefs:
+    """What free text in a reply may cite, given the evidence sent with the prompt."""
+    return refs_from_investigation(evidence.get("investigation"), render_evidence(evidence))

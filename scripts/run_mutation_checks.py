@@ -40,7 +40,7 @@ def load_corpus() -> dict:
 
 def make_copy(base: Path) -> Path:
     work = Path(tempfile.mkdtemp(prefix="mutant-", dir=base))
-    for name in ("src", "tests", "schemas"):
+    for name in ("src", "tests", "schemas", "scripts"):  # scripts: consumer tests load them (Task 9B.4A)
         shutil.copytree(ROOT / name, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     return work
 

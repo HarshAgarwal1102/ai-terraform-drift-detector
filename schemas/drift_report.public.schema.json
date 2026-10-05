@@ -1,0 +1,817 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/schemas/drift_report.public.schema.json",
+  "title": "Public drift report (public_version 1)",
+  "description": "Task 9B.4A: the public projection of the internal drift report (drift_report.schema.json), the only drift report that leaves the runner. Identical to the internal contract except: a required top-level public_version \"1\", and a fourth view status 'withheld' for values holding an ARM/resource ID, subscription/provider path, GUID or UPN/email-like identity (PROJECT_PLAN.md Phase 9B, P1-P4, G11). Configured IP addresses, CIDRs and URLs are Terraform evidence and are not withheld.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "classification_version",
+    "outcome",
+    "has_drift",
+    "failure",
+    "run",
+    "plan",
+    "summary",
+    "resources",
+    "resource_types",
+    "output_changes",
+    "public_version"
+  ],
+  "properties": {
+    "classification_version": {
+      "const": "2"
+    },
+    "outcome": {
+      "enum": [
+        "succeeded",
+        "failed"
+      ]
+    },
+    "has_drift": {
+      "description": "true/false only for valid evidence; null means unknown (failed or rejected evidence), never 'no drift'.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "failure": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/failure"
+        }
+      ]
+    },
+    "run": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/run"
+        }
+      ]
+    },
+    "plan": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/plan"
+        }
+      ]
+    },
+    "summary": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/summary"
+        }
+      ]
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    },
+    "resource_types": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/resource_type"
+      }
+    },
+    "output_changes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/output_change"
+      }
+    },
+    "public_version": {
+      "const": "1"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "succeeded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "has_drift": {
+            "type": "boolean"
+          },
+          "failure": {
+            "type": "null"
+          },
+          "run": {
+            "$ref": "#/$defs/run"
+          },
+          "plan": {
+            "$ref": "#/$defs/plan"
+          },
+          "summary": {
+            "$ref": "#/$defs/summary"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "has_drift": {
+            "type": "null"
+          },
+          "failure": {
+            "$ref": "#/$defs/failure"
+          },
+          "plan": {
+            "type": "null"
+          },
+          "summary": {
+            "type": "null"
+          },
+          "resources": {
+            "maxItems": 0
+          },
+          "resource_types": {
+            "maxItems": 0
+          },
+          "output_changes": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nullable_string": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nullable_integer": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "resource_class": {
+      "enum": [
+        "in_sync",
+        "external_drift",
+        "external_deletion",
+        "converged_drift",
+        "config_change",
+        "resource_added",
+        "resource_removed",
+        "drift_and_config_change",
+        "undetermined"
+      ]
+    },
+    "attribute_class": {
+      "enum": [
+        "drifted",
+        "drifted_converged",
+        "config_changed",
+        "drifted_and_config_changed",
+        "unknown_until_apply"
+      ]
+    },
+    "action": {
+      "enum": [
+        "no-op",
+        "read",
+        "create",
+        "update",
+        "delete",
+        "replace",
+        "unrecognized",
+        null
+      ]
+    },
+    "terraform_actions": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      ]
+    },
+    "classification_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "in_sync": {
+          "$ref": "#/$defs/count"
+        },
+        "external_drift": {
+          "$ref": "#/$defs/count"
+        },
+        "external_deletion": {
+          "$ref": "#/$defs/count"
+        },
+        "converged_drift": {
+          "$ref": "#/$defs/count"
+        },
+        "config_change": {
+          "$ref": "#/$defs/count"
+        },
+        "resource_added": {
+          "$ref": "#/$defs/count"
+        },
+        "resource_removed": {
+          "$ref": "#/$defs/count"
+        },
+        "drift_and_config_change": {
+          "$ref": "#/$defs/count"
+        },
+        "undetermined": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "severity": {
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
+      ]
+    },
+    "severity_counts": {
+      "description": "Resources per resource severity level; only levels that occur.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "CRITICAL": {
+          "$ref": "#/$defs/count"
+        },
+        "HIGH": {
+          "$ref": "#/$defs/count"
+        },
+        "MEDIUM": {
+          "$ref": "#/$defs/count"
+        },
+        "LOW": {
+          "$ref": "#/$defs/count"
+        },
+        "INFO": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "change_severity": {
+      "description": "Deterministic severity of one change (drift_engine.severity). rules: ids of the severity rules that set the level; empty for proven noise (INFO) or when no rule matches (MEDIUM).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "rules"
+      ],
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/severity"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "change_assessment": {
+      "description": "Comparator assessment the severity rests on (Task 4.4). noise_rule is recorded even when configuration overrides it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "noise_rule"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "configured",
+            "unconfigured",
+            "noise",
+            "undetermined"
+          ]
+        },
+        "noise_rule": {
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    },
+    "resource_severity": {
+      "description": "Deterministic resource severity: highest change severity raised to the classification/action floor; reasons name the floor and rules behind the level.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "reasons"
+      ],
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/severity"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "stage",
+        "reason"
+      ],
+      "properties": {
+        "source": {
+          "enum": [
+            "detection_run",
+            "classifier"
+          ]
+        },
+        "stage": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "reason": {
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    },
+    "run": {
+      "description": "Copied from detection_run.json (Task 3.2 manifest). Header mapping: environment = environment; target = working_dir + backend_key; run time = started_at / finished_at.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "environment",
+        "working_dir",
+        "backend_key",
+        "git_commit",
+        "started_at",
+        "finished_at",
+        "terraform_version",
+        "plan_exit_code",
+        "show_exit_code",
+        "detection_outcome"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "environment": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "working_dir": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "backend_key": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "git_commit": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "started_at": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "finished_at": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "terraform_version": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "plan_exit_code": {
+          "$ref": "#/$defs/nullable_integer"
+        },
+        "show_exit_code": {
+          "$ref": "#/$defs/nullable_integer"
+        },
+        "detection_outcome": {
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    },
+    "plan": {
+      "description": "Copied from plan.json. Header mapping: timestamp = timestamp (when Terraform produced the plan).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "terraform_version",
+        "timestamp",
+        "applyable",
+        "errored",
+        "complete"
+      ],
+      "properties": {
+        "format_version": {
+          "type": "string"
+        },
+        "terraform_version": {
+          "type": "string"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "applyable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "errored": {
+          "const": false
+        },
+        "complete": {
+          "const": true
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resources_total",
+        "drifted_resources",
+        "classification_counts",
+        "ambiguous_resources",
+        "highest_severity",
+        "severity_counts",
+        "has_pending_resource_changes",
+        "has_pending_output_changes",
+        "output_only_change"
+      ],
+      "properties": {
+        "resources_total": {
+          "$ref": "#/$defs/count"
+        },
+        "drifted_resources": {
+          "$ref": "#/$defs/count"
+        },
+        "classification_counts": {
+          "$ref": "#/$defs/classification_counts"
+        },
+        "ambiguous_resources": {
+          "$ref": "#/$defs/count"
+        },
+        "highest_severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "severity_counts": {
+          "$ref": "#/$defs/severity_counts"
+        },
+        "has_pending_resource_changes": {
+          "type": "boolean"
+        },
+        "has_pending_output_changes": {
+          "type": "boolean"
+        },
+        "output_only_change": {
+          "type": "boolean"
+        }
+      }
+    },
+    "attribute": {
+      "description": "Task 3.3: changed top-level attribute name with its spec §6.2 class (no values).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "class"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "class": {
+          "$ref": "#/$defs/attribute_class"
+        }
+      }
+    },
+    "view_value": {
+      "description": "One of the S/R/D views at a path. Only status 'value' carries a value (which may be null); redacted values are never emitted. In the public report, status 'withheld' replaces a value holding an identifier class.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "value"
+          ],
+          "properties": {
+            "status": {
+              "const": "value"
+            },
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "absent",
+                "unknown",
+                "redacted"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "kinds",
+            "resource",
+            "ref"
+          ],
+          "properties": {
+            "status": {
+              "const": "withheld"
+            },
+            "kinds": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "arm_resource_id",
+                  "guid",
+                  "identity"
+                ]
+              }
+            },
+            "resource": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ]
+            },
+            "ref": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^id-[1-9][0-9]*$"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "attribute_change": {
+      "description": "Task 3.4: one changed leaf path with its state/real/desired views. class is null for create/delete (spec §6.2 does not apply).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "attribute",
+        "class",
+        "state",
+        "real",
+        "desired",
+        "redacted",
+        "severity",
+        "assessment"
+      ],
+      "properties": {
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "attribute": {
+          "type": "string"
+        },
+        "class": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/attribute_class"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/view_value"
+        },
+        "real": {
+          "$ref": "#/$defs/view_value"
+        },
+        "desired": {
+          "$ref": "#/$defs/view_value"
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "severity": {
+          "$ref": "#/$defs/change_severity"
+        },
+        "assessment": {
+          "$ref": "#/$defs/change_assessment"
+        }
+      }
+    },
+    "resource": {
+      "description": "One managed resource address. Drift item fields required by Task 3.5: address, type, action, attribute_changes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "module_address",
+        "mode",
+        "type",
+        "name",
+        "index",
+        "provider_name",
+        "classification",
+        "action",
+        "actions",
+        "action_reason",
+        "drift_action",
+        "drift_actions",
+        "previous_address",
+        "importing",
+        "attributes",
+        "attribute_changes",
+        "ambiguous",
+        "notes",
+        "severity"
+      ],
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module_address": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "mode": {
+          "const": "managed"
+        },
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "index": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ]
+        },
+        "provider_name": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "classification": {
+          "$ref": "#/$defs/resource_class"
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        },
+        "actions": {
+          "$ref": "#/$defs/terraform_actions"
+        },
+        "action_reason": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "drift_action": {
+          "$ref": "#/$defs/action"
+        },
+        "drift_actions": {
+          "$ref": "#/$defs/terraform_actions"
+        },
+        "previous_address": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "importing": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attribute"
+          }
+        },
+        "attribute_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attribute_change"
+          }
+        },
+        "ambiguous": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "$ref": "#/$defs/resource_severity"
+        }
+      }
+    },
+    "resource_type": {
+      "description": "Task 3.4: resources grouped by Terraform type.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "resource_count",
+        "addresses",
+        "classification_counts"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "resource_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "classification_counts": {
+          "$ref": "#/$defs/classification_counts"
+        }
+      }
+    },
+    "output_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "action",
+        "actions"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    }
+  }
+}

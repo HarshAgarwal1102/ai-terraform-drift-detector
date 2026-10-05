@@ -32,7 +32,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
-from ai_engine.evidence import cited_keys, evidence_lookup, severity_rank
+from ai_engine.evidence import cited_keys, evidence_lookup, evidence_refs, severity_rank
 from ai_engine.nodes.common import CitedPath, Strict, free_text_violation
 from drift_engine.logs import log_event
 
@@ -177,13 +177,14 @@ def _deterministic_severity(known: Mapping, keys: list) -> str:
 def validate_cost_section(output: CostSection, evidence: Mapping[str, Any]) -> tuple[list[dict], list[dict]]:
     known = cited_keys(evidence, "cost")
     lookup = evidence_lookup(evidence)
+    refs = evidence_refs(evidence)
     accepted, rejected = [], []
     for index, finding in enumerate(output.findings):
         keys = [(finding.address, tuple(path)) for path in finding.cited_paths]
         if not all(key in known for key in keys):
             rejected.append({"index": index, "reason": "unsupported_citation"})
             continue
-        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation
+        violation = free_text_violation(finding.explanation, refs)  # all free-text guards
         if violation:
             rejected.append({"index": index, "reason": violation})
             continue
@@ -225,13 +226,14 @@ def validate_configuration_section(output: ConfigurationSection,
                                    evidence: Mapping[str, Any]) -> tuple[list[dict], list[dict]]:
     known = cited_keys(evidence, "configuration")
     lookup = evidence_lookup(evidence)
+    refs = evidence_refs(evidence)
     accepted, rejected = [], []
     for index, finding in enumerate(output.findings):
         keys = [(finding.address, tuple(path)) for path in finding.cited_paths]
         if not all(key in known for key in keys):
             rejected.append({"index": index, "reason": "unsupported_citation"})
             continue
-        violation = free_text_violation(finding.explanation)  # cost, attribution, remediation
+        violation = free_text_violation(finding.explanation, refs)  # all free-text guards
         if violation:
             rejected.append({"index": index, "reason": violation})
             continue

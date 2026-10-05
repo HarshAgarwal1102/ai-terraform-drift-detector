@@ -22,10 +22,11 @@
   resource) and the `risk` section (changes with at least one risk factor).
 
 Nothing is re-classified: every value is a lookup on fields drift_engine
-already decided. Who made a change, when, and through which channel are not in
-the evidence; until Phase 7 (Activity Log) the AI output carries the constants
-`actor = "unknown"` and `confirmed = false`, and only deterministic code may
-ever change them.
+already decided. Who made a change, when, and through which channel come only
+from the deterministic public investigation (Task 9B.4,
+`ai_engine.nodes.investigation_facts`): root-cause findings are hypotheses about
+the kind of origin and carry no actor; the report's `who.actor_attribution` is
+the only place attribution appears.
 
 The LLM sections (`root_cause_analysis`, `risk_assessment`) are part of the
 single `analyze_drift` call and validated here: section-scoped citations, the
@@ -45,8 +46,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
-from ai_engine.evidence import cited_keys, evidence_lookup, severity_rank
-from ai_engine.nodes.common import CitedPath, Strict, free_text_violation
+from ai_engine.evidence import cited_keys, evidence_lookup, evidence_refs, severity_rank
+from ai_engine.nodes.common import CitedPath, EvidenceRefs, Strict, free_text_violation
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ def derive_origin_risk(state: Mapping[str, Any]) -> dict[str, Any]:
                           "importing": resource["importing"], "action_reason": resource["action_reason"],
                           "ambiguous": resource["ambiguous"],
                           "risk_factors": [f for f in RISK_FACTORS if f in union]})
-    facts = {"changes": changes, "resources": resources, "routes": routes, "actor": "unknown", "confirmed": False}
+    facts = {"changes": changes, "resources": resources, "routes": routes}
     log_event(logger, logging.INFO, "origin_risk_derived", "origin categories and risk factors derived",
               changes=len(changes), root_cause_routes=sum(r["section"] == "root_cause" for r in routes),
               risk_routes=sum(r["section"] == "risk" for r in routes))
@@ -153,8 +154,6 @@ class RootCauseFinding(Strict):
     cited_paths: Annotated[list[CitedPath], Field(min_length=1, max_length=20)]
     hypothesis: Hypothesis
     possible_channels: Annotated[list[Channel], Field(min_length=1, max_length=6)]
-    actor: Literal["unknown"]  # constant until Phase 7 Activity Log evidence
-    confirmed: Literal[False]  # constant; only deterministic code may change it
     explanation: Explanation
     basis: Literal["inference"]
 
@@ -202,12 +201,12 @@ def _risk_supported(kind: str, change: Mapping[str, Any], evidence: Mapping[str,
     return kind in factors
 
 
-def _check(finding: Any, known: Mapping, index: int, rejected: list) -> list | None:
+def _check(finding: Any, known: Mapping, index: int, rejected: list, refs: EvidenceRefs) -> list | None:
     keys = [(finding.address, tuple(path)) for path in finding.cited_paths]
     if not all(key in known for key in keys):
         rejected.append({"index": index, "reason": "unsupported_citation"})
         return None
-    violation = free_text_violation(finding.explanation)
+    violation = free_text_violation(finding.explanation, refs)
     if violation:
         rejected.append({"index": index, "reason": violation})
         return None
@@ -223,9 +222,10 @@ def _facts(lookup: Mapping, keys: list) -> list[dict[str, Any]]:
 def validate_root_cause_section(output: RootCauseSection, evidence: Mapping[str, Any]) -> tuple[list[dict], list[dict]]:
     known = cited_keys(evidence, "root_cause")
     lookup = evidence_lookup(evidence)
+    refs = evidence_refs(evidence)
     accepted, rejected = [], []
     for index, finding in enumerate(output.findings):
-        keys = _check(finding, known, index, rejected)
+        keys = _check(finding, known, index, rejected, refs)
         if keys is None:
             continue
         if not all(hypothesis_consistent(finding.hypothesis, lookup[key][1]["origin"]) for key in keys):
@@ -236,9 +236,6 @@ def validate_root_cause_section(output: RootCauseSection, evidence: Mapping[str,
             "cited_paths": [list(path) for path in finding.cited_paths],
             "hypothesis": finding.hypothesis,  # inference, unconfirmed
             "possible_channels": list(dict.fromkeys(finding.possible_channels)),
-            "actor": "unknown",
-            "confirmed": False,
-            "confirmation_requires": "activity_log",  # Phase 7
             "origin_facts": _facts(lookup, keys),  # deterministic, authoritative
             "deterministic_severity": max((known[key] for key in keys), key=severity_rank),
             "explanation": finding.explanation,
@@ -250,9 +247,10 @@ def validate_root_cause_section(output: RootCauseSection, evidence: Mapping[str,
 def validate_risk_section(output: RiskSection, evidence: Mapping[str, Any]) -> tuple[list[dict], list[dict]]:
     known = cited_keys(evidence, "risk")
     lookup = evidence_lookup(evidence)
+    refs = evidence_refs(evidence)
     accepted, rejected = [], []
     for index, finding in enumerate(output.findings):
-        keys = _check(finding, known, index, rejected)
+        keys = _check(finding, known, index, rejected, refs)
         if keys is None:
             continue
         if finding.risk_kind != "other" and not any(

@@ -37,6 +37,7 @@ from ai_engine.nodes.common import (
     strict_json_loads,
 )
 from ai_engine.nodes.cost_analysis import route_cost_config, validate_cost_section, CostSection
+from ai_engine.nodes.investigation_facts import derive_investigation
 from ai_engine.nodes.parse_drift import parse_drift
 from ai_engine.nodes.remediation import hcl_value, plan_remediation
 from ai_engine.nodes.report_generator import AiAnalysisReport, render_markdown
@@ -49,6 +50,13 @@ from ai_engine.nodes.root_cause import (
 )
 from ai_engine.nodes.security_analysis import InvalidModelOutput, classify_drift, parse_model_output
 from drift_engine.classifier import evaluate
+
+
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
 
 HAS_AI_EXTRA = all(importlib.util.find_spec(m) for m in ("langgraph", "langchain_openai"))
 requires_ai = pytest.mark.skipif(not HAS_AI_EXTRA, reason="needs the 'ai' extra")
@@ -67,7 +75,7 @@ GROUPS = ("plan_evidence", "security_plans", "cost_config_plans", "root_cause_pl
 SECTION_KEYS = ("analyze_security", "analyze_cost", "analyze_configuration", "analyze_root_cause", "assess_risk")
 DETERMINISTIC = ("parsed_drift", "security_targets", "cost_targets", "config_targets", "origin_facts",
                  "remediation_plan")
-REPORT_DETERMINISTIC = ("report_version", "generated_from", "summary", "resources", "remediation", "attribution", "cost")
+REPORT_DETERMINISTIC = ("report_version", "provenance", "summary", "investigation", "resources", "remediation", "cost")
 AVAILABLE = {"available": True, "provider": "fake", "model": "fake-model", "reason": None}
 RG = 'module.resource_group.azurerm_resource_group.this["main"]'
 GUARDS = json.loads((CORPORA / "guards.json").read_text(encoding="utf-8"))["cases"]
@@ -78,7 +86,7 @@ def fixture_report(group: str, name: str) -> dict:
     base = FIXTURES / group / name
     plan = next((base / f for f in ("plan.synthetic.json", "plan.sanitized.json") if (base / f).exists()),
                 base / "plan.json")
-    return evaluate(str(plan), str(base / "detection_run.json")).report
+    return _public(evaluate(str(plan), str(base / "detection_run.json")))
 
 
 ALL_FIXTURES = [(g, p.name) for g in GROUPS for p in sorted((FIXTURES / g).iterdir()) if p.is_dir()]
@@ -86,7 +94,8 @@ ALL_FIXTURES = [(g, p.name) for g in GROUPS for p in sorted((FIXTURES / g).iterd
 
 def prepared(drift_report: dict) -> dict:
     state = {"drift_report": drift_report, "llm": AVAILABLE}
-    for node in (parse_drift, classify_drift, route_cost_config, derive_origin_risk, plan_remediation):
+    for node in (parse_drift, classify_drift, route_cost_config, derive_origin_risk, derive_investigation,
+                 plan_remediation):
         state.update(node(state))
     return state
 
@@ -97,7 +106,8 @@ def shown(messages) -> dict:
 
 
 def envelope(**sections) -> str:
-    keys = ("security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment")
+    keys = ("security_analysis", "cost_analysis", "configuration_analysis", "root_cause_analysis", "risk_assessment",
+            "investigation_analysis")
     return json.dumps({k: sections.get(k, {"findings": [], "summary": ""}) for k in keys})
 
 
@@ -136,7 +146,7 @@ def findings_for(evidence: dict, explanation=lambda r, c: f"{'.'.join(c['path'])
                 origin = c["origin"]
                 out["root_cause"].append(dict(base, hypothesis="lifecycle_change" if origin["lifecycle"]
                                               else _HYPOTHESIS[origin["category"]],
-                                              possible_channels=["unknown"], actor="unknown", confirmed=False))
+                                              possible_channels=["unknown"]))
             if "risk" in secs:
                 kind = next((f for f in origin_factors(c) if f not in ("redacted_unreadable", "moved_or_importing")),
                             "other")
@@ -181,7 +191,7 @@ def test_guard_corpus_is_balanced():
     by_category = {}
     for case in GUARDS:
         by_category.setdefault(case["category"], set()).add(case["expected"] is None)
-    for category in ("attribution", "remediation", "cost"):
+    for category in ("attribution", "remediation", "cost", "identity", "verdict_upgrade", "reference"):
         assert by_category[category] == {True, False}  # positives and documented negatives
     assert any(c["known_tradeoff"] for c in GUARDS)
 
@@ -326,7 +336,7 @@ def _injection_report(tmp_path, placement: str, value: str) -> dict:
                 "working_dir": "terraform/environments/dev"}
     (tmp_path / "plan.json").write_text(json.dumps(_injection_plan(placement, value)), encoding="utf-8")
     (tmp_path / "detection_run.json").write_text(json.dumps(manifest), encoding="utf-8")
-    drift = evaluate(str(tmp_path / "plan.json"), str(tmp_path / "detection_run.json")).report
+    drift = _public(evaluate(str(tmp_path / "plan.json"), str(tmp_path / "detection_run.json")))
     assert drift["outcome"] == "succeeded"
     return drift
 
@@ -350,8 +360,7 @@ class ObedientLLM(ScriptedLLM):
                                                             "monetary_impact": "not_determinable_from_evidence"}),
                                  ("configuration", "configuration_analysis", {"topic": "other"}),
                                  ("root_cause", "root_cause_analysis", {"hypothesis": "undetermined",
-                                                                        "possible_channels": ["unknown"],
-                                                                        "actor": "unknown", "confirmed": False}),
+                                                                        "possible_channels": ["unknown"]}),
                                  ("risk", "risk_assessment", {"risk_kind": "other"})):
             sections[key] = {"findings": f[name] + [dict(bogus, **extra)], "summary": f"The value says: {self.value}"}
         return envelope(**sections)
@@ -526,15 +535,15 @@ def _first(report, section):
 
 
 TAMPERS = {
-    "fingerprint": lambda r, d: r["generated_from"].update(drift_report_sha256="0" * 64),
-    "run id": lambda r, d: r["generated_from"].update(run_id="other-run"),
+    "fingerprint": lambda r, d: r["provenance"].update(drift_report_sha256="0" * 64),
+    "run id": lambda r, d: r["provenance"].update(run_id="other-run"),
     "summary severity": lambda r, d: r["summary"].update(highest_severity="INFO"),
-    "resource severity": lambda r, d: r["resources"][0].update(severity="LOW"),
-    "resource classification": lambda r, d: r["resources"][0].update(classification="in_sync"),
+    "resource severity": lambda r, d: r["resources"][0]["what"].update(severity="LOW"),
+    "resource classification": lambda r, d: r["resources"][0]["what"].update(classification="in_sync"),
     "resource dropped": lambda r, d: r["resources"].pop(),
-    "resource risk factors": lambda r, d: r["resources"][0].update(risk_factors=[]),
-    "change origin": lambda r, d: r["resources"][0]["changes"][0].update(origin="configuration_side"),
-    "change view": lambda r, d: r["resources"][0]["changes"][0].update(real={"status": "absent"}),
+    "resource risk factors": lambda r, d: r["resources"][0]["what"].update(risk_factors=[]),
+    "change origin": lambda r, d: r["resources"][0]["what"]["changes"][0].update(origin="configuration_side"),
+    "change view": lambda r, d: r["resources"][0]["what"]["changes"][0].update(real={"status": "absent"}),
     "evidence_sent unknown key": lambda r, d: r["llm"]["evidence_sent"].append(
         {"address": "azurerm_key_vault.prod", "path": ["x"], "sections": ["security"]}),
     "evidence_sent ineligible section": lambda r, d: next(
@@ -589,7 +598,14 @@ TAMPERS = {
         {"path": ["nope"], "reason": "value_absent"}),
     "remediation command altered": lambda r, d: r["remediation"]["options"][0]["commands"][0].update(
         command=r["remediation"]["options"][0]["commands"][0]["command"] + " -lock=false"),
-    "schema: actor": lambda r, d: r["attribution"].update(actor="admin"),
+    "schema: actor": lambda r, d: r["resources"][0]["who"]["actor_attribution"].update(status="confirmed"),
+    "schema: caller identity": lambda r, d: r["resources"][0]["who"]["recorded_caller"].update(identity="admin"),
+    "recommendation changed": lambda r, d: r["resources"][0]["remediation"]["recommendation"].update(
+        decision="human_decision_required", policy_rule="R1", rationale="ambiguous_intent", option_id=None,
+        kind=None, notes=[]),
+    "investigation status claimed": lambda r, d: r["investigation"].update(status="complete"),
+    "narrative statement edited": lambda r, d: r["resources"][0]["analysis"]["narrative"][0].update(
+        text="Terraform reports nothing."),
     "schema: finding actor": lambda r, d: _first(r, "root_cause").update(actor="admin@contoso.com"),
     "schema: finding confirmed": lambda r, d: _first(r, "root_cause").update(confirmed=True),
     "schema: execution": lambda r, d: r["remediation"]["options"][0]["execution"].update(allowed=True),
@@ -606,6 +622,17 @@ def test_verify_report_detects_tampering(name, full_report):
     TAMPERS[name](report, drift)
     problems = verify.verify_report(report, drift)
     assert problems, name
+    # report v2 restates policy v1 too, so a forged remediation flag is also caught there; the dedicated check
+    # must still fire on its own (Task 9B.4)
+    if name in SPECIFIC_PROBLEM:
+        assert any(SPECIFIC_PROBLEM[name] in p for p in problems), problems
+
+
+SPECIFIC_PROBLEM = {
+    "remediation destructive": "destructive flags do not match the plan action",
+    "remediation data_not_restored": "data_not_restored is wrong",
+    "remediation recreate on update": "recreate offered for a resource that was not deleted outside Terraform",
+}
 
 
 @requires_ai
@@ -681,7 +708,8 @@ def _graph_with_later(later, include_analysis=True):
 
     graph = StateGraph(AiState)
     steps = [("parse_drift", parse_drift), ("classify_drift", classify_drift), ("route_cost_config",
-             route_cost_config), ("derive_origin_risk", derive_origin_risk), ("plan_remediation", plan_remediation)]
+             route_cost_config), ("derive_origin_risk", derive_origin_risk),
+             ("derive_investigation", derive_investigation), ("plan_remediation", plan_remediation)]
     if include_analysis:
         steps += [("analyze_drift", make_analyze_drift(None)), ("generate_report", generate_report)]
     steps.append(("later", later))
@@ -878,7 +906,7 @@ def test_evidence_sent_must_be_empty_when_no_call_was_made():
     assert report["llm"]["attempted"] is False and verify.verify_report(report, drift) == []
     report["llm"]["evidence_sent"].append({"address": "azurerm_storage_account.this", "path": ["tags", "owner"],
                                            "sections": ["configuration"]})  # valid and eligible, but nothing was sent
-    assert verify.verify_report(report, drift) == ["llm: evidence_sent is not empty although no call was made"]
+    assert verify.verify_report(report, drift) == ["llm: evidence_sent / investigation_sent is not empty although no call was made"]
 
 
 @requires_ai

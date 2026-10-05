@@ -19,7 +19,7 @@ from contextlib import redirect_stdout
 import yaml
 
 from test_github_automation import (
-    BOT, ENV, FIXTURES, REPO, RG_ADDR, WORKFLOW, FakeGitHub, FakeResponse, _Base, args_for, evaluate, evidence,
+    BOT, ENV, FIXTURES, REPO, RG_ADDR, WORKFLOW, FakeGitHub, FakeResponse, _Base, _public, args_for, evaluate, evidence,
     fixture_dirs, fixture_report, ga, lowest_report, resolved_report,
 )
 
@@ -77,8 +77,8 @@ class LifecycleGatingTests(_Lifecycle):
         self.assertEqual(fake.count("POST"), 0)
 
     def test_gating_matrix(self):
-        failed = evaluate(os.path.join(self.tmp, "absent-plan.json"),
-                          os.path.join(FIXTURES, "plan_evidence", "failed_run", "detection_run.json")).report
+        failed = _public(evaluate(os.path.join(self.tmp, "absent-plan.json"),
+                                  os.path.join(FIXTURES, "plan_evidence", "failed_run", "detection_run.json")))
         cases = [
             ("false", resolved_report(), None),
             ("false", lowest_report(), "report_inconsistent"),           # has_drift true but 'false'

@@ -63,6 +63,12 @@ REASON_CODES = {"none", "usage", "install_failed", "missing_api_key", "oidc_toke
                 "sanitize_failed"}
 
 
+def _public(evaluation):
+    """The public drift report (Task 9B.4A): every consumer reads it, never the internal report."""
+    from drift_engine.report_public import public_document
+    return public_document(evaluation.report, evaluation.plan or {})
+
+
 def load_module(path: Path, name: str, source: str | None = None):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -92,7 +98,7 @@ def no_floats(text: str):
 
 @pytest.fixture(scope="module")
 def drift_report_path(tmp_path_factory) -> Path:
-    report = evaluate(str(PLAN), str(MANIFEST)).report
+    report = _public(evaluate(str(PLAN), str(MANIFEST)))
     assert report["run"]["run_id"] == RUN_ID and report["run"]["environment"] == "dev"
     path = tmp_path_factory.mktemp("drift") / "drift_report.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -515,7 +521,9 @@ def steps_by_name(job: dict) -> dict:
 def test_cost_steps_follow_the_drift_report_upload(wf):
     steps = wf["jobs"]["plan-and-analyze"]["steps"]
     names = [s["name"] for s in steps]
-    assert names[-3:] == ["Upload Drift Report", "Infracost Cost Estimate", "Upload Infracost Report"]
+    # Task 9B.5 (G10): the investigation sits between the drift report upload and the cost step (which runs az logout)
+    assert names[-5:] == ["Upload Drift Report", "Drift Investigation", "Upload Drift Investigation",
+                          "Infracost Cost Estimate", "Upload Infracost Report"]
     cost, upload = steps[-2], steps[-1]
     assert cost["id"] == "cost" and upload["id"] == "cost_upload"
     assert cost["if"] == ("${{ steps.upload.outcome == 'success' && (steps.analyze.outputs.drift_detected == 'true' "
@@ -556,7 +564,9 @@ def test_secret_and_continue_on_error_are_confined(wf):
     assert sum("secrets.INFRACOST_API_KEY" in ln for ln in code) == 1
     exceptions = [(j, s["name"]) for j, job in wf["jobs"].items() for s in job.get("steps", [])
                   if "continue-on-error" in s]
-    assert exceptions == [("plan-and-analyze", "Upload Infracost Report")]
+    # exactly two documented continue-on-error uploads (Task 10.1 D5, amended by Task 9B.5 / G10)
+    assert exceptions == [("plan-and-analyze", "Upload Drift Investigation"),
+                          ("plan-and-analyze", "Upload Infracost Report")]
     assert not any("continue-on-error" in job for job in wf["jobs"].values())
 
 

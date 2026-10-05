@@ -2,6 +2,7 @@
 
     drift-engine analyze --plan plan.json [--manifest detection_run.json]
                          [--output report.json] [--format json|yaml|console]
+                         [--public-output drift_report.public.json]
                          [--color auto|always|never]
                          [--log-level debug|info|warning|error] [--log-format text|json]
 
@@ -14,6 +15,12 @@ Terraform, Azure, a network service or an LLM.
 Pass the run manifest with --manifest whenever it exists: without it, the plan
 exit-code and Terraform-version checks of the integrity gate are skipped (a
 warning is printed and `run` holds only nulls).
+
+With --public-output, the public drift report (Task 9B.4A, report_public.py) is
+projected from the same report, verified independently and scanned before anything is
+written. If that fails, nothing at all is written and the exit status is 70 with the
+fixed code `public_projection_failed:<code>` (drift status unknown): the internal
+report is never published in its place. Without the flag `analyze` is unchanged.
 
 Logging is off unless --log-level is given; structured log events (logs.py) then go
 to standard error as text or JSON lines, never into the report. --output is
@@ -28,6 +35,8 @@ Exit status (process outcome only - drift is a valid result, not an error):
       written and drift status is unknown. The integrity gate rejects malformed
       input first, so this indicates an engine defect (defense in depth).
   70  also: an unexpected internal error (nothing is written, drift status unknown)
+  70  also: --public-output could not be projected, verified or written
+      (`public_projection_failed:<code>`, drift status unknown)
   73  the output file could not be written
   130 interrupted (Ctrl-C)
   141 standard output was closed early (broken pipe)
@@ -124,6 +133,7 @@ show the exception type only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -133,11 +143,13 @@ import tempfile
 import time
 from collections import Counter
 from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import ValidationError
 
 from drift_engine import (
-    __version__, activity_logs, attribution, comparator, investigation, investigation_public, severity, who,
+    __version__, activity_logs, attribution, comparator, investigation, investigation_public, report_public, severity,
+    who,
 )
 from drift_engine.classifier import evaluate
 from drift_engine.formatters import FORMATS, render
@@ -170,6 +182,9 @@ def _parser() -> argparse.ArgumentParser:
     analyze.add_argument("--manifest", help="run manifest (detection_run.json); enables the full integrity gate")
     analyze.add_argument("--output", help="write the report to this file instead of standard output")
     analyze.add_argument("--format", choices=FORMATS, default="json", help="output format (default: json)")
+    analyze.add_argument("--public-output",
+                         help="also write the public drift report (identifiers withheld, Task 9B.4A) to this file; "
+                              "nothing is written if it cannot be projected and verified")
     analyze.add_argument("--color", choices=("auto", "always", "never"), default="auto",
                          help="ANSI colors for --format console (default: auto)")
     analyze.add_argument("--log-level", choices=LOG_LEVELS,
@@ -232,7 +247,7 @@ def _parser() -> argparse.ArgumentParser:
     investigate_cmd.add_argument("--plan", required=True, help="plan.json written by terraform show -json")
     investigate_cmd.add_argument("--manifest", required=True, help="run manifest (detection_run.json) of the same run")
     investigate_cmd.add_argument("--report", required=True,
-                                 help="drift report (JSON) written by drift-engine analyze for the same run")
+                                 help="internal drift report (JSON) written by drift-engine analyze for the same run")
     investigate_cmd.add_argument("--anchors", help="directory of anchor candidates (needs --repository)")
     investigate_cmd.add_argument("--repository", help="the current repository, OWNER/NAME (anchor trust check)")
     investigate_cmd.add_argument("--lookback-days", type=_lookback_days, default=activity_logs.DEFAULT_LOOKBACK_DAYS,
@@ -254,7 +269,7 @@ def _parser() -> argparse.ArgumentParser:
                     "its binding to that drift report.",
     )
     check.add_argument("--public", required=True, help="public drift_investigation.json")
-    check.add_argument("--report", help="drift report (JSON) it must be bound to")
+    check.add_argument("--report", help="public drift report (JSON, analyze --public-output) it must be bound to")
     check.add_argument("--log-level", choices=LOG_LEVELS,
                        help="emit structured logs at this level and above to standard error (default: off)")
     check.add_argument("--log-format", choices=LOG_FORMATS, default="text",
@@ -271,7 +286,7 @@ def _parser() -> argparse.ArgumentParser:
     who_cmd.add_argument("--terraform", required=True,
                          help="terraform show -json state (or plan JSON) mapping addresses to ARM IDs")
     who_cmd.add_argument("--output-dir", required=True, help="directory for who_evidence.local.json (local only)")
-    who_cmd.add_argument("--report", help="drift report (JSON) the public file must be bound to")
+    who_cmd.add_argument("--report", help="public drift report (JSON) the public file must be bound to")
     who_cmd.add_argument("--log-level", choices=LOG_LEVELS,
                          help="emit structured logs at this level and above to standard error (default: off)")
     who_cmd.add_argument("--log-format", choices=LOG_FORMATS, default="text",
@@ -331,6 +346,28 @@ def analyze(args: argparse.Namespace) -> int:
         classes = {r["address"]: r["classification"] for r in report["resources"]}
         ratings = {r.address: r for r in severity.plan_severity(evaluation.parsed, comparisons, classes)}
 
+    public_text = None
+    if args.public_output is not None:
+        try:
+            public_text = report_public.publish_report(report, evaluation.plan or {}, _published_manifest(args, report))
+        except Exception as exc:  # fixed codes only: an exception message could echo a withheld value
+            code = exc.code if isinstance(exc, report_public.PublicReportError) else "verification_failed"
+            log_event(logger, logging.ERROR, "public_projection_failed", "public drift report not produced",
+                      code=code)
+            print(f"ERROR: public_projection_failed:{code}; nothing was written.\n"
+                  "  Drift status is UNKNOWN - this must not be treated as 'no drift'.", file=sys.stderr)
+            return EXIT_INTERNAL_ERROR
+
+    if public_text is not None:  # written first, so a failure leaves nothing behind
+        try:
+            _write_atomic(args.public_output, public_text)
+        except OSError as exc:
+            log_event(logger, logging.ERROR, "public_projection_failed", "public drift report not written",
+                      code="write_failed", error_type=type(exc).__name__)
+            print("ERROR: public_projection_failed:write_failed; nothing was written.\n"
+                  "  Drift status is UNKNOWN - this must not be treated as 'no drift'.", file=sys.stderr)
+            return EXIT_INTERNAL_ERROR
+
     text = render(args.format, report, ratings, _use_color(args.color, args.output is None))
     if args.output is None:
         sys.stdout.write(text)
@@ -342,6 +379,9 @@ def analyze(args: argparse.Namespace) -> int:
             log_event(logger, logging.ERROR, "output_write_failed", "cannot write the report",
                       output=args.output, error=str(exc))
             print(f"ERROR: cannot write {args.output}: {exc}", file=sys.stderr)
+            if public_text is not None:  # never leave a public report without its internal source
+                with contextlib.suppress(OSError):
+                    os.unlink(args.public_output)
             return EXIT_CANT_WRITE
         log_event(logger, logging.INFO, "report_written", "report written",
                   output=args.output, format=args.format, outcome=report["outcome"])
@@ -360,6 +400,20 @@ def analyze(args: argparse.Namespace) -> int:
         print(f"has_drift={str(report['has_drift']).lower()}  [{counts}]  severity={top}")
         print(f"Report: {args.output}")
     return EXIT_OK
+
+
+def _published_manifest(args: argparse.Namespace, report: dict) -> Any:
+    """The run manifest published beside the public report (scanned too); None when there is none. A
+    succeeded report whose manifest cannot be read again fails closed."""
+    if args.manifest is None:
+        return None
+    try:
+        with open(args.manifest, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, UnicodeDecodeError, ValueError):
+        if report["outcome"] == "succeeded":
+            raise report_public.PublicReportError("scan_failed") from None
+        return None
 
 
 def _refuse_restricted_stdout(args: argparse.Namespace) -> bool:
