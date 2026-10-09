@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete, committed together with 9B.4 and 9B.4A in `26aa3a9` (item 8). **2026-10-09: the CI result policy (Phase 9B G18, amends decision 1) is implemented in `4ba7668` (pushed). The no-drift real CI proof run #28 (`37948472263`) passed. The artifact-content checks (download approval) remain.** The drift path is blocked for Task 9B.6: Activity Log `authentication_failed` in CI, see 9B.5 Completion Notes). Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
+- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete, committed together with 9B.4 and 9B.4A in `26aa3a9` (item 8). **2026-10-09: the CI result policy (Phase 9B G18, amends decision 1) is implemented in `4ba7668` (pushed). The no-drift real CI proof run #28 (`37948472263`) passed, including the artifact-content checks (2026-10-09). Every 9B.5 acceptance criterion is met. 9B.5 is kept 🔵 pending the user's decision on the drift-path defect.** **The no-drift artifact checks also passed. Option B (user decision): the CI Activity Log authentication fix is done within 9B.5.** It is Option A plus a sanitized diagnostic, plus a real audience check and a drifted real-CI proof; amended and 🔒 locked 2026-10-09. **Implemented and validated locally 2026-10-09; committed and pushed to `main` 2026-10-09 (user-approved, in the commit that carries this plan update).** Local audience checks (a1) and (a2) passed. Next: the drifted real CI proof (check (b)).) Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
 - **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -2901,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally; the G18 CI result policy is implemented in `4ba7668`; the no-drift real CI proof run #28 passed on 2026-10-09; the artifact-content checks remain)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally; the G18 CI result policy is implemented in `4ba7668`; the no-drift real CI proof run #28 and its artifact checks passed on 2026-10-09; the CI Activity Log authentication fix (amended and locked 2026-10-09) is implemented, validated locally and committed and pushed to `main` 2026-10-09 (user-approved, in the commit that carries this plan update); its drifted real CI proof is pending)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -3294,6 +3294,7 @@ In addition:
 - **Objective**: Extend the Activity Log collector to evidence v2 with the investigation fields required by G7, G8, G11 and G13, using the verified event shape. Still collection only (no correlation).
 - **Dependencies**: Tasks 7.1–7.3 (implementation), Phase 9B locked decisions G1–G17
 - **Files/Areas**: `src/drift_engine/activity_logs.py`, `src/drift_engine/cli.py` (`activity-logs` options), `tests/test_activity_logs.py`, new `tests/fixtures/activity_log/` (sanitized fixtures derived from the verified shape: synthetic GUIDs, `user@example.invalid`, no real IPs; test inputs may use only documentation-range addresses `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` and `2001:db8::/32` to prove IPs are dropped, and no IP ever appears in an output), `src/drift_engine/__init__.py` (docstring)
+- **Amendment (2026-10-09, Task 9B.5 CI Activity Log authentication fix, user-approved)**: the evidence's per-scope `error` gains one optional, runner-only field `auth_reason`. It is present only with `authentication_failed`, has fixed values, and records no exception text. `evidence_version` stays `"2"`; documents without an authentication failure are unchanged. `AzureMonitorSource` requests the Azure Resource Manager audience Azure CLI caches at login (`https://management.core.windows.net//.default`). The `AzureCliCredential`-only rule, the GET allowlist, the limits and the existing fixed codes are unchanged. Owned and specified by Task 9B.5; the record below is historical.
 - **Acceptance Criteria**:
   - [x] **Evidence v2 fields**: `evidence_version: "2"` with per event:
     - `event_phase` (`begin` / `end` / `unknown`, from `eventName`);
@@ -3778,11 +3779,19 @@ In addition:
     - (d) `drift-engine analyze` still prints `str(exc)` for an internal-contract violation (pre-existing Phase 4 behaviour, outside this task); projection errors print fixed codes only.
 
 #### Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows)
-- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05), committed with 9B.4 and 9B.4A in `26aa3a9` (item 8). The G18 CI result policy (user-approved 2026-10-09) is implemented in `4ba7668` (pushed 2026-10-09). The no-drift real CI proof run #28 (`37948472263`) passed every check made from the public run data. The artifact-content checks (item 7) remain, and need approval to download the artifacts. Stays 🔵 STARTED until they pass.
+- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05), committed with 9B.4 and 9B.4A in `26aa3a9` (item 8). The G18 CI result policy (user-approved 2026-10-09) is implemented in `4ba7668` (pushed 2026-10-09). The no-drift real CI proof run #28 (`37948472263`) and its artifact-content checks passed (2026-10-09). All acceptance criteria up to the G18 work are checked.
+  - **Kept 🔵 STARTED (user decision 2026-10-09, Option B)**: scheduled runs #24 and #25 show the investigation fails on every real drifted run in CI (`evidence_failed`, `authentication_failed`; see Completion Notes).
+  - The fix is part of this task: "CI Activity Log authentication fix" below (Option A plus a sanitized diagnostic). It is user-approved and 🔒 locked 2026-10-09, **implemented and validated locally 2026-10-09 (including the diff review fixes M1/L2/L3 and N1), committed and pushed to `main` 2026-10-09 (user-approved, in the commit that carries this plan update)**.
+  - Local audience checks (a1) and (a2) passed. Still open: the drifted real CI proof (check (b)), which needs the user's test tag and one approval-gated dispatch.
 - **Started**: 2026-10-05
 - **Objective**: Run the investigation in `plan-and-analyze` and publish `drift-investigation-<run_id>` (G10), add the `investigation` check job, and feed the public investigation into `ai-analysis.yml`. Detection, issues, report and cost results stay unchanged.
 - **Dependencies**: Task 9B.4A (and 9B.4); Task 10.1 (step order and D5 exception pattern); Task 9A.1 (binding conventions)
 - **Files/Areas**: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`, new `ci/azure-constraints.txt`, new `scripts/investigation_analysis.sh` (orchestrates install check, anchor fetch, `investigate`, projection, check; fixed status codes; counts-only output), new `scripts/fetch_prior_drift_reports.py` (GitHub API, `actions: read`, G9 metadata and download into a runner directory; rules in G9 "Anchor fetch"); runner-only paths `${RUNNER_TEMP}/drift-internal/`, `${RUNNER_TEMP}/investigation/restricted/` (0700) and `${RUNNER_TEMP}/investigation-venv` (G10), new `tests/test_investigation_workflow.py`, `tests/test_infracost.py` (step order and exception list; amended 2026-10-05, item 5), `tests/test_ai_cli.py` (workflow structure; executed-step gate tests move to the public report); `README.md`, `docs/drift-detection-spec.md` (§8.3 and a new investigation section), `docs/architecture.md`
+  - **Amended (2026-10-09, CI Activity Log authentication fix)**:
+    - `src/drift_engine/activity_logs.py`: credential scope and the authentication diagnostic;
+    - `scripts/investigation_analysis.sh`: `investigation_detail` auth codes;
+    - `tests/test_activity_logs.py` and `tests/test_investigation_workflow.py`;
+    - `docs/drift-detection-spec.md` and `README.md` (diagnostic codes, only where needed).
 - **Acceptance Criteria**:
   - [x] **Workflow structure**: steps after `Upload Drift Report` and before the cost step; separate pinned venv with an exact-pin check; outputs `investigation_status` / `investigation_failure` / `investigation_detail` / `investigation_publishable` / `investigation_upload_outcome` (amended 2026-10-05); the documented exit-0 capture; exactly two `continue-on-error` uploads in the workflow; `plan-and-analyze` permissions `id-token: write`, `contents: read`, `actions: read` and timeout 45; the `investigation` job (`contents: read`, no Azure or secrets) with `--check` and a counts-only summary. **Inputs (amended 2026-10-05, item 3)**: it downloads both `drift-investigation-<run_id>` and `drift-report-<run_id>`, and runs `drift-engine investigation-check --public <file> --report <downloaded public drift_report.json>` (binding against the downloaded public report).
   - [x] **Isolation**: for every investigation failure (install, anchor fetch, Azure auth/authorization/throttling/timeout, correlation, projection, leak scan, upload), `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are identical to the same run with the investigation steps removed (artifact = the public drift report; amended 2026-10-05, item 4), and the `investigation` job fails. (An `incomplete` investigation is not a failure: G18.)
@@ -3797,7 +3806,7 @@ In addition:
     - Exit 2 / 70 / 73 / other → `failed` / `investigate_usage` / `investigate_internal_error` / `write_failed` / `investigate_internal_error` / false.
     - Killed by `timeout` (124) → `failed` / `timeout` / false.
     - Public check fails (leak, contract, binding) → `failed` / `public_check_failed` / false.
-    - **`investigation_detail`**: counts by fixed code only (e.g. `throttled=1`, `authorization_failed=1`), from the runner-only evidence's per-scope query-failure and limit codes. This is how authentication, authorization, throttling and timeouts become distinguishable without exposing values.
+    - **`investigation_detail`**: counts by fixed code only (e.g. `throttled=1`, `authorization_failed=1`), from the runner-only evidence's per-scope query-failure and limit codes. This is how authentication, authorization, throttling and timeouts become distinguishable without exposing values. **Amended (2026-10-09, CI Activity Log authentication fix)**: it also counts the fixed `auth_<reason>` codes from `error.auth_reason`.
     - **Decision 1 (amended 2026-10-09, G18, user-approved)**: an `incomplete` or failed-but-bindable investigation is uploaded unchanged. The public document keeps its own `outcome` and `failure` (stage/reason), so the AI report shows per-resource reasons or `investigation_failed` (D3). The `investigation` job **passes with a warning** for `incomplete` and **fails** for failed-but-bindable. *(Original 2026-10-05 wording: "The `investigation` job still **fails**" for both. Superseded because `incomplete` only occurs when drift exists, so drift alone could turn the run red.)*
   - [x] **`investigation` job result (amended 2026-10-09, G18)**:
     - **passes** when `investigation_upload_outcome == success`, `Verify Drift Investigation` passes, and `investigation_status` is `succeeded`, or is `incomplete`. For `incomplete` it emits a `::warning::` (drift investigated; some facts not confirmed by available evidence);
@@ -3834,6 +3843,71 @@ In addition:
     - the `ai-analysis.yml` gate step validates the public drift report contract (it currently validates `DriftReport`; Task 9A.1 amendment);
     - the cost step binds to the public report;
     - a projection failure gives `drift_detected=unknown` with no artifact uploaded (executed-step test).
+  - **CI Activity Log authentication fix (user-approved 2026-10-09, Option A plus a sanitized diagnostic; 🔒 locked 2026-10-09; revised and re-locked 2026-10-09 with the four audience-validation adjustments, user-approved; design review in Implementation Notes)**:
+    - [x] **Credential scope (Option A)** (implemented 2026-10-09; see Completion Notes, "CI Activity Log authentication fix"):
+      - `AzureMonitorSource` creates `MonitorManagementClient` with `credential_scopes` exactly `["https://management.core.windows.net//.default"]`. This is the Azure Resource Manager audience Azure CLI caches at `az login`.
+      - `AzureCliCredential` therefore runs `az account get-access-token --resource https://management.core.windows.net/`. In CI this is answered from the token cached at login, so the GitHub OIDC assertion (about 5-minute lifetime) is not reused after the G8 settle wait.
+      - **Unchanged**:
+        - `AzureCliCredential` only (Task 7.1 rule; never `DefaultAzureCredential`, `ClientAssertionCredential` or a secret);
+        - the request target (`base_url` `https://management.azure.com`), the GET-only Activity Log path allowlist and the no-redirect setting;
+        - limits, retries and the fixed error codes;
+        - the workflow, job permissions, secrets, the federated credential, RBAC and every G-decision.
+    - [x] **Sanitized authentication diagnostic (minimal)** (implemented 2026-10-09): the restricted, runner-only evidence's per-scope `error` gains one optional field, `auth_reason`.
+      - It is present only when `code == "authentication_failed"`. The model rejects it with any other code, and rejects a missing value with that code.
+      - Fixed values:
+        - `assertion_expired`: `AADSTS700024`;
+        - `federation_mismatch`: `AADSTS70021`, `AADSTS700213`;
+        - `other_aadsts`: any other AADSTS number;
+        - `no_aadsts`: the credential failed without an AADSTS number;
+        - `arm_rejected`: Azure Resource Manager answered HTTP 401.
+      - Only the number after `AADSTS` is matched (in memory) from the exception text, mapped through this allowlist, then discarded. The exception text, any AADSTS number, trace or correlation IDs, timestamps and tenant or client IDs never reach any document, log, output or summary.
+      - **Implementation note (2026-10-09, review M1, user-approved)**: this rule also covers azure-identity's own record of a failed token request (`"<credential>.get_token_info failed: <exception>"`, logged at WARNING and printed on standard error by Python's last-resort handler). A redaction filter on the `azure.identity` loggers keeps the record but reduces each exception argument to its type name and drops any traceback. **Extended (2026-10-09, review N1, user-approved)**: the same filter drops every `azure.identity` record below WARNING, which covers the pre-formatted DEBUG account-details record of a successful token request (client ID, tenant ID, UPN, object ID). No other logger is affected.
+      - `evidence_version` stays `"2"` (an additive, runner-only field). An evidence document without an authentication failure renders byte-identically to today.
+      - `scripts/investigation_analysis.sh` adds `auth_<reason>=<count>` to `investigation_detail`. These are fixed `[a-z_]` codes, e.g. `authentication_failed=1,auth_assertion_expired=1`.
+      - **Unchanged**: the public investigation contract, the public drift report, the AI report, the G11 privacy profile and the status vocabulary of the outcome mapping.
+    - [ ] **Audience acceptance, checked against the real Activity Log API (fake tests alone are insufficient)** ((a1) ✅ and (a2) ✅ 2026-10-09; (b) pending):
+      - **(a) Local, read-only, user-approved at execution time**, with the user's own `az login` session (real `AzureCliCredential`, real Activity Log API):
+        - **(a1) Pre-implementation go/no-go gate (adjustment 1)**: the current, unchanged `AzureMonitorSource` with an in-memory scope-pinning credential wrapper (`check_arm_audience.py`, scratchpad) requesting `https://management.core.windows.net//.default`.
+          - The `aud` claim of **the exact token sent with the request** equals `https://management.core.windows.net/`.
+          - One bounded GET of one page for `aitdd-dev-main-rg` over the last 60 minutes completes.
+          - Any other result (401, another code, a wrong `aud`) means Option A is invalid: stop, and return to the design review before any implementation.
+          - **Result (2026-10-09, user-approved run; ✅ go)**:
+            - local Azure CLI **2.84.0**; `aud_match=True` (the token actually sent carried `https://management.core.windows.net/`);
+            - outcome `complete`, code `none`, HTTP **200**, **one GET**, retry 0, event count **0**. There were no Activity Log events for the group in the last 60 minutes; the token is validated before results are returned, so HTTP 200 shows the audience was accepted.
+            - **Proven**: local API compatibility. The Activity Log API on `https://management.azure.com` accepts a `https://management.core.windows.net/`-audience token through the project's request path (user principal, local session).
+            - **Not proven by this check**: the CI behaviour. That covers the login-cache hit on the runner's Azure CLI 2.90.0 / MSAL 1.36.0, the pipeline service principal's access, and success after the settle wait. Only check (b), the drifted CI run, proves those.
+        - **(a2) Post-implementation repeat**: the same check through the **fixed** `AzureMonitorSource`, without the wrapper, before any push.
+          - **Result (2026-10-09, user-approved; ✅)**:
+            - script `check_arm_audience_fixed.py` (scratchpad): the fixed source creates its own `AzureCliCredential`. A recording transport reads only the `aud` of the bearer token actually sent.
+            - local Azure CLI **2.84.0**; `ARM_CREDENTIAL_SCOPE` is the cached audience: `True`; `aud_match=True`;
+            - outcome `complete`, code `none`, HTTP **200**, **one GET**, event count **0**.
+            - As with (a1), this proves local API compatibility only. The CI cache hit, the pipeline principal and the post-wait behaviour remain for (b).
+        - **Safety rules (adjustment 2)**:
+          - The token and its claims stay in memory. Only `aud` is decoded and printed; no other claim, no token, no subscription ID, no event content, no exception text.
+          - Output is limited to the Azure CLI version, `aud` match, the fixed outcome or error code, HTTP status and event count.
+          - Exactly one GET of one page, through the project's GET-only path allowlist with no redirects: `retry_total=0`, short timeouts, one resource group, a 60-minute window.
+          - SDK logging is disabled; the check writes no file and no bytecode.
+          - Acknowledged side effect: Azure CLI may cache the token in its own token cache (`~/.azure`), as any `az` ARM command does.
+        - **Versions recorded (adjustment 3)**:
+          - the local Azure CLI version at each check;
+          - the CI runner: image `ubuntu-24.04` 20261004.327 (run #28) ships Azure CLI 2.90.0 with MSAL 1.36.0. The runner image manages it; this project does not pin it.
+          - Every real CI proof records the runner image version.
+      - **(b) Real CI, decisive for the pipeline service principal**: the drifted run below. This proves Azure Resource Manager accepts the cached-audience token from the pipeline identity after the settle wait, and proves the login-cache hit on the runner's Azure CLI version.
+    - [ ] **Real drifted CI proof (approval-gated; Azure change by the user only, Execution Rule 10)**:
+      - The user adds one test tag to `aitdd-dev-main-rg` in the Azure Portal. The user approves the commit/push of the fix and one `workflow_dispatch` on that commit; run #28 is the in-sync anchor.
+      - Required results:
+        - the run concludes **success**: plan exit `2`, `drift_detected=true`, `external_drift` on `tags.<key>`;
+        - `Drift Investigation` lasts at least the 10-minute settle wait, so the query ran after the wait;
+        - `investigation_status` is `succeeded`, or `incomplete` with the G18 warning;
+        - `investigation_detail` has **no** query-failure, limit or `auth_*` code (in particular no `authentication_failed` or `all_queries_failed`);
+        - the public investigation's `binding.evidence_outcome` is `complete`;
+        - the `investigation`, `issues` and `cost` jobs and the triggered AI analysis succeed;
+        - every public artifact passes the identifier scan used for run #28;
+        - the runner image version (and with it the Azure CLI version) is recorded.
+      - **Afterwards**:
+        - the user removes the test tag;
+        - the next no-drift run (scheduled or dispatched) becomes the fresh in-sync anchor for Task 9B.6, and Task 8.3 closes the issue that the drifted run opened;
+        - Task 9B.6 does not reuse this run: one task at a time (Execution Rule 8).
 - **Validation**:
   - [x] Workflow-structure tests and executed-step tests (runner-realistic, as in Task 10.1).
   - [x] Synthetic gate tests for every failure code and the missing/invalid investigation paths.
@@ -3861,18 +3935,32 @@ In addition:
       - `Require Investigation Success` uses `drift_detected` only in the required/not-required decision (no failure branch keyed on `'true'` alone);
       - `issues`, `cost` and `investigation` run for both `'true'` and `'false'`.
     - Full suite, `actionlint` + shellcheck and `./scripts/validate.sh` pass.
-  - [ ] Real CI proof (approval-gated, on the G18 implementation): one no-drift `workflow_dispatch`. Before it, the user removes any leftover test tag from `aitdd-dev-main-rg` (e.g. `owner` from the 2026-10-04 test), so the resource group is in sync; this run later serves as the Task 9B.6 anchor. The investigation step runs with no Azure query, the artifact is present, the `investigation` job passes, and the AI report v2 shows no drifted resources and no investigation claims.
+  - [x] Real CI proof (approval-gated, on the G18 implementation): one no-drift `workflow_dispatch`. Before it, the user removes any leftover test tag from `aitdd-dev-main-rg` (e.g. `owner` from the 2026-10-04 test), so the resource group is in sync; this run later serves as the Task 9B.6 anchor. The investigation step runs with no Azure query, the artifact is present, the `investigation` job passes, and the AI report v2 shows no drifted resources and no investigation claims.
     - **Also verified (amended 2026-10-05, item 7)**:
       - `drift-report-<run_id>` contains only the public `drift_report.json` (with `public_version`) and `detection_run.json`, and no internal report is present in any artifact;
       - the issues and cost jobs pass on the public report;
       - the cost binding hash (`cost_run.json`), the public investigation's `binding.drift_report_sha256` and the AI report's `provenance.drift_report_sha256` all equal the canonical SHA-256 of the downloaded public drift report.
     - **Result (2026-10-09, run #28 `37948472263`; details in Completion Notes)**:
-      - **Passed** (from the public run data): every part of the main criterion except the AI report's "no investigation claims", plus "the issues and cost jobs pass on the public report".
-      - **Still open**:
-        - the artifact-content checks of item 7: the file list, `public_version`, no internal report, and the three-way hash equality;
-        - the AI report's "no investigation claims".
-
-        These need the artifacts downloaded into `.artifacts/` (approval required). This item therefore stays unchecked.
+      - **Passed, every part**: the main criterion (including "no Azure query" and "no investigation claims") and all three item-7 checks.
+        - The run data was checked on 2026-10-09.
+        - The four downloaded artifacts were checked on 2026-10-09 (results in Completion Notes, "Artifact verification").
+  - [x] **Activity Log authentication fix tests (2026-10-09)** (results in Completion Notes):
+    - **Scope**:
+      - a fake credential records the requested scopes: exactly `https://management.core.windows.net//.default`;
+      - every request still goes only to `https://management.azure.com` and the Activity Log path (existing allowlist and blocked-request tests unchanged and passing).
+    - **Through the real `AzureCliCredential`**: a fake `az` on `PATH` records its arguments: `account get-access-token --output json --resource https://management.core.windows.net/`, and never `https://management.azure.com`.
+    - **CI mechanism reproduced**: a fake `az` answers only the login-cached resource and fails every other resource with an `AADSTS700024` message.
+      - Before the scope change the collection fails with `authentication_failed` / `auth_reason: assertion_expired`; after it, the scope completes.
+      - This is shown on the real `collect_evidence` path, with a fake transport for the HTTP side.
+    - **Diagnostic mapping**:
+      - each allowlisted AADSTS number maps to its fixed reason;
+      - an unlisted number maps to `other_aadsts`, no number to `no_aadsts`, and an Azure Resource Manager 401 to `arm_rejected`;
+      - `auth_reason` with any other code, or a missing reason with `authentication_failed`, is rejected by the model;
+      - fixtures with a synthetic tenant/client GUID, an email, a trace ID and a timestamp in the exception text: none of them appears in the evidence, the logs, the script output or `investigation_detail`;
+      - evidence without an authentication failure is byte-identical to the current rendering.
+    - **Script**: `investigation_detail` counts `auth_<reason>` codes; the counts-only output line and the step summary stay within the fixed-code regexes.
+    - **Regression**: full suite, `unittest discover`, `actionlint` + shellcheck, `shellcheck scripts/investigation_analysis.sh`, `./scripts/validate.sh`.
+  - [ ] **Audience acceptance checks (a1), (a2) and (b)** recorded with results and versions, see the acceptance criterion above. (a1) and (a2) are recorded; (b) is pending (drifted real CI proof).
 - **Implementation Notes**:
   - Starts with a design review (step and job names, the exact exit-code mapping, the anchor-fetch limits). Done 2026-10-05 (below).
   - **Pre-implementation review (2026-10-05, items 1–8 and decision 6 user-approved)**: recorded in the criteria above.
@@ -3899,6 +3987,41 @@ In addition:
       - On a drifted run, the worst case of these bounds plus the other steps comes close to the job limit.
       - A job timeout would fail `plan-and-analyze` itself.
       - The real drift run of Task 9B.6 records the actual durations.
+  - **Activity Log authentication design review (2026-10-09, read-only; user-approved Option A plus a sanitized diagnostic; 🔒 locked)**:
+    - **Observed** (public run data):
+      - Run #25: OIDC login finished 08:04:11. `Drift Investigation` ran 08:04:49 → 08:14:49 (the G8 settle wait). The single Activity Log query ran at about 08:14:48, about 10.6 minutes after login, and failed within a second. Run #24 shows the same pattern.
+      - Detail `authentication_failed=1,all_queries_failed=1`.
+      - Not `authorization_failed` (403), so Reader permission is not the cause. Not `credential_unavailable`, so the Azure CLI session existed (`azure-identity` 1.26.0 maps a plain "run az login" without `AADSTS` to that code).
+      - No-drift runs never request a token, which is why they pass.
+    - **Code path** (pinned packages and Azure CLI 2.91 source, read in the scratchpad):
+      - `azure-mgmt-monitor` 7.0.0 requests `https://management.azure.com/.default`. `AzureCliCredential` turns that into `az account get-access-token --resource https://management.azure.com`.
+      - After the OIDC login, Azure CLI keeps the GitHub OIDC token as a static `client_assertion` for MSAL `ConfidentialClientApplication`.
+      - At login it lists subscriptions with the scope `https://management.core.windows.net//.default` (`active_directory_resource_id`), so only that token is cached.
+      - MSAL 1.39 answers `acquire_token_for_client` from the cache only on an exact scope match. The later `management.azure.com` request therefore goes to Entra ID with the original assertion.
+    - **External**: GitHub's documented example OIDC token has `exp − iat = 300 s`. Azure/login issue #441 reports a 5-minute token and later `AADSTS700024` failures.
+    - **Conclusion**:
+      - The cache miss re-sends the expired GitHub assertion, which Entra ID rejects. This is the mechanism consistent with all evidence.
+      - The exact AADSTS code is not recorded: it was only in a runner-only log that is never uploaded. The only remaining alternative is a Resource Manager 401.
+      - The sanitized diagnostic makes any recurrence distinguishable without exposing values.
+    - **Options considered**:
+      - **A**: use the cached audience (chosen; smallest, no rule change).
+      - **B**: pre-warm the token after login (timing-dependent; changes a completed Phase 5 step).
+      - **C**: fresh assertion via `ClientAssertionCredential` (would break the "`AzureCliCredential` only" rule and expose the OIDC request credentials to Python).
+      - **D**: re-login after the wait (contradicts the locked G10 one-step design).
+    - **Trade-offs of A (accepted)**:
+      - It depends on Azure CLI caching the ARM-audience token at login. A future Azure CLI or `azure/login` change could reintroduce the failure; the diagnostic and the scheduled runs would show it.
+      - The cached token must outlive the investigation. Service-principal tokens default to about 1 hour, versus at most about 27 minutes of use after login (fetch ≤ 300 s, `investigate` ≤ 1500 s).
+      - Local `drift-engine` use with a user `az login` requests the same audience; Azure CLI itself calls Resource Manager this way.
+    - **Compatibility evidence (adjustment 4; read-only, from the pinned code, 2026-10-09)**:
+      - `azure-identity` 1.26.0 `_scopes_to_resource("https://management.core.windows.net//.default")` gives `https://management.core.windows.net/` (trailing slash kept). Azure CLI `resource_to_scopes` turns that back into exactly the login-cached scope. Today's `https://management.azure.com/.default` maps to `https://management.azure.com`, a different scope.
+      - Azure CLI's own `az monitor activity-log list` (AAZ `MgmtClient`) calls `/subscriptions/{id}/providers/Microsoft.Insights/eventtypes/management/values` (API 2015-04-01) on `resource_manager` (`https://management.azure.com/`) with `credential_scopes = resource_to_scopes(active_directory_resource_id)`, i.e. this same audience.
+      - MSAL (1.36.0 on the runner, 1.39.0 in Azure CLI 2.91.0): `acquire_token_for_client` answers from the cache first. A failed proactive refresh of an aging token falls back to the still-valid cached token; only a fully expired token is re-requested with the assertion.
+      - Azure CLI 2.90.0 against 2.91.0: the auth code paths used here are identical (the differences are macOS broker and a removed cloud).
+      - Microsoft documentation: the `management.core.windows.net` audience expects the trailing slash (MSAL guidance), and Resource Manager's wrong-audience error lists `https://management.core.windows.net/` as allowed (Microsoft Q&A).
+      - No official page lists Resource Manager's accepted audiences, hence the real checks (a1), (a2) and (b).
+    - **Plan impact**: no G-decision changes and no locked rule changes.
+      - The Task 9B.1 evidence contract gains one optional runner-only field, recorded as an amendment there.
+      - Task 9B.5's Files/Areas, criteria and validation are amended above.
 - **Completion Notes** (implementation and local validation, 2026-10-05; real CI proof pending):
   - **Files**:
     - workflows: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`;
@@ -3932,7 +4055,7 @@ In addition:
     - `actionlint` (incl. shellcheck on every `run:` block) clean on both workflows; `shellcheck` clean on `scripts/investigation_analysis.sh`.
     - gitleaks: only the two pre-existing synthetic findings. None of the 41 identifier-like values of the local raw Activity Log capture appears in any change.
   - **Not done / limitations**:
-    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8; done in `26aa3a9`), the G18 change committed and pushed (done in `4ba7668`), then one no-drift `workflow_dispatch` after the user removes any leftover test tag (done: run #28, see "Real CI proof" below; item 7 artifact-content checks still open). Isolation and the hash equality across cost, investigation and AI are verified structurally and in executed steps, not yet on GitHub-hosted runners.
+    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8; done in `26aa3a9`), the G18 change committed and pushed (done in `4ba7668`), then one no-drift `workflow_dispatch` after the user removes any leftover test tag (done: run #28 and its artifact checks, see "Real CI proof" and "Artifact verification" below). The hash equality across cost, investigation and AI is now verified on GitHub-hosted runner output (run #28). Isolation of an investigation failure was observed on real runners in scheduled runs #24 and #25.
     - (b) The Azure pins were resolved for CPython 3.12 linux x86_64 with pip's resolver report; locally they were installed and checked on 3.13. The CI exact-pin check is the 3.12 confirmation.
     - (c) The AI mutation corpus was not re-run (no `ai_engine` source changed in 9B.5).
   - **G18 implementation (2026-10-09; commit `4ba7668`, pushed; push-triggered `Phase 9 - Security Scan` `37944658696` and `Phase 2 - Terraform Azure Auth & Validation` `37944658966` both success)**:
@@ -4016,8 +4139,40 @@ In addition:
     - **Triggered AI analysis**: run **#11**, id `37948669003` (<https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/37948669003>), commit `4ba7668`. **Conclusion: success** (29s).
       - Summary: source run `37948472263` attempt 1; resources 0; remediation options 0; AI sections analysed 0 of 6; investigation `complete`; LLM `none` / `not_attempted`.
       - Artifact `ai-analysis-report-37948472263`: 3,937 B, `sha256:f578f6ff022c9f49cb3c907baa8c2e47bbeaf7fe1a96f4d80b7258b2eb7615c7`.
-    - **Not yet verified**: the artifact contents. That covers the file lists, `public_version`, no internal report, AI `report_version: "2"`, and the three-way `drift_report_sha256` equality. It needs approval to download the four artifacts into `.artifacts/task-9B.5-ci-proof/`.
-    - **Anchor for Task 9B.6**: this run's public in-sync drift report is retained until 2026-11-08.
+    - **Artifact verification (2026-10-09, user-approved download)**:
+      - **Download**: the user downloaded the four original ZIPs into `.artifacts/task-9B.5-ci-proof/` (gitignored). Their SHA-256 equals the GitHub digests above, and the AI ZIP equals `sha256:f578f6ff…7615c7`.
+      - **Extraction**: each ZIP was extracted into its own folder under `extracted/`, after listing confirmed flat regular-file entries only (no directories, paths or symlinks).
+      - **Checks**: scratchpad script with the project's own validators, Python 3.13, `.[dev,ai,azure]`. **34 of 34 passed**, plus the two CI checkers:
+        - **File lists**:
+          - `drift-report`: exactly `detection_run.json` and `drift_report.json`;
+          - `drift-investigation`: `drift_investigation.json`;
+          - `infracost-report`: `cost_run.json` and `infracost.json`;
+          - `ai-analysis-report`: `ai_analysis_report.json` and `.md`;
+          - 7 files in total.
+        - **Public drift report**:
+          - validates as `PublicDriftReport` and against `schemas/drift_report.public.schema.json` (0 errors);
+          - `public_version: "1"`, outcome `succeeded`, `has_drift: false`, `{"in_sync": 5}`, `run.run_id` `github-37948472263-1`;
+          - the manifest shows succeeded, plan exit 0, commit `4ba7668`.
+        - **No internal report**: no JSON file in any artifact validates as the internal `DriftReport` contract.
+        - **Public investigation**:
+          - validates as `PublicInvestigation`: `public_version: "1"`, outcome `complete`, 0 resources, no failure, run id bound;
+          - `drift-engine investigation-check` against the downloaded public report: `valid`, exit 0;
+          - **no Azure query**: with no drifted resource there is no target and no scope, so no Activity Log page is requested (`select_targets` → `_scope_plans` → `_run_scope`). `completeness.queried_at` is only the collection timestamp, and anchors examined 0.
+        - **AI report**:
+          - `report_version: "2"`;
+          - `ai_engine.verify.verify_report` (schema and binding to the drift report and investigation) and `verify_markdown`: no problems;
+          - 0 resources, no drift, 0 options, investigation `complete` without failure;
+          - LLM provider `none`, `not_attempted`, `evidence_sent: []`, `investigation_sent: []`;
+          - **no investigation claims**: no verdict, operation name, `recorded_caller`, `decisive_operation` or `pipeline_identity` in `resources` or the Markdown.
+        - **Three-way hash**: the canonical SHA-256 of the downloaded public drift report is `3608aa7b213a287ace44cb24bcabb433308adf9f4e2302af941b590424deb464`.
+          - The `ai_engine`, `sanitize_infracost` and `investigation_public` implementations all compute that value.
+          - It equals `cost_run.json` `drift_report_sha256`, the investigation's `binding.drift_report_sha256` and the AI `provenance.drift_report_sha256`.
+          - The AI `provenance.investigation_sha256` (`8b4cfa65…6632000b`) equals the canonical hash of the investigation.
+          - The cost and AI run ids are `github-37948472263-1`.
+        - **Cost**: `scripts/sanitize_infracost.py --check` against the downloaded drift report, run id `github-37948472263-1`: exit 0.
+        - **Identifier scan** of all 7 files: no finding from the G11 `leak_findings` scanner. There is no GUID, `/subscriptions/`, `/providers/` or `/resourceGroups/` path, email or UPN, IPv4 address outside the configured `10.10.` CIDRs, or token-like string. The live subscription ID, tenant ID and signed-in user name (read locally, never printed) appear in no file.
+      - **Git**: all 11 files under `.artifacts/task-9B.5-ci-proof/` (4 ZIPs, 7 extracted) are ignored (`.gitignore:40` `.artifacts/`); `git ls-files .artifacts` is empty.
+    - **Anchor for Task 9B.6**: this run's public in-sync drift report is retained until 2026-11-08. **Superseded (2026-10-09)** by the no-drift run that follows the 9B.5 drifted proof and the tag removal (see the CI Activity Log authentication fix).
     - **Earlier scheduled runs on `26aa3a9`** (pre-G18 9B.5 code, read from public run data):
       - #26 `37749098619` and #27 `37904551688` (2026-10-08 and 2026-10-09, no drift): all jobs success.
       - #24 `37436291693` and #25 `37591269837` (2026-10-06 and 2026-10-07): real drift, while the `owner` test tag was still present.
@@ -4031,13 +4186,134 @@ In addition:
       - Until this is resolved, the 9B.6 primary drift run would fail its G18 investigation criterion.
       - Diagnosis and any fix need a design review and user approval; they are not part of this record.
 
+  - **CI Activity Log authentication fix (2026-10-09; committed and pushed to `main` 2026-10-09 (user-approved, in the commit that carries this plan update))**:
+    - **Files**:
+      - `src/drift_engine/activity_logs.py`:
+        - new constants `ARM_CREDENTIAL_SCOPE`, `AUTH_REASONS` and the AADSTS allowlist;
+        - `QueryError.auth_reason`, with a validator requiring it exactly with `authentication_failed`, and a serializer that omits it when absent;
+        - `SourceError(..., auth_reason)`: defaults to `no_aadsts` for `authentication_failed` and is rejected with any other code;
+        - `_auth_reason()`: 401 gives `arm_rejected`; otherwise the AADSTS number is mapped through the allowlist;
+        - `pages()` passes the reason; `_run_scope` records it;
+        - `MonitorManagementClient(..., credential_scopes=[ARM_CREDENTIAL_SCOPE])`;
+        - module docstring updated.
+      - `scripts/investigation_analysis.sh`: `detail_codes` adds `auth_<reason>` counts (regex-bounded); header comment updated.
+      - `tests/test_activity_logs.py`: two tests in `AzureMonitorSourceTests`, plus the new classes `CachedAudienceCliTests` (2) and `AuthReasonTests` (4).
+      - `tests/test_investigation_workflow.py`: `test_detail_codes_count_the_auth_reason`.
+      - Docs: `docs/drift-detection-spec.md` (§8.3 status and credential) and `README.md` (investigation status and token).
+      - **Unchanged**: workflows, permissions, secrets, credentials, Azure resources and every G-decision.
+    - **Tests**:
+      - **Scope**: the recorded scope is exactly `https://management.core.windows.net//.default`; the request is still GET to `management.azure.com` on the Activity Log path.
+      - **Real `AzureCliCredential`** with a fake `az` on `PATH`: the only call is `account get-access-token --output json --resource https://management.core.windows.net/`.
+      - **CI failure reproduced on the real `collect_evidence` path**: the fake `az` serves only the login-cached resource and prints a realistic `AADSTS700024` error with synthetic GUIDs, a UPN, a trace ID and timestamps.
+        - With the old SDK scope: `authentication_failed` / `assertion_expired`, no HTTP request sent.
+        - With the fix: the scope is `complete`, with one request.
+        - None of the synthetic values, `AADSTS` or `700024` appears in the evidence or the logs.
+      - **Mapping**: `700024`, `70021`, `700213`, another number, 7 digits, too short, no number, and 401.
+      - **Validation rules**: `SourceError` and `QueryError` rules; auth reasons through the SDK source (credential errors and HTTP 401); no reason for 403 or 429.
+      - **Rendering**: without an authentication failure, every other query-failure code, a limit code and a complete scope render without `auth_reason`, with error keys exactly `{code, http_status}`. An authentication failure round-trips.
+      - **Script**: `investigation_detail` = `all_queries_failed=1,auth_arm_rejected=1,auth_assertion_expired=1,authentication_failed=3`. A non-code reason is ignored, and no secret appears in the output line or outputs.
+    - **Mutation check** (scratch copies, restored and byte-compared). Each mutation was caught:
+      - scope argument removed: 3 failing tests;
+      - reason always `no_aadsts`: 7;
+      - absent reason not omitted: 1;
+      - no 401 mapping: 2;
+      - script ignores the reason: 1.
+    - **Byte-identical rendering**: 14 evidence documents without an authentication failure (complete, page limit, and each other query-failure code) rendered with the committed code (temporary `git worktree` of HEAD, removed afterwards) and with the new code: identical SHA-256 for all 14.
+    - **Validation** (scratchpad venv, Python 3.13):
+      - full suite **2359 passed** (3,950 subtests), coverage 98.84%;
+      - `unittest discover -s tests`: 958 OK;
+      - `actionlint` 1.7.12: clean on all workflows;
+      - `shellcheck scripts/investigation_analysis.sh`: clean. (A wider `shellcheck scripts/*.sh` run reports one informational SC2329 in the unchanged `generate_plan_json.sh`: a false positive, since `on_exit` is invoked via `trap on_exit EXIT`.)
+      - `./scripts/validate.sh` passed.
+    - **Audience checks**: (a1) and (a2) passed (see the acceptance criterion).
+    - **Not done**:
+      - check (b), the drifted real CI proof, is pending. It needs a portal test tag (user action) and one approval-gated dispatch.
+  - **Diff review fixes (2026-10-09, user-approved: M1, L2, L3 fixed; L1 and I1 documented; committed and pushed to `main` 2026-10-09 (user-approved, in the commit that carries this plan update))**:
+    - **M1, credential error text on standard error**:
+      - **Finding**: azure-identity's `log_get_token` logs a failed request as `"%s failed: %s"` with the exception at WARNING. With no handler configured, Python's last-resort handler printed Azure CLI's raw error (tenant and client IDs, trace and correlation IDs, a UPN, timestamps) to standard error.
+        - In CI this landed only in the runner-only `investigation.log` (0700, never uploaded or printed); locally it reached the terminal.
+        - This predates the fix and is not introduced by it.
+      - **Fix** (`activity_logs.py`): `_RedactExceptionArguments`, installed idempotently by `_redact_azure_identity_logs()` on every `azure.identity` logger when the source builds its client.
+        - The record is kept: each exception argument becomes its type name and the traceback is dropped. Records without an exception argument are unchanged.
+        - No other logger is touched (`azure`, `azure.core`, `drift_engine` and application loggers are verified).
+        - `drift_engine`'s supported logging configurations (off, and `--log-level` text/json) attach no root handler; their own structured logs are unchanged.
+    - **L2**: `SourceError("authentication_failed", 401)` without an explicit reason now defaults to `arm_rejected`, consistent with `_auth_reason`. Only custom sources and fakes use the default.
+    - **L3**: `scripts/investigation_analysis.sh` counts `auth_<reason>` only for the five allowlisted reasons, instead of any `[a-z_]` string. A sync test asserts the script's list equals `AUTH_REASONS`.
+    - **L1, known compatibility limitation (documented; the strict model and `evidence_version: "2"` are unchanged by decision)**: an evidence file written before this change with an `authentication_failed` scope (no `auth_reason`) no longer satisfies the strict evidence model.
+      - `drift-engine attribute --evidence <old file>` treats it as invalid evidence, and post-run verification reports a contract failure.
+      - CI is unaffected (evidence is produced and consumed in the same run); only such locally saved files are.
+    - **I1, known limitation (documented; no credential redesign)**: a Resource Manager 401 carrying a CAE claims challenge makes the challenge policy request a token with claims. `AzureCliCredential` cannot satisfy that, so the query is reported as `credential_unavailable` without an `auth_reason`. This predates the fix (verified with a fake `az` and a 401 carrying an `insufficient_claims` challenge).
+    - **Tests added**:
+      - `CredentialErrorLogRedactionTests`:
+        - the real `drift-engine activity-logs` CLI in a subprocess, failing on a fake `az` that prints planted GUIDs, a UPN, trace IDs and timestamps, under logging off, `--log-level debug` text, and debug json;
+        - none of the planted values reaches stdout, stderr or the evidence;
+        - the redacted azure-identity record (`AzureCliCredential.get_token_info failed: ClientAuthenticationError`) is still present, and `drift_engine` debug logs still appear;
+        - an unrelated logger and an `azure.core` logger still print their full warning text;
+        - filter unit rules: idempotent, only `azure.identity` loggers, argument redaction, traceback dropped, success record unchanged.
+      - `test_source_error_rules` (L2).
+      - `test_detail_codes_count_the_auth_reason` with an unlisted `none` reason ignored, and `test_script_auth_reason_allowlist_matches_the_engine` (L3).
+    - **Mutation check** (restored and byte-compared). Each mutation was caught:
+      - filter not installed: 4 failing tests;
+      - filter drops records: 4;
+      - L2 default reverted: 1;
+      - script regex instead of the allowlist: 2.
+      - An unreachable branch for non-tuple record arguments was removed (`LogRecord` keeps positional arguments as a tuple); `activity_logs.py` coverage is 100%.
+    - **Validation** (scratchpad venv, Python 3.13):
+      - targeted tests 18 passed;
+      - full suite **2363 passed** (3,953 subtests), coverage 98.84%;
+      - `unittest discover -s tests`: 961 OK;
+      - `actionlint` clean; `shellcheck scripts/investigation_analysis.sh` clean; `./scripts/validate.sh` passed.
+      - **Evidence byte-equivalence** against HEAD (temporary `git worktree`, removed): 14 of 14 documents without an authentication failure identical.
+      - The scratchpad leak probe now shows no planted value on standard error.
+    - **Final focused review (2026-10-09)**:
+      - **Propagation verified**: Python applies the filters of the record's *originating* logger once in `Logger.handle`, before `callHandlers` walks the hierarchy. Every ancestor handler and `lastResort` therefore receives the already-redacted record.
+        - Probed in fresh processes: root handler at WARNING and at DEBUG (traceback attached), a DEBUG handler on `azure`, and a handler on the originating `azure.identity._internal.decorators` logger.
+        - Result: no planted `az` text, no traceback, and no `azure.identity` logger left without the filter after a token request.
+        - New regression test `test_redaction_holds_through_propagation_and_host_handlers` (4 setups). Mutation-checked: keeping the traceback fails the 3 DEBUG setups; not installing the filter fails all 4.
+      - **Rechecked**:
+        - the five `AUTH_REASONS` equal the model `Literal` and the script allowlist; the AADSTS map values are a subset; the longest detail code is 24 characters;
+        - HTTP 401 gives `arm_rejected`, a token-acquisition failure gives the AADSTS mapping, and 403/429 carry no reason (CAE 401: I1);
+        - CI routes the investigation's stderr only to the runner-only restricted log;
+        - evidence byte-equivalence against HEAD: 14 of 14 identical.
+      - **Finding N1 (fixed 2026-10-09, user-approved; see "N1 fix" below)**: when a host application enables DEBUG on `azure`/`azure.identity` (never done by drift-engine's supported logging configurations, whose effective level stays WARNING), azure-identity's *success* path logs a pre-formatted `[Authenticated account] Client ID … Tenant ID … User Principal Name … Object ID` record.
+        - It is built from the token's claims, so argument redaction cannot cover it.
+        - Probed with a planted JWT: `upn`, `tid`, `oid` and `appid` reached the host handler in all three DEBUG setups.
+        - `resolve_tenant`'s INFO records with tenant IDs are similar, but are not on this path (no tenant is passed).
+      - **Validation**:
+        - targeted tests 19 passed;
+        - full suite **2364 passed** (3,957 subtests), coverage 98.84% (`activity_logs.py` 100%);
+        - `unittest` 962 OK; `actionlint`, `shellcheck` and `validate.sh` clean.
+    - **N1 fix (2026-10-09, user-approved; committed and pushed to `main` 2026-10-09 (user-approved, in the commit that carries this plan update))**:
+      - **Change**: `_RedactExceptionArguments.filter` returns `False` for every record below WARNING. WARNING and ERROR records are kept with the existing redaction (exception arguments reduced to type names, traceback dropped).
+        - The filter is still installed only on `azure.identity` loggers; unrelated loggers, `azure.core` and `drift_engine` are unchanged.
+        - The spec's credential note is updated.
+      - **Tests**:
+        - `test_debug_account_details_never_reach_host_handlers`:
+          - a fake `az` returns a JWT with planted `appid` (client ID), `tid` (tenant ID), `upn` and `oid`;
+          - three DEBUG host setups: root DEBUG, a DEBUG handler on `azure`, a handler on the originating logger;
+          - none of the four values, no `[Authenticated account]` and no `get_token_info succeeded` reach stdout or stderr;
+          - the host's own unrelated DEBUG line and `azure.core` DEBUG/WARNING lines are still emitted, wherever that setup emits them.
+        - `test_filter_rules` gains DEBUG/INFO records dropped and an ERROR record redacted.
+        - The existing propagation, CLI and unrelated-logger tests still pass: the failure WARNING record is kept, redacted.
+      - **Mutation check** (restored and byte-compared). Each mutation was caught:
+        - no level drop: 4 failing tests;
+        - WARNING dropped too: 8;
+        - every record dropped: 8;
+        - filter installed on every logger: 1.
+      - **Probe** (scratchpad, fresh processes): with root handlers at WARNING and DEBUG, a DEBUG handler on `azure`, and a handler on the originating logger, on both the failure and the success path (planted JWT), no planted value leaks and no `azure.identity` logger is left unfiltered.
+      - **Validation**:
+        - targeted tests 18 passed;
+        - full suite **2365 passed** (3,960 subtests), coverage 98.84% (`activity_logs.py` 100%);
+        - `unittest` 963 OK; `actionlint`, `shellcheck scripts/investigation_analysis.sh` and `./scripts/validate.sh` clean.
+        - **Evidence byte-equivalence** against HEAD (temporary `git worktree`, removed): 14 of 14 identical.
+
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Prove the product requirement with real Azure evidence through CI. Then close Phase 9B and return Phases 6 and 7 to 🟢; Phase 10 resumes.
 - **Dependencies**: Task 9B.5 (and 9B.4A)
 - **Files/Areas**: `.artifacts/task-9B.6-ci-proof/` (gitignored; downloaded artifacts and local WHO output), `PROJECT_PLAN.md`, `README.md` (limitations)
 - **Acceptance Criteria**:
-  - [ ] **Primary scenario** (user actions, Execution Rule 10): the user adds a tag to `aitdd-dev-main-rg` in the Azure Portal and dispatches drift detection. A valid in-sync drift report within retention is required; the Task 9B.5 no-drift proof run serves as that anchor.
+  - [ ] **Primary scenario** (user actions, Execution Rule 10): the user adds a tag to `aitdd-dev-main-rg` in the Azure Portal and dispatches drift detection. A valid in-sync drift report within retention is required; the Task 9B.5 no-drift proof run serves as that anchor. **Amended (2026-10-09)**: the anchor is the latest no-drift run after the Task 9B.5 drifted proof and the user's tag removal (G9 picks the most recent in-sync report).
     - The drift run reports `external_drift` on `tags.<key>`, unaffected by the investigation.
     - **CI result (G18, added 2026-10-09)**: the drift run concludes **success**. Specifically:
       - `Generate Plan Evidence` records plan exit code `2`;

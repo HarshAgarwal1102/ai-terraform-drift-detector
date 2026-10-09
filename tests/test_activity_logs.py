@@ -13,6 +13,7 @@ callers and addresses below are synthetic.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import copy
 import datetime as dt
@@ -1514,6 +1515,358 @@ class AzureMonitorSourceTests(_Base):
         self.assertIn(CALLER, text)
         for marker in FORBIDDEN_MARKERS + ("fake-token-for-tests",):
             self.assertNotIn(marker, text)
+
+    # --- Task 9B.5: CI Activity Log authentication fix (Option A) and auth_reason
+
+    def test_requests_the_login_cached_arm_audience(self):
+        class RecordingCredential(FakeCredential):
+            def __init__(self):
+                super().__init__()
+                self.scopes = []
+
+            def get_token(self, *scopes, **kwargs):
+                self.scopes.append(scopes)
+                return super().get_token(*scopes, **kwargs)
+
+        credential = RecordingCredential()
+        self.pages(self.source([(200, {"value": [rest_event()]})], credential=credential))
+        self.assertEqual(al.ARM_CREDENTIAL_SCOPE, "https://management.core.windows.net//.default")
+        self.assertEqual(credential.scopes, [("https://management.core.windows.net//.default",)])
+        ((request, _),) = self.fake.requests  # the request target is unchanged
+        url = urlsplit(request.url)
+        self.assertEqual((request.method, url.scheme, url.hostname), ("GET", "https", "management.azure.com"))
+        self.assertEqual(url.path, f"/subscriptions/{SUB}/providers/Microsoft.Insights/eventtypes/management/values")
+
+    def test_authentication_failures_carry_a_fixed_reason(self):
+        expired = ClientAuthenticationError("ERROR: AADSTS700024: Client assertion is not within its valid time range.")
+        cases = [(FakeCredential(expired), "assertion_expired"),
+                 (FakeCredential(ClientAuthenticationError("expired")), "no_aadsts")]
+        for credential, reason in cases:
+            with self.subTest(reason), self.assertRaises(al.SourceError) as ctx:
+                self.pages(self.source([], credential=credential))
+            self.assertEqual((ctx.exception.code, ctx.exception.http_status, ctx.exception.auth_reason),
+                             ("authentication_failed", None, reason))
+        with self.assertRaises(al.SourceError) as ctx:
+            self.pages(self.source([(401, {"error": {"code": "InvalidAuthenticationToken", "message": "AADSTS700024"}})]))
+        self.assertEqual((ctx.exception.code, ctx.exception.http_status, ctx.exception.auth_reason),
+                         ("authentication_failed", 401, "arm_rejected"))
+        for status in (403, 429):  # other failures never carry a reason
+            with self.subTest(status), self.assertRaises(al.SourceError) as ctx:
+                self.pages(self.source([(status, {})] * 3))
+            self.assertIsNone(ctx.exception.auth_reason)
+
+
+# Synthetic values an Azure CLI error could print; none may leave the in-memory exception.
+AZ_STDERR_SECRETS = ("11111111-2222-4333-8444-555555555555", "66666666-7777-4888-9999-000000000000",
+                     "00000000-0000-4000-8000-0000000000aa", "00000000-0000-4000-8000-0000000000bb",
+                     "user@example.invalid", "08:14:48", "AADSTS", "700024", "Trace ID", "assertion valid from")
+FAKE_AZ = """#!/bin/sh
+# Stands in for Azure CLI after an OIDC login: only the resource cached at login is served;
+# any other resource needs the (expired) GitHub assertion and fails as Azure CLI does.
+printf '%s\\n' "$*" >> "$AZ_ARGS_LOG"
+if [ -z "${AZ_FAIL_ALL:-}" ] && [ "$*" = "account get-access-token --output json --resource https://management.core.windows.net/" ]; then
+  printf '{"accessToken": "%s", "expires_on": %s, "tokenType": "Bearer"}' "${AZ_TOKEN:-fake-token-for-tests}" "$AZ_EXPIRES_ON"
+  exit 0
+fi
+printf "ERROR: AADSTS700024: Client assertion is not within its valid time range. Current time: \\
+2026-10-07T08:14:48.0000000Z, assertion valid from 2026-10-07T08:03:59.0000000Z, expiry time of assertion \\
+2026-10-07T08:08:59.0000000Z. Trace ID: 11111111-2222-4333-8444-555555555555 Correlation ID: \\
+66666666-7777-4888-9999-000000000000 Timestamp: 2026-10-07 08:14:48Z tenant 00000000-0000-4000-8000-0000000000aa \\
+client 00000000-0000-4000-8000-0000000000bb user user@example.invalid\\nPlease run 'az login' to setup account.\\n" >&2
+exit 1
+"""
+
+
+@unittest.skipUnless(HAS_AZURE, "needs the 'azure' extra (pip install -e '.[azure]')")
+class CachedAudienceCliTests(_Base):
+    """Task 9B.5: the real AzureCliCredential and collect_evidence against a fake `az` that
+    reproduces the CI failure (no Azure, no network: the HTTP side is a fake transport)."""
+
+    def setUp(self):
+        super().setUp()
+        self.bin = os.path.join(self.tmp, "fake-az-bin")
+        os.makedirs(self.bin)
+        path = os.path.join(self.bin, "az")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(FAKE_AZ)
+        os.chmod(path, 0o755)
+        self.args_log = os.path.join(self.tmp, "az-args.log")
+        env = {"PATH": f"{self.bin}{os.pathsep}/usr/bin{os.pathsep}/bin", "AZ_ARGS_LOG": self.args_log,
+               "AZ_EXPIRES_ON": str(int(time.time()) + 3600)}
+        patcher = mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def az_calls(self):
+        with open(self.args_log, encoding="utf-8") as fh:
+            return fh.read().splitlines()
+
+    def source(self):
+        self.fake = FakeAzure([(200, {"value": [rest_event()]})])
+        session = requests.Session()
+        session.mount("https://", self.fake)
+        return al.AzureMonitorSource(transport=NoSleepTransport(session=session, session_owner=False))
+
+    def test_real_azure_cli_credential_requests_the_cached_resource(self):
+        pages = list(self.source().pages(SUB, AzureMonitorSourceTests.FILTER))
+        self.assertEqual(len(pages[0].events), 1)
+        self.assertEqual(self.az_calls(),
+                         ["account get-access-token --output json --resource https://management.core.windows.net/"])
+        self.assertNotIn("management.azure.com", "\n".join(self.az_calls()))
+
+    def test_ci_failure_reproduced_and_fixed_on_the_collection_path(self):
+        paths = bundle(self.tmp, "plan_evidence", "external_drift")
+        # before the fix: the SDK default scope misses the login cache -> expired assertion
+        with mock.patch.object(al, "ARM_CREDENTIAL_SCOPE", "https://management.azure.com/.default"), \
+                self.assertLogs("drift_engine", level="DEBUG") as logs:
+            before = collect(paths, self.source())
+        (scope,) = before.scopes
+        self.assertEqual((scope.status, scope.error.code, scope.error.http_status, scope.error.auth_reason),
+                         ("failed", "authentication_failed", None, "assertion_expired"))
+        self.assertEqual(self.fake.requests, [])  # no request was sent without a token
+        self.assertEqual(self.az_calls(), ["account get-access-token --output json --resource https://management.azure.com"])
+        text = al.render_evidence(before) + "\n".join(logs.output)
+        for secret in AZ_STDERR_SECRETS:
+            self.assertNotIn(secret, text)
+        self.assertEqual(json.loads(al.render_evidence(before))["scopes"][0]["error"],
+                         {"code": "authentication_failed", "http_status": None, "auth_reason": "assertion_expired"})
+        # after the fix: the login-cached audience is served from the cache
+        after = collect(paths, self.source())
+        self.assertEqual((after.outcome, after.scopes[0].status, after.scopes[0].error), ("complete", "complete", None))
+        self.assertEqual(len(self.fake.requests), 1)
+        self.assertEqual(self.az_calls()[-1],
+                         "account get-access-token --output json --resource https://management.core.windows.net/")
+
+
+@unittest.skipUnless(HAS_AZURE, "needs the 'azure' extra (pip install -e '.[azure]')")
+class AuthReasonTests(_Base):
+    """Task 9B.5: the sanitized authentication diagnostic."""
+
+    def test_mapping(self):
+        cases = [("AADSTS700024: Client assertion is not within its valid time range.", None, "assertion_expired"),
+                 ("AADSTS70021: No matching federated identity record found.", None, "federation_mismatch"),
+                 ("AADSTS700213: No matching federated identity record found for presented assertion subject.", None,
+                  "federation_mismatch"),
+                 ("AADSTS50079: due to a configuration change ...", None, "other_aadsts"),
+                 ("AADSTS7000241 (seven digits: not 700024)", None, "other_aadsts"),
+                 ("AADSTS1234 (too short)", None, "no_aadsts"),
+                 ("Failed to invoke Azure CLI", None, "no_aadsts"),
+                 ("AADSTS700024 in an ARM 401 body", 401, "arm_rejected")]
+        for message, status, reason in cases:
+            with self.subTest(message):
+                self.assertEqual(al._auth_reason(ClientAuthenticationError(message), status), reason)
+                self.assertIn(reason, al.AUTH_REASONS)
+
+    def test_source_error_rules(self):
+        self.assertEqual(al.SourceError("authentication_failed").auth_reason, "no_aadsts")
+        self.assertEqual(al.SourceError("authentication_failed", 401).auth_reason, "arm_rejected")  # as _auth_reason
+        self.assertEqual(al.SourceError("authentication_failed", 401, "arm_rejected").auth_reason, "arm_rejected")
+        self.assertIsNone(al.SourceError("throttled", 429).auth_reason)
+        for args in (("throttled", 429, "no_aadsts"), ("authentication_failed", None, "invented"),
+                     ("credential_unavailable", None, "no_aadsts")):
+            with self.subTest(args), self.assertRaises(ValueError):
+                al.SourceError(*args)
+
+    def test_model_requires_the_reason_with_authentication_failed_only(self):
+        good = {"code": "authentication_failed", "http_status": None, "auth_reason": "assertion_expired"}
+        self.assertEqual(al.QueryError.model_validate(good).auth_reason, "assertion_expired")
+        for bad in ({"code": "authentication_failed", "http_status": None},
+                    {"code": "authentication_failed", "http_status": None, "auth_reason": "invented"},
+                    {"code": "throttled", "http_status": 429, "auth_reason": "no_aadsts"},
+                    {"code": "deadline_exceeded", "http_status": None, "auth_reason": "no_aadsts"}):
+            with self.subTest(bad), self.assertRaises(ValidationError):
+                al.QueryError.model_validate(bad)
+
+    def test_rendering_is_unchanged_without_an_authentication_failure(self):
+        paths = bundle(self.tmp, "plan_evidence", "external_drift")
+        outcomes = [FakeSource({RG: [page(ev(1))]})]
+        outcomes += [FakeSource({RG: [al.SourceError(code, 429 if code == "throttled" else None)]})
+                     for code in al.QUERY_FAILURE_CODES if code != "authentication_failed"]
+        for source in outcomes:
+            text = al.render_evidence(collect(paths, source))
+            self.assertNotIn("auth_reason", text)
+            error = json.loads(text)["scopes"][0]["error"]
+            self.assertTrue(error is None or set(error) == {"code", "http_status"})
+        limited = collect(paths, FakeSource({RG: [page(ev(1), more=True)]}), limits=al.Limits(max_pages_per_scope=1))
+        self.assertEqual(json.loads(al.render_evidence(limited))["scopes"][0]["error"],
+                         {"code": "page_limit_exceeded", "http_status": None})
+        failed = collect(paths, FakeSource({RG: [al.SourceError("authentication_failed", None, "assertion_expired")]}))
+        self.assertEqual(al.ActivityLogEvidence.model_validate_json(al.render_evidence(failed)), failed)
+
+
+@unittest.skipUnless(HAS_AZURE, "needs the 'azure' extra (pip install -e '.[azure]')")
+class CredentialErrorLogRedactionTests(_Base):
+    """Task 9B.5 (review M1): azure-identity logs a failed get_token with the exception
+    text (Azure CLI stderr). Under the supported logging configurations, stderr must never
+    carry it; the record itself and unrelated logs stay."""
+
+    def setUp(self):
+        super().setUp()
+        self.bin = os.path.join(self.tmp, "fake-az-bin")
+        os.makedirs(self.bin)
+        with open(os.path.join(self.bin, "az"), "w", encoding="utf-8") as fh:
+            fh.write(FAKE_AZ)
+        os.chmod(os.path.join(self.bin, "az"), 0o755)
+
+    def run_python(self, *args, **extra_env):
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.path.dirname(sys.executable)}{os.pathsep}/usr/bin{os.pathsep}/bin",
+               "AZ_ARGS_LOG": os.path.join(self.tmp, "az-args.log"), "AZ_FAIL_ALL": "1",
+               "AZ_EXPIRES_ON": str(int(time.time()) + 3600), "HOME": self.tmp,
+               "PYTHONPATH": os.path.join(ROOT, "src"), "PYTHONDONTWRITEBYTECODE": "1", **extra_env}
+        return subprocess.run([sys.executable, *args], env=env, capture_output=True, text=True, timeout=120)
+
+    def assert_clean(self, *texts):
+        joined = "\n".join(texts)
+        for secret in AZ_STDERR_SECRETS:
+            self.assertNotIn(secret, joined)
+
+    def test_cli_stderr_never_carries_the_credential_error_text(self):
+        plan, manifest = bundle(self.tmp, "plan_evidence", "external_drift")
+        for options in ([], ["--log-level", "debug"], ["--log-level", "debug", "--log-format", "json"]):
+            with self.subTest(options=options):
+                output = os.path.join(self.tmp, f"evidence-{len(options)}.json")
+                proc = self.run_python("-m", "drift_engine.cli", "activity-logs", "--plan", plan,
+                                       "--manifest", manifest, "--output", output, *options)
+                with open(output, encoding="utf-8") as fh:
+                    evidence = json.load(fh)
+                self.assertEqual(evidence["scopes"][0]["error"],
+                                 {"code": "authentication_failed", "http_status": None, "auth_reason": "assertion_expired"})
+                self.assert_clean(proc.stdout, proc.stderr, json.dumps(evidence))
+                # the azure-identity record itself is kept, reduced to the exception type
+                self.assertIn("AzureCliCredential.get_token_info failed: ClientAuthenticationError", proc.stderr)
+                if options:  # drift_engine's own logs are not suppressed
+                    self.assertIn("activity_log_query_finished", proc.stderr)
+
+    def test_redaction_holds_through_propagation_and_host_handlers(self):
+        # The filter runs on the originating azure.identity logger before any handler, so the
+        # record every handler up the hierarchy (and lastResort) receives is already redacted.
+        setups = {
+            "root WARNING": "logging.basicConfig(level=logging.WARNING, stream=sys.stderr)",
+            "root DEBUG (failure traceback attached)": "logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)",
+            "handler on azure": ("h = logging.StreamHandler(sys.stderr); lg = logging.getLogger('azure'); "
+                                 "lg.addHandler(h); lg.setLevel(logging.DEBUG)"),
+            "handler on the originating logger": (
+                "import azure.identity; h = logging.StreamHandler(sys.stderr); "
+                "lg = logging.getLogger('azure.identity._internal.decorators'); lg.addHandler(h); lg.setLevel(logging.DEBUG)"),
+        }
+        for name, setup in setups.items():
+            with self.subTest(name):
+                program = textwrap.dedent(f"""
+                    import logging, sys
+                    {setup}
+                    sys.path.insert(0, {os.path.join(ROOT, "tests")!r})
+                    import test_activity_logs as t
+                    al = t.al
+                    try:
+                        list(al.AzureMonitorSource().pages(t.SUB, "x"))
+                    except al.SourceError as exc:
+                        print("code", exc.code, exc.auth_reason)
+                    print("unfiltered", sorted(n for n in logging.root.manager.loggerDict if n.startswith("azure.identity")
+                                               and al._REDACT_EXCEPTION_ARGUMENTS not in logging.getLogger(n).filters))
+                """)
+                proc = self.run_python("-c", program)
+                self.assertIn("code authentication_failed assertion_expired", proc.stdout)
+                self.assertIn("unfiltered []", proc.stdout)  # no azure.identity logger left without the filter
+                self.assert_clean(proc.stdout, proc.stderr)
+                self.assertIn("get_token_info failed: ClientAuthenticationError", proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
+
+    def test_debug_account_details_never_reach_host_handlers(self):
+        # azure-identity logs a successful token request at DEBUG with the token's claims
+        # pre-formatted ("[Authenticated account] Client ID ... Tenant ID ... UPN ... Object ID").
+        claims = {"appid": "00000000-0000-4000-8000-0000000000e1", "tid": "00000000-0000-4000-8000-0000000000e2",
+                  "upn": "planted.upn@example.invalid", "oid": "00000000-0000-4000-8000-0000000000e3"}
+        segment = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")  # noqa: E731
+        token = f"{segment({'alg': 'none'})}.{segment(claims)}.signature"
+        # (setup, lines the host configuration itself emits from other loggers: they must stay)
+        setups = {
+            "root DEBUG": ("logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)",
+                           ("unrelated debug kept", "azure core debug kept", "azure core warning kept")),
+            "handler on azure": (("h = logging.StreamHandler(sys.stderr); lg = logging.getLogger('azure'); "
+                                  "lg.addHandler(h); lg.setLevel(logging.DEBUG)"),
+                                 ("azure core debug kept", "azure core warning kept")),
+            "handler on the originating logger": (
+                ("import azure.identity; h = logging.StreamHandler(sys.stderr); "
+                 "lg = logging.getLogger('azure.identity._internal.decorators'); lg.addHandler(h); "
+                 "lg.setLevel(logging.DEBUG)"),
+                ("azure core warning kept",)),
+        }
+        for name, (setup, kept_lines) in setups.items():
+            with self.subTest(name):
+                program = textwrap.dedent(f"""
+                    import logging, sys
+                    {setup}
+                    sys.path.insert(0, {os.path.join(ROOT, "tests")!r})
+                    import requests
+                    import test_activity_logs as t
+                    al = t.al
+                    fake = t.FakeAzure([(200, {{"value": []}})])
+                    session = requests.Session(); session.mount("https://", fake)
+                    source = al.AzureMonitorSource(transport=t.NoSleepTransport(session=session, session_owner=False))
+                    print("pages", len(list(source.pages(t.SUB, "x"))))
+                    logging.getLogger("unrelated.app").debug("unrelated debug kept")
+                    logging.getLogger("azure.core.probe").debug("azure core debug kept")
+                    logging.getLogger("azure.core.probe").warning("azure core warning kept")
+                """)
+                proc = self.run_python("-c", program, AZ_FAIL_ALL="", AZ_TOKEN=token)
+                self.assertIn("pages 1", proc.stdout, proc.stderr[-500:])
+                for value in claims.values():
+                    self.assertNotIn(value, proc.stdout + proc.stderr)
+                self.assertNotIn("[Authenticated account]", proc.stderr)
+                self.assertNotIn("get_token_info succeeded", proc.stderr)  # azure.identity below WARNING: dropped
+                for kept in kept_lines:
+                    self.assertIn(kept, proc.stderr)
+
+    def test_unrelated_logs_are_not_suppressed(self):
+        program = textwrap.dedent(f"""
+            import logging, sys
+            sys.path.insert(0, {os.path.join(ROOT, "tests")!r})
+            import test_activity_logs as t
+            al = t.al
+            try:
+                list(al.AzureMonitorSource().pages(t.SUB, "x"))
+            except al.SourceError as exc:
+                print("code", exc.code, exc.auth_reason)
+            logging.getLogger("unrelated.app").warning("unrelated warning %s", ValueError("kept text 42"))
+            logging.getLogger("azure.core.anything").warning("azure core warning %s", ValueError("core text 43"))
+        """)
+        proc = self.run_python("-c", program)
+        self.assertIn("code authentication_failed assertion_expired", proc.stdout)
+        self.assert_clean(proc.stdout, proc.stderr)
+        self.assertIn("unrelated warning kept text 42", proc.stderr)
+        self.assertIn("azure core warning core text 43", proc.stderr)
+
+    def test_filter_rules(self):
+        al._redact_azure_identity_logs()
+        al._redact_azure_identity_logs()
+        decorators = logging.getLogger("azure.identity._internal.decorators")
+        self.assertEqual(decorators.filters.count(al._REDACT_EXCEPTION_ARGUMENTS), 1)  # idempotent
+        self.assertNotIn(al._REDACT_EXCEPTION_ARGUMENTS, logging.getLogger("azure").filters)
+        self.assertNotIn(al._REDACT_EXCEPTION_ARGUMENTS, logging.getLogger("drift_engine").filters)
+
+        def record(msg, args, exc_info=None):
+            return logging.LogRecord("azure.identity.x", logging.WARNING, __file__, 1, msg, args, exc_info)
+
+        error = ClientAuthenticationError("AADSTS700024 tenant 00000000-0000-4000-8000-0000000000aa")
+        r = record("%s failed: %s", ("AzureCliCredential.get_token_info", error))
+        self.assertTrue(al._REDACT_EXCEPTION_ARGUMENTS.filter(r))
+        self.assertEqual(r.getMessage(), "AzureCliCredential.get_token_info failed: ClientAuthenticationError")
+        try:
+            raise error
+        except ClientAuthenticationError:
+            r = record("failed: %s", (error,), sys.exc_info())
+        al._REDACT_EXCEPTION_ARGUMENTS.filter(r)
+        self.assertEqual((r.getMessage(), r.exc_info, r.exc_text), ("failed: ClientAuthenticationError", None, None))
+        r = record("%s succeeded", ("AzureCliCredential.get_token_info",))
+        self.assertTrue(al._REDACT_EXCEPTION_ARGUMENTS.filter(r))
+        self.assertEqual(r.getMessage(), "AzureCliCredential.get_token_info succeeded")  # WARNING, no exception: unchanged
+        for level in (logging.DEBUG, logging.INFO):  # below WARNING: dropped
+            low = logging.LogRecord("azure.identity.x", level, __file__, 1, "[Authenticated account] Tenant ID: %s",
+                                    ("00000000-0000-4000-8000-0000000000aa",), None)
+            self.assertFalse(al._REDACT_EXCEPTION_ARGUMENTS.filter(low))
+        error_record = logging.LogRecord("azure.identity.x", logging.ERROR, __file__, 1, "x %s", (ValueError("v"),), None)
+        self.assertTrue(al._REDACT_EXCEPTION_ARGUMENTS.filter(error_record))
+        self.assertEqual(error_record.getMessage(), "x ValueError")
 
 
 # ---------------------------------------------------------------------------

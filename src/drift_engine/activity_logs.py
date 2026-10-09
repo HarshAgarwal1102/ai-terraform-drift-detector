@@ -67,7 +67,8 @@ change a drift detection result: this module only reads the drift report.
 Azure access is confined to `AzureMonitorSource`, which imports the Azure SDK
 (`[azure]` extra: azure-mgmt-monitor, azure-identity) only when it is first asked
 for a page. It authenticates with `AzureCliCredential` only (the `az login` /
-azure/login OIDC session; never DefaultAzureCredential or a secret), sends GET
+azure/login OIDC session; never DefaultAzureCredential or a secret) for the Azure
+Resource Manager audience Azure CLI caches at login (Task 9B.5), sends GET
 requests to the Activity Log endpoint on management.azure.com only (every other
 request, redirect or nextLink is blocked before it is sent), and bounds retries,
 Retry-After waits and timeouts. Nothing else in drift_engine imports the SDK.
@@ -90,7 +91,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Protocol
 from urllib.parse import urlsplit
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_serializer, model_validator
 
 from drift_engine.classifier import Evaluation, evaluate
 from drift_engine.logs import log_event
@@ -133,6 +134,11 @@ LEVELS = ("Critical", "Error", "Informational", "Verbose", "Warning")
 
 ARM_HOST = "management.azure.com"
 ARM_ENDPOINT = f"https://{ARM_HOST}"
+# Task 9B.5: the Azure Resource Manager audience Azure CLI caches at `az login`
+# (`active_directory_resource_id`). The SDK default (`https://management.azure.com/.default`)
+# misses that cache, and in CI Azure CLI then re-sends the GitHub OIDC assertion, which
+# expires about 5 minutes after login. Requests still go to ARM_ENDPOINT only.
+ARM_CREDENTIAL_SCOPE = "https://management.core.windows.net//.default"
 # API version 2015-04-01, the only Activity Log version and the SDK's default.
 _ACTIVITY_LOG_PATH = "/subscriptions/{subscription_id}/providers/microsoft.insights/eventtypes/management/values"
 
@@ -154,6 +160,17 @@ QUERY_FAILURE_CODES = (
     "timeout",
 )
 LIMIT_CODES = ("deadline_exceeded", "event_limit_exceeded", "page_limit_exceeded")
+# Task 9B.5: why an `authentication_failed` query failed. Only the number after
+# "AADSTS" is matched from the exception text (in memory); the text itself is never kept.
+AUTH_REASONS = (
+    "arm_rejected",  # Azure Resource Manager answered HTTP 401
+    "assertion_expired",  # AADSTS700024: the client assertion is outside its validity window
+    "federation_mismatch",  # AADSTS70021 / AADSTS700213: no matching federated credential
+    "no_aadsts",  # the credential failed without an AADSTS number
+    "other_aadsts",  # any other AADSTS number
+)
+_AADSTS_REASONS = {"700024": "assertion_expired", "70021": "federation_mismatch", "700213": "federation_mismatch"}
+_AADSTS = re.compile(r"AADSTS(\d{5,7})(?!\d)")
 DROP_REASONS = (
     "conflicting_duplicate",  # the same eventDataId with different content: every copy dropped
     "duplicate",  # an identical repeat of an event already kept
@@ -434,6 +451,22 @@ class Failure(_Model):
 class QueryError(_Model):
     code: QueryFailureCode | LimitCode
     http_status: Annotated[int, Field(ge=100, le=599)] | None
+    # Task 9B.5: present with `authentication_failed` only, omitted from the rendering
+    # otherwise (documents without an authentication failure are unchanged)
+    auth_reason: Literal[AUTH_REASONS] | None = None
+
+    @model_validator(mode="after")
+    def _auth_reason_with_authentication_failed_only(self) -> QueryError:
+        if (self.code == "authentication_failed") != (self.auth_reason is not None):
+            raise ValueError("auth_reason is required with authentication_failed and forbidden otherwise")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_auth_reason(self, handler: Any) -> dict:
+        data = handler(self)
+        if data.get("auth_reason") is None:
+            data.pop("auth_reason", None)
+        return data
 
 
 class Scope(_Model):
@@ -817,12 +850,19 @@ def query_filter(window: Window, resource_group: str) -> str:
 class SourceError(Exception):
     """A query failed; `code` is one of QUERY_FAILURE_CODES."""
 
-    def __init__(self, code: str, http_status: int | None = None) -> None:
+    def __init__(self, code: str, http_status: int | None = None, auth_reason: str | None = None) -> None:
         if code not in QUERY_FAILURE_CODES:
             raise ValueError(f"unknown query failure code {code!r}")
+        if code == "authentication_failed":
+            auth_reason = auth_reason or ("arm_rejected" if http_status == 401 else "no_aadsts")
+            if auth_reason not in AUTH_REASONS:
+                raise ValueError(f"unknown auth reason {auth_reason!r}")
+        elif auth_reason is not None:
+            raise ValueError("auth_reason is only valid with authentication_failed")
         super().__init__(code)
         self.code = code
         self.http_status = http_status
+        self.auth_reason = auth_reason
 
 
 @dataclass(frozen=True)
@@ -1098,6 +1138,8 @@ def _run_scope(plan: _ScopePlan, source: ActivityLogSource, window: Window, limi
         return result
     except SourceError as exc:
         result.status, result.error = "failed", {"code": exc.code, "http_status": exc.http_status}
+        if exc.auth_reason is not None:
+            result.error["auth_reason"] = exc.auth_reason
         return result
     finally:
         close = getattr(pages, "close", None)
@@ -1463,6 +1505,56 @@ def _status(exc: Any) -> int | None:
     return status if type(status) is int and 100 <= status <= 599 else None
 
 
+def _auth_reason(exc: BaseException, http_status: int | None) -> str:
+    """The fixed AUTH_REASONS value for an `authentication_failed` exception. Only the
+    number after "AADSTS" is read from the exception text; the text is never kept."""
+    if http_status == 401:
+        return "arm_rejected"
+    match = _AADSTS.search(str(exc))
+    if match is None:
+        return "no_aadsts"
+    return _AADSTS_REASONS.get(match.group(1), "other_aadsts")
+
+
+class _RedactExceptionArguments(logging.Filter):
+    """Task 9B.5: two azure-identity records can expose identifiers.
+
+    - A failed `get_token` is logged at WARNING with the exception as an argument
+      ("AzureCliCredential.get_token_info failed: <exception>"). For AzureCliCredential that
+      text is Azure CLI's stderr: tenant and client IDs, trace and correlation IDs, a UPN,
+      timestamps. Such records are kept; each exception argument becomes its type name and any
+      traceback is dropped.
+    - A successful `get_token` is logged at DEBUG with the token's claims pre-formatted into
+      the message ("[Authenticated account] Client ID ... Tenant ID ... User Principal Name
+      ... Object ID"), which no argument redaction can reach. Every azure.identity record
+      below WARNING is therefore dropped (only when a host enables those levels do they exist).
+    Installed only on azure.identity loggers; no other logger is affected."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno < logging.WARNING:
+            return False
+        # LogRecord keeps positional arguments as a tuple (only a single mapping is unwrapped)
+        if isinstance(record.args, tuple) and any(isinstance(a, BaseException) for a in record.args):
+            record.args = tuple(type(a).__name__ if isinstance(a, BaseException) else a for a in record.args)
+        if record.exc_info:
+            record.exc_info, record.exc_text = None, None
+        return True
+
+
+_REDACT_EXCEPTION_ARGUMENTS = _RedactExceptionArguments()
+
+
+def _redact_azure_identity_logs() -> None:
+    """Install the redaction filter on every `azure.identity` logger (they are created when
+    the package is imported; logger filters are not inherited by child loggers). Idempotent;
+    other loggers are not touched."""
+    for name in list(logging.root.manager.loggerDict):
+        if name == "azure.identity" or name.startswith("azure.identity."):
+            identity_logger = logging.getLogger(name)
+            if _REDACT_EXCEPTION_ARGUMENTS not in identity_logger.filters:
+                identity_logger.addFilter(_REDACT_EXCEPTION_ARGUMENTS)
+
+
 class AzureMonitorSource:
     """ActivityLogSource backed by azure-mgmt-monitor (`[azure]` extra).
 
@@ -1489,11 +1581,13 @@ class AzureMonitorSource:
         if subscription_id in self._clients:
             return self._clients[subscription_id]
         try:
+            import azure.identity  # noqa: F401  (its loggers must exist for the redaction filter)
             from azure.core.pipeline.policies import RetryPolicy
             from azure.mgmt.monitor import MonitorManagementClient
             credential = self._get_credential()
         except ImportError:
             raise SourceError("azure_sdk_unavailable") from None
+        _redact_azure_identity_logs()
         settings = self._settings
 
         class BoundedRetryPolicy(RetryPolicy):
@@ -1514,7 +1608,8 @@ class AzureMonitorSource:
         }
         if self._transport is not None:
             kwargs["transport"] = self._transport
-        client = MonitorManagementClient(credential, subscription_id, base_url=ARM_ENDPOINT, **kwargs)
+        client = MonitorManagementClient(credential, subscription_id, base_url=ARM_ENDPOINT,
+                                         credential_scopes=[ARM_CREDENTIAL_SCOPE], **kwargs)
         self._clients[subscription_id] = client
         return client
 
@@ -1535,7 +1630,8 @@ class AzureMonitorSource:
                 events = tuple(_event_record(event) for event in page)
             except (AzureError, _BlockedRequest, TypeError, ValueError, AttributeError, KeyError) as exc:
                 code, http_status = _error_code(exc)
-                raise SourceError(code, http_status) from None
+                reason = _auth_reason(exc, http_status) if code == "authentication_failed" else None
+                raise SourceError(code, http_status, reason) from None
             next_link = pager.continuation_token
             yield Page(events, has_more=bool(next_link))
             if not next_link:

@@ -39,7 +39,8 @@
 #                              evidence_binding_failed | input_failed | investigate_usage |
 #                              investigate_internal_error | write_failed | timeout |
 #                              public_check_failed
-#   investigation_detail       counts by fixed Activity Log failure/limit code, or none
+#   investigation_detail       counts by fixed Activity Log failure/limit code and, for
+#                              authentication_failed, auth_<reason> (Task 9B.5), or none
 #   investigation_publishable  true only for a public file that passed the check
 #                              (succeeded, incomplete, or failed but bindable: decision 1)
 # -----------------------------------------------
@@ -80,6 +81,9 @@ for scope in doc.get("scopes") or []:
     code = (scope.get("error") or {}).get("code")
     if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,40}", code):
         codes[code] += 1
+    reason = (scope.get("error") or {}).get("auth_reason")  # Task 9B.5: drift_engine.activity_logs.AUTH_REASONS
+    if reason in ("arm_rejected", "assertion_expired", "federation_mismatch", "no_aadsts", "other_aadsts"):
+        codes[f"auth_{reason}"] += 1
 reason = (doc.get("failure") or {}).get("reason")
 if isinstance(reason, str) and re.fullmatch(r"[a-z_]{1,40}", reason):
     codes[reason] += 1

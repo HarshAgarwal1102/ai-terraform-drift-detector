@@ -595,8 +595,21 @@ pricing queries and its usage telemetry are the only accepted egress.
   anything is uploaded.
 - **Status**: the step always exits 0 (the second documented D5 exception) and records
   `investigation_status` (`succeeded` / `incomplete` / `failed`), a fixed `investigation_failure`
-  code, `investigation_detail` (counts by fixed Activity Log failure code only) and
-  `investigation_publishable`.
+  code, `investigation_detail` (counts by fixed Activity Log failure code only; an
+  `authentication_failed` scope also counts its fixed `auth_<reason>`: `assertion_expired`,
+  `federation_mismatch`, `other_aadsts`, `no_aadsts` or `arm_rejected`) and `investigation_publishable`.
+- **Credential** (Task 9B.5): `AzureCliCredential` only, asking for the Azure Resource Manager audience
+  Azure CLI caches at login (`https://management.core.windows.net//.default`); requests still go only
+  to the Activity Log endpoint on `management.azure.com`. The SDK default audience missed that cache,
+  so after the settle wait Azure CLI re-sent the expired GitHub OIDC assertion (runs #24/#25).
+  azure-identity's own log record of a failed token request is reduced to the exception type, so
+  Azure CLI's error text (tenant/client IDs, trace IDs, UPN) never reaches standard error; its
+  records below WARNING (including the DEBUG account details of a successful token request) are
+  dropped. No other logger is affected.
+  Known limitations: an evidence file written before this change with an `authentication_failed`
+  scope (no `auth_reason`) no longer satisfies the strict evidence model (evidence version stays 2);
+  a Resource Manager 401 carrying a CAE claims challenge is reported as `credential_unavailable`,
+  because `AzureCliCredential` cannot satisfy claims.
 - **Upload**: `drift-investigation-<run_id>` (public file only, 30 days; the second documented
   `continue-on-error` upload) when the result is publishable: succeeded, incomplete, or failed but
   bindable.

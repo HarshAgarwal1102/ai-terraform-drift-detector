@@ -475,7 +475,9 @@ The investigation never changes `drift_detected`, the drift report, issues, cost
   on the runner (0700). The public file carries caller *type*, client application and verdicts, never
   an identity; `drift-engine who` reproduces the recorded identity locally.
 - **Status**: `investigation_status` / `investigation_failure` / `investigation_detail` (fixed codes
-  and counts only).
+  and counts only; an authentication failure adds a fixed `auth_<reason>`, e.g. `auth_assertion_expired`).
+- **Azure token**: the Azure CLI session from the OIDC login, for the Resource Manager audience Azure CLI
+  cached at login, so the investigation still authenticates after its 10-minute settle wait.
   - An incomplete or failed-but-bindable investigation is still uploaded (the AI report then shows
     why).
   - The `investigation` job needs the investigation to be uploaded and to bind to the public drift

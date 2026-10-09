@@ -446,6 +446,33 @@ def test_detail_codes_come_from_the_runner_only_evidence(harness, scenarios):
     _assert_clean(proc, outputs, runner, True)
 
 
+def test_detail_codes_count_the_auth_reason(harness, scenarios):
+    # Task 9B.5: the fixed auth_reason of authentication_failed scopes; anything else is ignored
+    evidence = json.dumps({"scopes": [{"error": {"code": "authentication_failed", "http_status": None,
+                                                 "auth_reason": "assertion_expired"}},
+                                      {"error": {"code": "authentication_failed", "http_status": 401,
+                                                 "auth_reason": "arm_rejected"}},
+                                      {"error": {"code": "authentication_failed",
+                                                 "auth_reason": "AADSTS700024 user@example.invalid"}},
+                                      {"error": {"code": "authentication_failed", "auth_reason": "none"}}],
+                           "failure": {"stage": "query", "reason": "all_queries_failed"}})
+    proc, outputs, runner, _ = harness.run(scenarios["evidence_failed"], drift="false",
+                                           mode={"rc": 1, "public": scenarios["evidence_failed"][4],
+                                                 "evidence": evidence})
+    assert outputs["investigation_detail"] == ("all_queries_failed=1,auth_arm_rejected=1,auth_assertion_expired=1,"
+                                               "authentication_failed=4")  # unlisted reasons are ignored (review L3)
+    assert OUTPUT_LINE.fullmatch(proc.stdout.strip().splitlines()[-1])
+    for secret in ("AADSTS", "700024", "user@example.invalid"):
+        assert secret not in proc.stdout + proc.stderr + json.dumps(outputs)
+    _assert_clean(proc, outputs, runner, True)
+
+
+def test_script_auth_reason_allowlist_matches_the_engine():
+    from drift_engine.activity_logs import AUTH_REASONS
+    listed = re.search(r'if reason in \(([^)]*)\):', SCRIPT.read_text(encoding="utf-8")).group(1)
+    assert tuple(re.findall(r'"([a-z_]+)"', listed)) == AUTH_REASONS
+
+
 def test_timeout_is_bounded_in_the_script(harness, scenarios):
     proc, outputs, runner, _ = harness.run(scenarios["complete"], drift="false", mode={"rc": 0}, timeout_hit=True)
     assert (outputs["investigation_status"], outputs["investigation_failure"]) == ("failed", "timeout")
