@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete, committed together with 9B.4 and 9B.4A in `26aa3a9` (item 8). **2026-10-09: the CI result policy (Phase 9B G18, amends decision 1) is approved, implemented and validated locally; it is not yet committed.** Next: commit and push (user approval), then the approval-gated real CI proof). Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
+- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete, committed together with 9B.4 and 9B.4A in `26aa3a9` (item 8). **2026-10-09: the CI result policy (Phase 9B G18, amends decision 1) is implemented in `4ba7668` (pushed). The no-drift real CI proof run #28 (`37948472263`) passed. The artifact-content checks (download approval) remain.** The drift path is blocked for Task 9B.6: Activity Log `authentication_failed` in CI, see 9B.5 Completion Notes). Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
 - **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -2901,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally; the G18 CI result policy (2026-10-09) is implemented and validated locally, not yet committed; then the approval-gated real CI proof)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally; the G18 CI result policy is implemented in `4ba7668`; the no-drift real CI proof run #28 passed on 2026-10-09; the artifact-content checks remain)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -3778,7 +3778,7 @@ In addition:
     - (d) `drift-engine analyze` still prints `str(exc)` for an internal-contract violation (pre-existing Phase 4 behaviour, outside this task); projection errors print fixed codes only.
 
 #### Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows)
-- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05), committed with 9B.4 and 9B.4A in `26aa3a9` (item 8). The G18 CI result policy (user-approved 2026-10-09) is implemented and validated locally (2026-10-09), not yet committed. Next: commit and push (user approval), then the approval-gated real CI proof.
+- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05), committed with 9B.4 and 9B.4A in `26aa3a9` (item 8). The G18 CI result policy (user-approved 2026-10-09) is implemented in `4ba7668` (pushed 2026-10-09). The no-drift real CI proof run #28 (`37948472263`) passed every check made from the public run data. The artifact-content checks (item 7) remain, and need approval to download the artifacts. Stays 🔵 STARTED until they pass.
 - **Started**: 2026-10-05
 - **Objective**: Run the investigation in `plan-and-analyze` and publish `drift-investigation-<run_id>` (G10), add the `investigation` check job, and feed the public investigation into `ai-analysis.yml`. Detection, issues, report and cost results stay unchanged.
 - **Dependencies**: Task 9B.4A (and 9B.4); Task 10.1 (step order and D5 exception pattern); Task 9A.1 (binding conventions)
@@ -3866,6 +3866,13 @@ In addition:
       - `drift-report-<run_id>` contains only the public `drift_report.json` (with `public_version`) and `detection_run.json`, and no internal report is present in any artifact;
       - the issues and cost jobs pass on the public report;
       - the cost binding hash (`cost_run.json`), the public investigation's `binding.drift_report_sha256` and the AI report's `provenance.drift_report_sha256` all equal the canonical SHA-256 of the downloaded public drift report.
+    - **Result (2026-10-09, run #28 `37948472263`; details in Completion Notes)**:
+      - **Passed** (from the public run data): every part of the main criterion except the AI report's "no investigation claims", plus "the issues and cost jobs pass on the public report".
+      - **Still open**:
+        - the artifact-content checks of item 7: the file list, `public_version`, no internal report, and the three-way hash equality;
+        - the AI report's "no investigation claims".
+
+        These need the artifacts downloaded into `.artifacts/` (approval required). This item therefore stays unchecked.
 - **Implementation Notes**:
   - Starts with a design review (step and job names, the exact exit-code mapping, the anchor-fetch limits). Done 2026-10-05 (below).
   - **Pre-implementation review (2026-10-05, items 1–8 and decision 6 user-approved)**: recorded in the criteria above.
@@ -3925,10 +3932,10 @@ In addition:
     - `actionlint` (incl. shellcheck on every `run:` block) clean on both workflows; `shellcheck` clean on `scripts/investigation_analysis.sh`.
     - gitleaks: only the two pre-existing synthetic findings. None of the 41 identifier-like values of the local raw Activity Log capture appears in any change.
   - **Not done / limitations**:
-    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8; done in `26aa3a9`), the G18 change committed and pushed (implemented 2026-10-09, uncommitted), then one no-drift `workflow_dispatch` after the user removes any leftover test tag. Isolation and the hash equality across cost, investigation and AI are verified structurally and in executed steps, not yet on GitHub-hosted runners.
+    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8; done in `26aa3a9`), the G18 change committed and pushed (done in `4ba7668`), then one no-drift `workflow_dispatch` after the user removes any leftover test tag (done: run #28, see "Real CI proof" below; item 7 artifact-content checks still open). Isolation and the hash equality across cost, investigation and AI are verified structurally and in executed steps, not yet on GitHub-hosted runners.
     - (b) The Azure pins were resolved for CPython 3.12 linux x86_64 with pip's resolver report; locally they were installed and checked on 3.13. The CI exact-pin check is the 3.12 confirmation.
     - (c) The AI mutation corpus was not re-run (no `ai_engine` source changed in 9B.5).
-  - **G18 implementation (2026-10-09, local; not committed)**:
+  - **G18 implementation (2026-10-09; commit `4ba7668`, pushed; push-triggered `Phase 9 - Security Scan` `37944658696` and `Phase 2 - Terraform Azure Auth & Validation` `37944658966` both success)**:
     - **Files**:
       - `.github/workflows/drift-detection.yml`:
         - `Require Investigation Success` gains `DRIFT_DETECTED` env (`needs.plan-and-analyze.outputs.drift_detected`);
@@ -3979,6 +3986,50 @@ In addition:
       - G18 is not yet proven on GitHub-hosted runners;
       - the no-drift path is covered by the Task 9B.5 real CI proof, and the drift path by Task 9B.6;
       - the time-budget residual risk stays open until the 9B.6 drift run records job durations.
+  - **Real CI proof, no-drift run (2026-10-09, user-approved; dispatched by Claude through the signed-in in-app browser)**:
+    - **Pre-check (read-only, 2026-10-09)**:
+      - `aitdd-dev-main-rg` tags equal the configured `common_tags` exactly (`environment=dev`, `project=ai-terraform-drift-detector`, `managed_by=terraform`); no `owner` or other extra key. The VNet and NSG carry the same three tags; the NSG has 0 custom rules.
+      - The Activity Log shows user `tags/write` events on the group on 2026-10-04 11:04:58Z (the documented `owner` test) and 2026-10-07 13:54:08Z (most likely its removal; the log does not record values). No Azure change was made.
+    - **Run**: **#28**, id `37948472263`, <https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/37948472263>.
+      - `workflow_dispatch`, `main`, commit `4ba7668`, attempt 1, environment `dev`;
+      - 2026-10-09T15:00:38Z, total 1m 29s. **Conclusion: success.**
+    - **Jobs**: all **success**.
+      - Preflight 5s; Terraform Plan & Drift Analysis 58s; Drift Investigation 13s; Drift Issues 14s; Cost Estimate 7s; Report & Summary 3s.
+      - Annotations: Node.js 20 deprecation and Ubuntu 26 notices only; no error, no drift warning.
+    - **Report & Summary**:
+      - Result **VALID**, failed stage none, drift status **none**, `drift_detected` **`false`**;
+      - plan exit code `0`, classification `{"in_sync":5}`;
+      - backend initialised and validated; artifact `drift-report-37948472263`.
+    - **Drift Investigation** job summary:
+      - status `succeeded`, failure `none`, detail `none`;
+      - upload `success`, verification `success`;
+      - outcome `complete`, resources 0, verdicts none, anchors examined 0 / accepted 0 (no fetch on a no-drift run, as designed).
+    - **Drift Issues**: outcome ok, 0 created / updated / closed. **Cost Estimate**: 0 USD, run `github-37948472263-1`.
+    - **Artifacts** (Actions API, expire 2026-11-08):
+
+      | Artifact | Size | Digest |
+      | --- | --- | --- |
+      | `drift-report-37948472263` | 1,494 B | `sha256:10c3a82df4ec8d298859f9356983b5350c0c48e08dd1d6e9a625bd775960620f` |
+      | `drift-investigation-37948472263` | 680 B | `sha256:22a4c2863cd7719d473b206190b9bafd775d2b7c2581e7a155a524a0e756fb2a` |
+      | `infracost-report-37948472263` | 941 B | `sha256:c8b039d913e0f6196823d86dbb548244842ac280d374172671c0c45f98787d30` |
+
+    - **Triggered AI analysis**: run **#11**, id `37948669003` (<https://github.com/HarshAgarwal1102/ai-terraform-drift-detector/actions/runs/37948669003>), commit `4ba7668`. **Conclusion: success** (29s).
+      - Summary: source run `37948472263` attempt 1; resources 0; remediation options 0; AI sections analysed 0 of 6; investigation `complete`; LLM `none` / `not_attempted`.
+      - Artifact `ai-analysis-report-37948472263`: 3,937 B, `sha256:f578f6ff022c9f49cb3c907baa8c2e47bbeaf7fe1a96f4d80b7258b2eb7615c7`.
+    - **Not yet verified**: the artifact contents. That covers the file lists, `public_version`, no internal report, AI `report_version: "2"`, and the three-way `drift_report_sha256` equality. It needs approval to download the four artifacts into `.artifacts/task-9B.5-ci-proof/`.
+    - **Anchor for Task 9B.6**: this run's public in-sync drift report is retained until 2026-11-08.
+    - **Earlier scheduled runs on `26aa3a9`** (pre-G18 9B.5 code, read from public run data):
+      - #26 `37749098619` and #27 `37904551688` (2026-10-08 and 2026-10-09, no drift): all jobs success.
+      - #24 `37436291693` and #25 `37591269837` (2026-10-06 and 2026-10-07): real drift, while the `owner` test tag was still present.
+        - Detection, issues, cost and report all succeeded, with "Drift detected in dev (a valid result, not a pipeline failure)".
+        - Only the Drift Investigation job failed, on both runs: status `failed`, failure `evidence_failed` (from the annotations).
+        - #25's job summary also shows detail `all_queries_failed=1,authentication_failed=1`, upload and verification `success`, outcome `failed`, 1 resource `not_investigated`, anchors examined 24 / accepted 1. #24's summary was not read.
+        - Plan & Drift Analysis took 11m 3s on #25: the G8 settle wait ran before the Activity Log query.
+        - G18 keeps this case red (Q2: `failed` is a process error), and the drift result was unaffected, as designed.
+    - **Blocker for Task 9B.6 (open, not diagnosed)**: in CI, the Activity Log query fails authentication on a drifted run.
+      - Hypothesis, unverified: after the ~10-minute settle wait, the Azure CLI session from `azure/login` OIDC can no longer obtain a token (the federated client assertion has expired).
+      - Until this is resolved, the 9B.6 primary drift run would fail its G18 investigation criterion.
+      - Diagnosis and any fix need a design review and user approval; they are not part of this record.
 
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
 - **Status**: ⬜ NOT STARTED
