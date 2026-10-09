@@ -39,17 +39,28 @@ name: "Phase 5 - Drift Detection"
 #                     no id-token, no Azure, no secrets). Cost is informational: a
 #                     cost failure turns the run red but never changes
 #                     drift_detected, the drift report, issues or the report job.
-#   investigation     Task 9B.5: fails unless the drift investigation succeeded,
-#                     its upload succeeded and the downloaded public investigation
-#                     binds to the downloaded public drift report; counts-only
-#                     summary. Least privilege (contents: read; no id-token, no
-#                     Azure, no secrets). Never changes drift_detected, the drift
-#                     report or artifact, issues, cost or the report job.
+#   investigation     Task 9B.5 (G18): passes when the drift investigation
+#                     succeeded, or is incomplete (with a warning), and its upload
+#                     succeeded and the downloaded public investigation binds to the
+#                     downloaded public drift report; fails when it failed. It is
+#                     required only for a drifted run: one that never ran fails a
+#                     drifted run and passes a no-drift run. Counts-only summary.
+#                     Least privilege (contents: read; no id-token, no Azure, no
+#                     secrets). Never changes drift_detected, the drift report or
+#                     artifact, issues, cost or the report job.
 #   report            run summary, also after failures (reporting only).
 #
-# Job status reflects process validity only: detected drift is a valid result and
-# does not fail the job; any detection or classification failure does, and the
-# drift status of that run is UNKNOWN (never "no drift").
+# CI result policy (PROJECT_PLAN.md Phase 9B G18). Run status reflects process
+# validity only:
+#   no drift                -> success, drift_detected=false
+#   drift                   -> success, drift_detected=true; drift is a finding,
+#                              visible in the warning, summary, issues and report
+#   detection/process error -> failure, drift_detected=unknown (never "no drift")
+#   investigation incomplete -> success with a warning; investigation failed (or
+#                              required and never ran) -> the investigation job fails
+#   cost or issues failure  -> that job fails; drift_detected is unchanged
+# Terraform plan exit 2 means pending changes, not necessarily drift: the
+# classification decides drift, and exit 2 is never a failure or "unknown".
 #
 # Job outputs (Task 5.5), on plan-and-analyze and repeated on report (which also
 # yields "unknown" when plan-and-analyze never ran):
@@ -759,11 +770,14 @@ jobs:
   # Task 9B.5 (G10): makes the drift investigation's outcome visible. Runs for every
   # valid classification (literal "true" or "false"). It verifies the uploaded public
   # investigation against the downloaded PUBLIC drift report (item 3), writes a
-  # counts-only summary, and fails (Require Investigation Success, last so the summary
-  # still renders) unless the investigation succeeded, its upload succeeded and the
-  # verification passed (decision 1: an incomplete or failed-but-bindable
-  # investigation is uploaded and still fails here). drift_detected, the drift report
-  # and artifact, issues, cost and the report job are unaffected (report keeps
+  # counts-only summary, and then decides the job result (Require Investigation
+  # Success, last so the summary still renders; G18, which amends decision 1):
+  # succeeded passes; incomplete passes with a warning; failed (incl. an uploaded
+  # failed-but-bindable investigation) fails; a failed upload or verification fails.
+  # An investigation is required only for a drifted run: one that never ran fails
+  # when drift_detected is "true" and passes ("not required") when it is "false".
+  # drift_detected decides only that; drift itself never fails it. drift_detected,
+  # the drift report and artifact, issues, cost and the report job are unaffected (report keeps
   # needs: [preflight, plan-and-analyze]). Least privilege: contents: read only; no
   # id-token, no Azure, no secrets (same-run artifact downloads need no token).
   investigation:
@@ -851,19 +865,32 @@ jobs:
               print(f"| Artifact | `drift-investigation-{os.environ['GITHUB_RUN_ID']}` (30 days) |")
           PY
 
+      # G18: drift_detected is read only to decide whether an investigation was
+      # required (a drifted run); drift itself never fails this step.
       - name: Require Investigation Success
         if: ${{ !cancelled() }}
         env:
+          DRIFT_DETECTED: ${{ needs.plan-and-analyze.outputs.drift_detected }}
           INVESTIGATION_STATUS: ${{ needs.plan-and-analyze.outputs.investigation_status }}
           INVESTIGATION_FAILURE: ${{ needs.plan-and-analyze.outputs.investigation_failure }}
           INVESTIGATION_UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.investigation_upload_outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: |
           set -euo pipefail
-          if [ "${INVESTIGATION_STATUS}" != "succeeded" ]; then
-            echo "::error::Drift investigation did not succeed (status '${INVESTIGATION_STATUS:-not run}', failure '${INVESTIGATION_FAILURE:-n/a}'). Drift result unaffected."
+          if [ -z "${INVESTIGATION_STATUS}" ]; then
+            if [ "${DRIFT_DETECTED}" = "false" ]; then
+              printf '\nDrift investigation: not required: no drift.\n' >> "${GITHUB_STEP_SUMMARY}"
+              echo "Drift investigation did not run: not required: no drift."
+              exit 0
+            fi
+            echo "::error::Drift investigation is required for a drifted run but did not run. Drift result unaffected."
             exit 1
           fi
+          case "${INVESTIGATION_STATUS}" in
+            succeeded | incomplete) ;;
+            *) echo "::error::Drift investigation did not succeed (status '${INVESTIGATION_STATUS}', failure '${INVESTIGATION_FAILURE:-n/a}'). Drift result unaffected."
+               exit 1 ;;
+          esac
           if [ "${INVESTIGATION_UPLOAD_OUTCOME}" != "success" ]; then
             echo "::error::Drift investigation upload did not succeed (outcome '${INVESTIGATION_UPLOAD_OUTCOME:-n/a}'). Drift result unaffected."
             exit 1
@@ -872,7 +899,10 @@ jobs:
             echo "::error::The uploaded drift investigation failed verification against the public drift report. Drift result unaffected."
             exit 1
           fi
-          echo "investigation_status=succeeded, upload=success, verification=success"
+          if [ "${INVESTIGATION_STATUS}" = "incomplete" ]; then
+            echo "::warning::Drift investigation incomplete: some facts are not confirmed by available evidence (see the investigation summary). A finding, not a failure; drift result unaffected."
+          fi
+          echo "investigation_status=${INVESTIGATION_STATUS}, upload=success, verification=success"
 
   # Runs after failures too (not after cancellation) so every completed run
   # reports its result. It only reports: the run's red/green status comes from the

@@ -117,7 +117,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 - **LLM-independent detection**: Drift detection must work even when the LLM is unavailable.
 - **No autonomous apply**: AI must never directly execute destructive `terraform apply`. Remediation requires human approval.
 - **Security gates**: Security scan failures should fail the relevant CI/CD pipeline.
-- **Drift is a valid result**: "Drift detected" is a valid detection result and does not by itself mean the detection pipeline failed. Detection/process errors should fail appropriately.
+- **Drift is a valid result**: "Drift detected" is a valid detection result and does not by itself mean the detection pipeline failed. Detection/process errors should fail appropriately. The binding CI result policy for `drift-detection.yml` is Phase 9B **G18** (user-approved 2026-10-09).
 - **Real data only**: The final dashboard must use real project data/artifacts; no mock or fake metrics.
 
 ---
@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete; the approval-gated real CI proof is pending: commit and push 9B.4 + 9B.4A + 9B.5 together first, item 8). Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
+- **Current Active Task**: Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows) (🔵 started 2026-10-05; implementation and local validation complete, committed together with 9B.4 and 9B.4A in `26aa3a9` (item 8). **2026-10-09: the CI result policy (Phase 9B G18, amends decision 1) is approved, implemented and validated locally; it is not yet committed.** Next: commit and push (user approval), then the approval-gated real CI proof). Task 9B.4A completed 2026-10-05: do not push it to `main` without 9B.5's workflow wiring (9B.4A limitation (a); 9B.5 item 8). Task 9B.4 completed 2026-10-05; its open issue (e) is owned by Task 9B.4A. Task 9B.5 follows 9B.4A.
 - **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -2901,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally, awaiting the approval-gated real CI proof)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.4 and 9B.4A complete; Task 9B.5 started: implemented and validated locally; the G18 CI result policy (2026-10-09) is implemented and validated locally, not yet committed; then the approval-gated real CI proof)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -3092,11 +3092,11 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
       2. `Download Drift Investigation` (if the upload succeeded);
       3. `Verify Drift Investigation` (`investigation-check --public … --report <downloaded public drift report>`);
       4. `Investigation Summary` (counts only);
-      5. **`Require Investigation Success`** (last, so the summary still renders): it fails unless `investigation_status == succeeded`, `investigation_upload_outcome == success` and verification passed.
+      5. **`Require Investigation Success`** (last, so the summary still renders): it fails unless `investigation_status == succeeded`, `investigation_upload_outcome == success` and verification passed. **Amended (2026-10-09, G18)**: `investigation_status == incomplete` with a successful upload and verification also passes, with a `::warning::`. On a no-drift run (`drift_detected == 'false'`) an investigation that did not run passes (not required); on a drifted run it fails.
   - **Upload**: `drift-investigation-<run_id>` (public file only, 30 days; `if: investigation_publishable == 'true'`, `if-no-files-found: error`, `overwrite: true`) uses `continue-on-error: true` as a second documented exception. This amends Task 10.1 D5's "no other step may use `continue-on-error`".
   - **Job settings for `plan-and-analyze`**: permissions `id-token: write`, `contents: read`, `actions: read` (anchor lookup); timeout 30 → 45 min.
   - **Public drift report (amended 2026-10-05, P1/P3)**: `Upload Drift Report` uploads only the public drift report (Task 9B.4A) and `detection_run.json`. A failed projection or verification means `analyze` exit 70, UNKNOWN and no upload, never the internal report.
-  - **New `investigation` check job**: `contents: read` only, no Azure, no secrets. It downloads `drift-investigation-<run_id>` and `drift-report-<run_id>` and binds the investigation to the downloaded **public** drift report (amended 2026-10-05, Task 9B.5 item 3). It fails the run on any investigation failure, while `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are unaffected.
+  - **New `investigation` check job**: `contents: read` only, no Azure, no secrets. It downloads `drift-investigation-<run_id>` and `drift-report-<run_id>` and binds the investigation to the downloaded **public** drift report (amended 2026-10-05, Task 9B.5 item 3). It fails the run on any investigation failure, while `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are unaffected. **Amended (2026-10-09, G18)**: an `incomplete` investigation is a finding, not a failure.
   - **Logs and step summaries**: counts and fixed codes only.
 - **G11 — Public privacy profile** (every public artifact, workflow log, step summary and LLM input):
   - **Never**: caller identity in any form (UPN, name, object ID, app ID, hash), subscription/tenant IDs, ARM resource IDs, event/correlation/operation IDs, IP addresses, claims, HTTP request data, raw Activity Log content or free text (`description`, `properties.*`).
@@ -3177,6 +3177,38 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
   - `security-scan.yml`, `terraform-auth-test.yml`;
   - remediation command catalogue and approval/execution constants;
   - the no-autonomous-apply principle.
+- **G18 — CI result policy (user-approved 2026-10-09, Task 9B.5 design review Q1/Q2; deliberately amends decision 1 of 2026-10-05; revised and 🔒 LOCKED 2026-10-09 with the "investigation required" scope below. Changing G18 needs user approval, G1)**:
+  - **Principle**: drift detection is a successful finding, not a CI failure. The run's red/green status reflects process validity only. `drift_detected` comes from the classification alone. It is never derived from the run conclusion or from any job other than `plan-and-analyze`.
+  - **Terraform plan exit code 2** means *pending changes*, not necessarily drift (spec §4.2): a configuration-only or output-only change also exits 2, and converged drift exits 0. The classification (`drift-engine analyze`) alone decides drift. Exit 2 is never mapped to a failure or to `drift_detected=unknown`.
+  - **Result matrix** (`drift-detection.yml`):
+
+    | Case | `drift_detected` | Drift report artifact | Jobs | Run |
+    | --- | --- | --- | --- | --- |
+    | No drift: valid classification, `has_drift: false` (plan exit 0, or 2 for a config/output-only change) | `false` | uploaded | `plan-and-analyze`, `issues`, `cost`, `investigation`, `report` succeed | **success** |
+    | Drift: valid classification, `has_drift: true` (plan exit 2, or 0 for converged drift) | `true` | uploaded; drift visible (`::warning::`, `drift_status=detected`, run summary, issues, public report) | as above; `investigation` passes for `succeeded` or `incomplete` | **success** |
+    | Detection/process error: auth, init/validate, plan exit 1 or other, `show`, integrity gate, lock-file change, `analyze` ≠ 0, public projection failure, invalid report | `unknown` (never `false`) | not uploaded | `plan-and-analyze` fails; `issues`, `cost`, `investigation` skipped; `report` shows FAILED | **failure** |
+    | Investigation `incomplete` (some drifted resources `not_investigated`), upload and verification succeeded | unchanged | unchanged | `investigation` **succeeds with a `::warning::`** | success (unless another job fails) |
+    | No drift, investigation intentionally skipped (it did not run: empty `investigation_status` on a `drift_detected=false` run) | `false` | uploaded | `investigation` **succeeds** ("not required: no drift" in its summary) | success (unless another job fails) |
+    | Investigation `failed` (any failure code, including failed-but-bindable uploaded documents, on a drifted or a no-drift run), or it ran and its upload or verification failed (also for `incomplete`) | unchanged | unchanged | `investigation` **fails** | **failure** |
+    | Investigation required but never ran (empty `investigation_status` on a `drift_detected=true` run) | `true` (unchanged) | unchanged | `investigation` **fails** | **failure** |
+    | Cost failure (Phase 10 D5) or issues failure (Phase 8) | unchanged | unchanged | that job fails | **failure** |
+
+  - **Investigation required (revision 2026-10-09)**:
+    - An investigation is **required** only for a drifted run (`drift_detected` is the literal `true`). There it must run; if it never ran, the `investigation` job fails.
+    - For a no-drift run (`drift_detected` is the literal `false`), the investigation is **not required**. If it is skipped (did not run), the `investigation` job passes. If it does run, its result is judged by the same rows as on a drifted run (`succeeded` passes; `incomplete` passes with a warning; `failed`, or a failed upload or verification, fails), because a run that was started and failed is a process error.
+    - The current 9B.5 design still runs the investigation on no-drift runs (no anchor fetch, no Azure query, a `complete` document is uploaded), and the 9B.5 real CI proof verifies that path. The skip rule therefore covers an intentional skip, now or in a later design, and never needs a skip to happen.
+    - Why the skip rule cannot hide a failure in today's workflow: on a `'false'` run, `Drift Investigation` is skipped only when `Upload Drift Report` did not succeed, and that already fails `plan-and-analyze` and the run. A crash of the step script is mapped to `failed` / `script_error`, never to an empty status.
+    - `drift_detected=unknown`: the `investigation` job does not run at all; the run has already failed in detection.
+    - `Require Investigation Success` may read `drift_detected` **only** to decide whether an investigation was required. Drift (`'true'`) never by itself fails it, or any other job.
+  - **Separation**:
+    - An investigation outcome never changes `drift_detected`, `drift_status`, the drift report or artifact, `issues`, `cost` or `report`.
+    - A failed or missing investigation is never "no drift". The AI report shows `not_investigated` / `investigation_failed` for every drifted resource (D3).
+    - `ai-analysis.yml` stays a separate workflow and decides validity from the drift report artifact, not from the source run's conclusion (Task 9A.1 D3/D4).
+  - **Unchanged by G18**:
+    - `scripts/investigation_analysis.sh` and its status vocabulary: `incomplete` keeps the fixed code `investigation_failure=incomplete`, which no longer fails the job;
+    - the uploads and the publishable rule (decision 1's "uploaded unchanged");
+    - the drift, issues, cost and report jobs.
+  - **Owner**: Task 9B.5 (implementation and tests); real-run proof of the drift row in Task 9B.6.
 
 #### Data flow (target)
 
@@ -3193,7 +3225,7 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
    6. public projection (`investigate --public-output`);
    7. verification (projection ⊂ restricted ⊂ evidence) and leak scan, all before the public file is written.
 3. Upload `drift-investigation-<run_id>` (`drift_investigation.json`) when publishable (succeeded, incomplete, or failed but bindable; decision 1). Then the cost step (bound to the public drift report).
-4. `investigation` check job: downloads the public investigation and the public drift report, runs `investigation-check` against that report (amended 2026-10-05, Task 9B.5 item 3), and writes a counts-only summary. Before this, still in `plan-and-analyze`, `scripts/investigation_analysis.sh` has already checked the same binding against `${RUNNER_TEMP}/drift/drift_report.json` before upload (item 2).
+4. `investigation` check job: downloads the public investigation and the public drift report, runs `investigation-check` against that report (amended 2026-10-05, Task 9B.5 item 3), and writes a counts-only summary. It passes for `succeeded`, passes with a warning for `incomplete`, passes when no investigation ran on a no-drift run (not required), and fails otherwise (G18). Before this, still in `plan-and-analyze`, `scripts/investigation_analysis.sh` has already checked the same binding against `${RUNNER_TEMP}/drift/drift_report.json` before upload (item 2).
 5. `ai-analysis.yml` (`workflow_run`, no Azure):
    - downloads and binds the public drift report and the investigation;
    - runs AI engine v2: deterministic WHAT/WHEN/WHO/correlation, fallback narrative, recommendation policy, and LLM interpretation only when enabled (never in CI in Phase 9B);
@@ -3250,6 +3282,7 @@ The user adds a tag to the Terraform-managed `aitdd-dev-main-rg` in the Azure Po
 - **Recommendation**: `restore_declared` (R4) with the accept-remote note, approval required.
 
 In addition:
+- the drift run concludes **success** with `drift_detected=true` (G18);
 - the drift result is unchanged by the investigation;
 - the public files pass the leak scan;
 - `drift-engine who` locally reproduces the identity Azure recorded.
@@ -3745,14 +3778,14 @@ In addition:
     - (d) `drift-engine analyze` still prints `str(exc)` for an internal-contract violation (pre-existing Phase 4 behaviour, outside this task); projection errors print fixed codes only.
 
 #### Task 9B.5 — CI Integration (Drift Detection & AI Analysis Workflows)
-- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05); the approval-gated real CI proof is pending (needs the 9B.4 + 9B.4A + 9B.5 commit and push, item 8)
+- **Status**: 🔵 STARTED: implementation and local validation complete (2026-10-05), committed with 9B.4 and 9B.4A in `26aa3a9` (item 8). The G18 CI result policy (user-approved 2026-10-09) is implemented and validated locally (2026-10-09), not yet committed. Next: commit and push (user approval), then the approval-gated real CI proof.
 - **Started**: 2026-10-05
 - **Objective**: Run the investigation in `plan-and-analyze` and publish `drift-investigation-<run_id>` (G10), add the `investigation` check job, and feed the public investigation into `ai-analysis.yml`. Detection, issues, report and cost results stay unchanged.
 - **Dependencies**: Task 9B.4A (and 9B.4); Task 10.1 (step order and D5 exception pattern); Task 9A.1 (binding conventions)
 - **Files/Areas**: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`, new `ci/azure-constraints.txt`, new `scripts/investigation_analysis.sh` (orchestrates install check, anchor fetch, `investigate`, projection, check; fixed status codes; counts-only output), new `scripts/fetch_prior_drift_reports.py` (GitHub API, `actions: read`, G9 metadata and download into a runner directory; rules in G9 "Anchor fetch"); runner-only paths `${RUNNER_TEMP}/drift-internal/`, `${RUNNER_TEMP}/investigation/restricted/` (0700) and `${RUNNER_TEMP}/investigation-venv` (G10), new `tests/test_investigation_workflow.py`, `tests/test_infracost.py` (step order and exception list; amended 2026-10-05, item 5), `tests/test_ai_cli.py` (workflow structure; executed-step gate tests move to the public report); `README.md`, `docs/drift-detection-spec.md` (§8.3 and a new investigation section), `docs/architecture.md`
 - **Acceptance Criteria**:
   - [x] **Workflow structure**: steps after `Upload Drift Report` and before the cost step; separate pinned venv with an exact-pin check; outputs `investigation_status` / `investigation_failure` / `investigation_detail` / `investigation_publishable` / `investigation_upload_outcome` (amended 2026-10-05); the documented exit-0 capture; exactly two `continue-on-error` uploads in the workflow; `plan-and-analyze` permissions `id-token: write`, `contents: read`, `actions: read` and timeout 45; the `investigation` job (`contents: read`, no Azure or secrets) with `--check` and a counts-only summary. **Inputs (amended 2026-10-05, item 3)**: it downloads both `drift-investigation-<run_id>` and `drift-report-<run_id>`, and runs `drift-engine investigation-check --public <file> --report <downloaded public drift_report.json>` (binding against the downloaded public report).
-  - [x] **Isolation**: for every investigation failure (install, anchor fetch, Azure auth/authorization/throttling/timeout, correlation, projection, leak scan, upload), `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are identical to the same run with the investigation steps removed (artifact = the public drift report; amended 2026-10-05, item 4), and the `investigation` job fails.
+  - [x] **Isolation**: for every investigation failure (install, anchor fetch, Azure auth/authorization/throttling/timeout, correlation, projection, leak scan, upload), `drift_detected`, the drift report and artifact, `issues`, `report` and `cost` are identical to the same run with the investigation steps removed (artifact = the public drift report; amended 2026-10-05, item 4), and the `investigation` job fails. (An `incomplete` investigation is not a failure: G18.)
   - [x] **Investigation outcome mapping (user-approved 2026-10-05, decisions 1 and 2)**: `scripts/investigation_analysis.sh` always exits 0 and writes `investigation_status` / `investigation_failure` / `investigation_publishable`.
     - Required input file missing → `failed` / `inputs_missing` / false.
     - pip install fails / installed pins differ → `failed` / `install_failed` / `pin_mismatch` / false.
@@ -3765,8 +3798,25 @@ In addition:
     - Killed by `timeout` (124) → `failed` / `timeout` / false.
     - Public check fails (leak, contract, binding) → `failed` / `public_check_failed` / false.
     - **`investigation_detail`**: counts by fixed code only (e.g. `throttled=1`, `authorization_failed=1`), from the runner-only evidence's per-scope query-failure and limit codes. This is how authentication, authorization, throttling and timeouts become distinguishable without exposing values.
-    - **Decision 1**: an `incomplete` or failed-but-bindable investigation is uploaded unchanged. The public document keeps its own `outcome` and `failure` (stage/reason), so the AI report shows per-resource reasons or `investigation_failed` (D3). The `investigation` job still **fails**.
-  - [x] **`investigation` job result**: passes only when `investigation_status == succeeded`, `investigation_upload_outcome == success` and `Verify Drift Investigation` passes; fails in every other case, including an upload failure and decision 1's uploaded-but-not-succeeded cases.
+    - **Decision 1 (amended 2026-10-09, G18, user-approved)**: an `incomplete` or failed-but-bindable investigation is uploaded unchanged. The public document keeps its own `outcome` and `failure` (stage/reason), so the AI report shows per-resource reasons or `investigation_failed` (D3). The `investigation` job **passes with a warning** for `incomplete` and **fails** for failed-but-bindable. *(Original 2026-10-05 wording: "The `investigation` job still **fails**" for both. Superseded because `incomplete` only occurs when drift exists, so drift alone could turn the run red.)*
+  - [x] **`investigation` job result (amended 2026-10-09, G18)**:
+    - **passes** when `investigation_upload_outcome == success`, `Verify Drift Investigation` passes, and `investigation_status` is `succeeded`, or is `incomplete`. For `incomplete` it emits a `::warning::` (drift investigated; some facts not confirmed by available evidence);
+    - **passes** on a no-drift run (`drift_detected == 'false'`) when the investigation did not run (empty `investigation_status`: not required, intentionally skipped). The step itself writes "not required: no drift" to the step summary. Upload and verification are not checked because they did not run (revision 2026-10-09);
+    - **fails** in every other case:
+      - `failed` (including decision 1's uploaded failed-but-bindable case), on a drifted or a no-drift run;
+      - an empty status (never ran) on a drifted run (`drift_detected == 'true'`: investigation required);
+      - an upload failure, or a verification failure (also for `incomplete`).
+    - *(Original 2026-10-05 criterion, met and superseded: passes only for `succeeded`.)*
+  - [x] **CI result policy (G18, user-approved 2026-10-09)**: `drift-detection.yml` implements the G18 result matrix:
+    - no drift → success with `drift_detected=false`;
+    - drift → success with `drift_detected=true`, drift visible;
+    - detection/process error → failure with `unknown`;
+    - investigation `incomplete` → success with a warning; investigation `failed` → the `investigation` job fails;
+    - investigation required (drifted run) but never ran → the `investigation` job fails; not required (no-drift run) and skipped → it passes.
+    - No job condition or pass/fail step treats `drift_detected == 'true'`, `has_drift: true` or plan exit 2 as a failure.
+    - `Require Investigation Success` reads `drift_detected` only to decide whether an investigation was required, through a new `DRIFT_DETECTED` env from `needs.plan-and-analyze.outputs.drift_detected`. A `'true'` value never by itself fails it.
+    - The workflow header comments state the policy.
+    - Only `Require Investigation Success`, the workflow comments, the tests and the documentation change. The scripts, outputs, uploads and the other jobs stay as they are.
   - [x] **AI workflow drift report gate (decision 6, user-approved 2026-10-05)**: the `ai-analysis.yml` gate validates the public drift report contract.
     - A valid public report with `outcome: failed` → UNKNOWN, no AI analysis, no artifact (job succeeds, as today).
     - A present report that is invalid or not the public contract (e.g. an internal-format report) → the CI job **fails**, with no result artifact (a wiring/privacy violation, not a detection result).
@@ -3788,13 +3838,30 @@ In addition:
   - [x] Workflow-structure tests and executed-step tests (runner-realistic, as in Task 10.1).
   - [x] Synthetic gate tests for every failure code and the missing/invalid investigation paths.
   - [x] Executed-step tests (amended 2026-10-05) for:
-    - every row of the investigation outcome mapping, incl. decision 1 (uploaded, job fails) and decision 2 (no `investigate` after a failed fetch);
+    - every row of the investigation outcome mapping, incl. decision 1 (uploaded, job fails; amended by G18 for `incomplete`, see the G18 tests below) and decision 2 (no `investigate` after a failed fetch);
     - the anchor-fetch filters, limits, size caps and per-candidate failures (fake GitHub API);
     - the no-drift path skipping the fetch;
     - the `investigation` job's pass/fail condition;
     - the absence of any step-level timeout on `Drift Investigation`.
   - [x] Pin closure test for `ci/azure-constraints.txt`.
-  - [ ] Real CI proof (approval-gated): one no-drift `workflow_dispatch`. Before it, the user removes any leftover test tag from `aitdd-dev-main-rg` (e.g. `owner` from the 2026-10-04 test), so the resource group is in sync; this run later serves as the Task 9B.6 anchor. The investigation step runs with no Azure query, the artifact is present, the `investigation` job passes, and the AI report v2 shows no drifted resources and no investigation claims.
+  - [x] **G18 tests (2026-10-09)** (results in Completion Notes, "G18 implementation"):
+    - `Require Investigation Success` matrix:
+      - `incomplete` + upload success + verification success → passes and prints the `::warning::`;
+      - `incomplete` with a failed upload, or with a failed verification → fails;
+      - `succeeded` → passes; `failed` → fails, with `drift_detected` `'true'` and `'false'` (unchanged rows);
+      - an empty status with `drift_detected='true'` → fails (required, never ran);
+      - an empty status with `drift_detected='false'` (upload and verification `skipped`) → passes, with "not required: no drift" in the summary;
+      - `drift_detected='true'` with `succeeded` and success everywhere → passes, so drift alone never fails the step.
+    - Executed-step test of `Generate Plan Evidence`, with a fake `scripts/generate_plan_json.sh` that writes the manifest:
+      - plan exit 0 and plan exit 2 with `outcome: succeeded` → the step exits 0 and passes `plan_exit_code` through;
+      - script exit 1 with a failed manifest, script exit 64 (stale manifest ignored), an unexpected `plan_exit_code` with script exit 0, or a modified lock file → the step fails, and `Analyze Drift` (when it runs) yields `unknown`.
+      - Until now this was covered only by the uncommitted Phase 5 harness.
+    - Structural guard:
+      - no job `if:` and no pass/fail step treats `drift_detected == 'true'`, `has_drift` true or plan exit 2 as a failure;
+      - `Require Investigation Success` uses `drift_detected` only in the required/not-required decision (no failure branch keyed on `'true'` alone);
+      - `issues`, `cost` and `investigation` run for both `'true'` and `'false'`.
+    - Full suite, `actionlint` + shellcheck and `./scripts/validate.sh` pass.
+  - [ ] Real CI proof (approval-gated, on the G18 implementation): one no-drift `workflow_dispatch`. Before it, the user removes any leftover test tag from `aitdd-dev-main-rg` (e.g. `owner` from the 2026-10-04 test), so the resource group is in sync; this run later serves as the Task 9B.6 anchor. The investigation step runs with no Azure query, the artifact is present, the `investigation` job passes, and the AI report v2 shows no drifted resources and no investigation claims.
     - **Also verified (amended 2026-10-05, item 7)**:
       - `drift-report-<run_id>` contains only the public `drift_report.json` (with `public_version`) and `detection_run.json`, and no internal report is present in any artifact;
       - the issues and cost jobs pass on the public report;
@@ -3806,6 +3873,25 @@ In addition:
     - **Scope**: the existing Phase 5 diagnostic-log exposure (`plan.log` tail, `az account show`) is out of 9B.5's scope and recorded as a Phase 12 known limitation. 9B.5's hygiene criterion covers the steps 9B.5 adds or changes.
     - Unchanged by design: the issues job and `scripts/github_automation.py`, the cost job and the `Infracost Cost Estimate` report path, the `report` job, the AI CLI and the investigation binding code.
   - **Design review (2026-10-05, user-approved: decisions 1 and 2 and the remaining design)**: job/step boundaries and names, runner isolation and time bounds (G10); anchor fetch (G9); the outcome mapping and the `investigation` job result (criteria above); upload sequencing (upload drift report → investigation → upload investigation if publishable → cost, unchanged and independent of the investigation); the AI gate (decision 6); the D5 always-exit-0 pattern with a final `Require Investigation Success` step.
+  - **CI result policy review (2026-10-09, user-approved Q1/Q2 → G18)**. The requirement reviewed: "drift detection is a successful finding, not a CI failure".
+    - **Already satisfied, no change**:
+      - the plan script accepts plan exit `0 | 2`, and the evidence step accepts both;
+      - `drift-engine analyze` exits 0 for drift and for no drift;
+      - `Analyze Drift` writes `drift_detected=true` with a `::warning::` and exits 0;
+      - the drift report is uploaded for drift;
+      - `issues`, `cost` and `investigation` run for both `'true'` and `'false'`;
+      - process errors give `unknown` and fail the run;
+      - the investigation never changes `drift_detected`;
+      - a missing or failed investigation gives `not_investigated` / `investigation_failed` in the AI report, never "no drift";
+      - `ai-analysis.yml` is gated on the artifact, not the source run's conclusion.
+    - **Gap**: `Require Investigation Success` failed on `incomplete`. `incomplete` (some drifted resource `not_investigated`) can only occur when drift exists: a no-drift run has no drifted resources and is always `complete`. So a drift finding alone could turn the run red. Resolved by amending decision 1 (G18).
+    - **Kept red by decision (Q2)**: an investigation `failed` outcome, including anchor-fetch and Activity Log query failures. They also occur only on drifted runs, but they are process errors of the investigation concern. They never touch `drift_detected` or the drift artifact.
+    - **Revision (2026-10-09, user clarification; G18 locked)**: "never ran" fails the `investigation` job only when the investigation was required, which means a drifted run. A no-drift run with no investigation passes. The current design still runs the investigation on no-drift runs, so this rule only guarantees that an intentional skip can never turn a no-drift run red. `Require Investigation Success` reads `drift_detected` for this decision only.
+    - **Test gap**: no committed test executed the `Generate Plan Evidence` step block with plan exit 2 (only the uncommitted Phase 5 harness did). Closed by the G18 tests.
+    - **Not changed (residual risk, recorded)**: the time budget stays as approved in G10 (fetch 300 s, `investigate` 1500 s, `plan-and-analyze` 45 min).
+      - On a drifted run, the worst case of these bounds plus the other steps comes close to the job limit.
+      - A job timeout would fail `plan-and-analyze` itself.
+      - The real drift run of Task 9B.6 records the actual durations.
 - **Completion Notes** (implementation and local validation, 2026-10-05; real CI proof pending):
   - **Files**:
     - workflows: `.github/workflows/drift-detection.yml`, `.github/workflows/ai-analysis.yml`;
@@ -3839,9 +3925,60 @@ In addition:
     - `actionlint` (incl. shellcheck on every `run:` block) clean on both workflows; `shellcheck` clean on `scripts/investigation_analysis.sh`.
     - gitleaks: only the two pre-existing synthetic findings. None of the 41 identifier-like values of the local raw Activity Log capture appears in any change.
   - **Not done / limitations**:
-    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8), then one no-drift `workflow_dispatch` after the user removes any leftover test tag. Isolation and the hash equality across cost, investigation and AI are verified structurally and in executed steps, not yet on GitHub-hosted runners.
+    - (a) **Real CI proof pending** (approval-gated). It needs 9B.4, 9B.4A and 9B.5 committed and pushed together (item 8; done in `26aa3a9`), the G18 change committed and pushed (implemented 2026-10-09, uncommitted), then one no-drift `workflow_dispatch` after the user removes any leftover test tag. Isolation and the hash equality across cost, investigation and AI are verified structurally and in executed steps, not yet on GitHub-hosted runners.
     - (b) The Azure pins were resolved for CPython 3.12 linux x86_64 with pip's resolver report; locally they were installed and checked on 3.13. The CI exact-pin check is the 3.12 confirmation.
     - (c) The AI mutation corpus was not re-run (no `ai_engine` source changed in 9B.5).
+  - **G18 implementation (2026-10-09, local; not committed)**:
+    - **Files**:
+      - `.github/workflows/drift-detection.yml`:
+        - `Require Investigation Success` gains `DRIFT_DETECTED` env (`needs.plan-and-analyze.outputs.drift_detected`);
+        - an empty status passes only when `DRIFT_DETECTED` is the literal `false`. The step then appends "Drift investigation: not required: no drift." to the step summary. Otherwise it fails with `::error::`;
+        - `succeeded | incomplete` continue to the existing upload and verification checks;
+        - `incomplete` then prints a `::warning::`;
+        - every other status fails;
+        - the workflow header and the `investigation` job comments state the G18 policy.
+
+        No other step, condition, output, upload, script or job changed.
+      - `tests/test_investigation_workflow.py`: 54 → 87 tests.
+      - Docs: `README.md` and `docs/drift-detection-spec.md` §8.3 (policy wording, reviewed against the implementation: consistent). `docs/architecture.md` needed no change.
+    - **Tests added or changed** (executed workflow `run:` blocks, as in the rest of the file):
+      - **`Require Investigation Success` matrix (16 cases)**:
+        - `succeeded`: passes with `true` and `false`; fails on an upload or verification failure;
+        - `incomplete`: passes with exactly one `::warning::` only when uploaded and verified, else fails;
+        - `failed`: fails with `true` and `false`, uploaded or not;
+        - never ran: fails with `true`; passes with `false`, and the summary says "not required: no drift";
+        - `unknown` or empty `drift_detected`: fails closed;
+        - every failure prints `::error::` and "Drift result unaffected.".
+      - **Drift independence (8 cases)**: for every status that ran, the result is identical for `drift_detected` `true` and `false`.
+      - **`Generate Plan Evidence` executed** (fake `generate_plan_json.sh` in a temporary git repo, real `jq`/`git`), chained into the real `Analyze Drift`. Plan exit 0/2 → step exit 0, `plan_exit_code` passed through, no `::error::`. The classification decides drift:
+        - `in_sync` (0) → `false`; `converged_drift` (0) → `true`;
+        - `external_drift` (2) and `external_deletion` (2) → `true`, with the drift `::warning::`;
+        - `config_change` (2) and `output_only_change` (2) → `false`.
+      - **Evidence failures (5 cases)**: plan failed (script 1, failed manifest), unusable `ARTIFACT_DIR` (64, stale manifest ignored: `manifest_present=false`, job output falls back to `unknown`), unexpected `plan_exit_code` 3, provider lock modified, non-dev var file. Each fails the step with "Drift status: UNKNOWN."; where `Analyze Drift` runs afterwards it yields `drift_detected=unknown` and fails.
+      - **Structural guard**:
+        - every job or step `if:` that reads `drift_detected` accepts both `'true'` and `'false'`. These are exactly `Drift Investigation`, `Infracost Cost Estimate`, `issues`, `cost` and `investigation`;
+        - no `if:` reads `has_drift`, `drift_status` or `plan_exit_code`;
+        - the steps that read the drift result or plan exit code are exactly six, each executed by a test showing drift alone never fails it: `Generate Plan Evidence`, `Analyze Drift`, `Drift Investigation`, `Manage Drift Issues` (Phase 8 tests), `Require Investigation Success` and `Run Summary`.
+      - **`Run Summary` executed**: `drift_detected` `true` and `false` with plan exit 2 → Result **VALID**, exit 0. A failed stage → "FAILED - drift status UNKNOWN", `drift_detected` `unknown`, still exit 0 (reporting only).
+    - **Mutation check** (scratch copies of the workflow, restored and byte-compared afterwards). Each mutation was caught by the new tests:
+      - `incomplete` fails again: 1 failing test;
+      - the no-drift skip removed: 2;
+      - `Analyze Drift` exits 1 on drift: 3;
+      - plan exit 2 rejected by the evidence step: 4;
+      - `issues` gated on `'true'` only: 1;
+      - a missing investigation passes on a drifted run: 5.
+    - **Validation** (scratchpad venv, Python 3.13, `.[dev,ai,azure]` with both constraint files):
+      - `tests/test_investigation_workflow.py`: **87 passed**;
+      - full suite: **2350 passed** (3,931 subtests); coverage 98.84% (gate 85%);
+      - `unittest discover -s tests`: 950 OK;
+      - `actionlint` 1.7.12 with shellcheck 0.11.0: clean on `drift-detection.yml` and `ai-analysis.yml`;
+      - `shellcheck` clean on `scripts/investigation_analysis.sh` (unchanged);
+      - `check-jsonschema` (GitHub workflow schema) OK;
+      - `./scripts/validate.sh` (Terraform 1.14.7) passed.
+    - **Not done**:
+      - G18 is not yet proven on GitHub-hosted runners;
+      - the no-drift path is covered by the Task 9B.5 real CI proof, and the drift path by Task 9B.6;
+      - the time-budget residual risk stays open until the 9B.6 drift run records job durations.
 
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
 - **Status**: ⬜ NOT STARTED
@@ -3851,9 +3988,17 @@ In addition:
 - **Acceptance Criteria**:
   - [ ] **Primary scenario** (user actions, Execution Rule 10): the user adds a tag to `aitdd-dev-main-rg` in the Azure Portal and dispatches drift detection. A valid in-sync drift report within retention is required; the Task 9B.5 no-drift proof run serves as that anchor.
     - The drift run reports `external_drift` on `tags.<key>`, unaffected by the investigation.
+    - **CI result (G18, added 2026-10-09)**: the drift run concludes **success**. Specifically:
+      - `Generate Plan Evidence` records plan exit code `2`;
+      - `drift_detected=true` and `drift_status=detected`;
+      - `drift-report-<run_id>` is uploaded with `has_drift: true`;
+      - `plan-and-analyze`, `issues` (drift issue created or updated), `cost`, `investigation` and `report` (Result VALID) all succeed;
+      - the `investigation` job passes with `investigation_status` `succeeded` (`complete`), or `incomplete` with the `::warning::`, with upload and verification successful. Any other investigation result fails this criterion;
+      - the triggered `ai-analysis` run succeeds;
+      - job durations are recorded (G18 time-budget note).
     - The public AI report v2 meets every item of "Phase 9B end-to-end acceptance": WHAT; operation `Microsoft.Resources/tags/write` Succeeded; WHEN matching the Azure record to the second; WHO type `user`, client `azure_portal`, `pipeline_identity: false`, identity withheld; actor attribution not confirmed; verdict `sole_capable_operation`; property link `inferred_not_provable`; completeness; deterministic narrative; recommendation `restore_declared` with the accept-remote note and approval required.
-  - [ ] **Control A**: a second portal tag change on the same resource group, then dispatch → `ambiguous` (two capable operations since the anchor).
-  - [ ] **Control B**: the user removes the test tags (portal), then dispatch → no drift and no investigation claims; the AI report v2 has no drifted resources.
+  - [ ] **Control A**: a second portal tag change on the same resource group, then dispatch → `ambiguous` (two capable operations since the anchor). The run concludes **success** with `drift_detected=true` (G18).
+  - [ ] **Control B**: the user removes the test tags (portal), then dispatch → no drift and no investigation claims; the AI report v2 has no drifted resources. The run concludes **success** with `drift_detected=false` (G18).
   - [ ] **Leak scan** (amended 2026-10-05, P2): every downloaded public artifact (`drift-report`, `drift-investigation`, `ai-analysis-report`) contains:
     - no UPN, email or other caller identity; no GUID; no `/subscriptions/` or `/providers/` path or other ARM/resource ID; no Activity Log or caller IP address;
     - the public investigation also passes its full G11 leak scan;

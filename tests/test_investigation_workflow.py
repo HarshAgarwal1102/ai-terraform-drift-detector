@@ -779,19 +779,54 @@ def _job_step(wf, name, tmp_path, env):
     return proc, gh_summary.read_text()
 
 
-@pytest.mark.parametrize("status, upload, verify, ok", [
-    ("succeeded", "success", "success", True),
-    ("incomplete", "success", "success", False),  # decision 1: uploaded, still a failure
-    ("failed", "success", "success", False),
-    ("succeeded", "failure", "skipped", False),
-    ("succeeded", "success", "failure", False),
-    ("", "", "", False),  # the investigation never ran
+def _require(wf, tmp_path, drift, status, upload, verify):
+    return _job_step(wf, "Require Investigation Success", tmp_path, {
+        "DRIFT_DETECTED": drift, "INVESTIGATION_STATUS": status, "INVESTIGATION_FAILURE": "x",
+        "INVESTIGATION_UPLOAD_OUTCOME": upload, "VERIFY_OUTCOME": verify})
+
+
+# G18 (PROJECT_PLAN.md Phase 9B, amends decision 1): the four status cases, on drifted and no-drift runs.
+@pytest.mark.parametrize("drift, status, upload, verify, ok", [
+    # succeeded
+    ("true", "succeeded", "success", "success", True),
+    ("false", "succeeded", "success", "success", True),
+    ("true", "succeeded", "failure", "skipped", False),
+    ("true", "succeeded", "success", "failure", False),
+    # incomplete: a finding, passes with a warning, but only when uploaded and verified
+    ("true", "incomplete", "success", "success", True),
+    ("true", "incomplete", "failure", "skipped", False),
+    ("true", "incomplete", "success", "failure", False),
+    # failed: always fails, including decision 1's uploaded failed-but-bindable document
+    ("true", "failed", "success", "success", False),
+    ("false", "failed", "success", "success", False),
+    ("true", "failed", "skipped", "skipped", False),
+    ("false", "failed", "skipped", "skipped", False),
+    # never ran: required for a drifted run; not required (intentional skip) for a no-drift run
+    ("true", "", "skipped", "skipped", False),
+    ("false", "", "skipped", "skipped", True),
+    ("false", "", "", "", True),
+    ("unknown", "", "", "", False),  # unreachable (the job needs true/false); fails closed
+    ("", "", "", "", False),
 ])
-def test_require_investigation_success(wf, tmp_path, status, upload, verify, ok):
-    proc, _ = _job_step(wf, "Require Investigation Success", tmp_path, {
-        "INVESTIGATION_STATUS": status, "INVESTIGATION_FAILURE": "x", "INVESTIGATION_UPLOAD_OUTCOME": upload,
-        "VERIFY_OUTCOME": verify})
+def test_require_investigation_success(wf, tmp_path, drift, status, upload, verify, ok):
+    proc, summary = _require(wf, tmp_path, drift, status, upload, verify)
     assert (proc.returncode == 0) is ok, proc.stdout
+    assert ("::warning::" in proc.stdout) is (ok and status == "incomplete")
+    assert ("not required: no drift" in summary) is (ok and status == "")
+    if not ok:
+        assert "::error::" in proc.stdout and "Drift result unaffected." in proc.stdout
+
+
+@pytest.mark.parametrize("status, upload, verify", [
+    ("succeeded", "success", "success"), ("succeeded", "failure", "skipped"), ("succeeded", "success", "failure"),
+    ("incomplete", "success", "success"), ("incomplete", "failure", "skipped"), ("incomplete", "success", "failure"),
+    ("failed", "success", "success"), ("failed", "skipped", "skipped"),
+])
+def test_require_investigation_success_never_depends_on_drift_once_run(wf, tmp_path, status, upload, verify):
+    # G18: drift_detected decides only whether a missing investigation was required.
+    drifted, _ = _require(wf, tmp_path, "true", status, upload, verify)
+    clean, _ = _require(wf, tmp_path, "false", status, upload, verify)
+    assert drifted.returncode == clean.returncode
 
 
 def test_summary_is_counts_only(wf, tmp_path, scenarios):
@@ -828,6 +863,163 @@ def test_investigation_step_block_maps_a_script_crash(wf, tmp_path):
     assert _outputs(gh) == {"investigation_status": "failed", "investigation_failure": "script_error",
                             "investigation_detail": "none", "investigation_publishable": "false"}
     assert not (runner / "investigation" / "public" / "drift_investigation.json").exists()
+
+
+# --------------------------------------------------------------------------- G18 CI result policy
+
+LOCK = "terraform/environments/dev/.terraform.lock.hcl"
+FAKE_PLAN_SCRIPT = """#!/bin/sh
+# Stands in for scripts/generate_plan_json.sh: writes the given evidence, then exits SCRIPT_RC.
+[ -z "${FIXTURE_PLAN:-}" ] || cp "${FIXTURE_PLAN}" "${ARTIFACT_DIR}/plan.json"
+[ -z "${FIXTURE_MANIFEST:-}" ] || cp "${FIXTURE_MANIFEST}" "${ARTIFACT_DIR}/detection_run.json"
+[ -z "${TOUCH_LOCK:-}" ] || echo "# changed" >> "${TF_DIR}/.terraform.lock.hcl"
+exit "${SCRIPT_RC}"
+"""
+
+
+def _git_repo(path: Path) -> Path:
+    (path / "scripts").mkdir(parents=True)
+    (path / LOCK).parent.mkdir(parents=True)
+    (path / LOCK).write_text("# lock\n")
+    _exe(path / "scripts" / "generate_plan_json.sh", FAKE_PLAN_SCRIPT)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+    env = {"PATH": os.environ["PATH"], "HOME": str(path), "GIT_CONFIG_NOSYSTEM": "1"}
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "fixture"]):
+        subprocess.run(git + args, cwd=path, env=env, check=True, capture_output=True)
+    return path
+
+
+def _evidence(wf, tmp_path, *, rc=0, plan=None, manifest=None, touch_lock=False, var_file="dev.tfvars",
+              stale_manifest=None):
+    repo = _git_repo(tmp_path / "repo")
+    art = tmp_path / "evidence" / "drift"
+    art.mkdir(parents=True)
+    if stale_manifest is not None:  # left over from an earlier run: must never be read as evidence
+        shutil.copy(stale_manifest, art / "detection_run.json")
+    gh = tmp_path / "evidence" / "gh_output"
+    gh.write_text("")
+    tools = os.pathsep.join(sorted({str(Path(shutil.which(t)).parent) for t in ("git", "jq")}))
+    env = {"PATH": f"{tools}:/usr/bin:/bin", "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
+           "WORK_DIR": "terraform/environments/dev", "VAR_FILE": var_file, "ARTIFACT_DIR": str(art),
+           "GITHUB_WORKSPACE": str(repo), "GITHUB_OUTPUT": str(gh), "SCRIPT_RC": str(rc),
+           "FIXTURE_PLAN": str(plan or ""), "FIXTURE_MANIFEST": str(manifest or ""),
+           "TOUCH_LOCK": "1" if touch_lock else ""}
+    script = tmp_path / "evidence" / "step.sh"
+    script.write_text(steps_by_name(wf["jobs"]["plan-and-analyze"])["Generate Plan Evidence"]["run"])
+    proc = subprocess.run([BASH, "-e", str(script)], cwd=repo, env=env, capture_output=True, text=True, timeout=60)
+    return proc, _outputs(gh), art
+
+
+# Plan exit 0/2 are valid evidence; drift is decided by the classification alone (exit 2 = pending changes).
+@pytest.mark.parametrize("name, plan_rc, drift", [
+    ("in_sync", "0", "false"), ("converged_drift", "0", "true"),
+    ("external_drift", "2", "true"), ("external_deletion", "2", "true"),
+    ("config_change", "2", "false"), ("output_only_change", "2", "false"),
+])
+def test_plan_exit_0_and_2_are_valid_and_classification_decides_drift(wf, tmp_path, engine_shim, name, plan_rc,
+                                                                     drift):
+    plan, manifest = _fixture(name)
+    proc, outputs, art = _evidence(wf, tmp_path, plan=plan, manifest=manifest)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert outputs["plan_exit_code"] == plan_rc and outputs["outcome"] == "succeeded"
+    assert outputs["manifest_present"] == "true" and "::error::" not in proc.stdout
+    proc, outputs, _ = _analyze(wf, tmp_path, engine_shim, art / "plan.json", art / "detection_run.json")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert outputs["drift_detected"] == drift
+    assert outputs["drift_status"] == ("detected" if drift == "true" else "none")
+    assert ("::warning::Drift detected" in proc.stdout) is (drift == "true")
+
+
+@pytest.mark.parametrize("case", ["plan_failed", "unusable_artifact_dir", "unexpected_plan_exit_code",
+                                  "lock_modified", "non_dev_var_file"])
+def test_evidence_failures_fail_the_step_and_drift_is_unknown(wf, tmp_path, engine_shim, case):
+    plan, manifest = _fixture("external_drift")
+    failed_manifest = TESTS / "fixtures" / "plan_evidence" / "failed_run" / "detection_run.json"
+    odd = tmp_path / "odd_manifest.json"
+    odd.write_text(json.dumps({**json.loads(manifest.read_text()), "plan_exit_code": 3}))
+    kwargs = {
+        "plan_failed": {"rc": 1, "manifest": failed_manifest},
+        "unusable_artifact_dir": {"rc": 64, "stale_manifest": manifest},
+        "unexpected_plan_exit_code": {"rc": 0, "plan": plan, "manifest": odd},
+        "lock_modified": {"rc": 0, "plan": plan, "manifest": manifest, "touch_lock": True},
+        "non_dev_var_file": {"var_file": "prod.tfvars", "plan": plan, "manifest": manifest},
+    }[case]
+    proc, outputs, art = _evidence(wf, tmp_path, **kwargs)
+    assert proc.returncode != 0
+    assert "Drift status: UNKNOWN." in proc.stdout
+    if case == "unusable_artifact_dir":
+        assert outputs["manifest_present"] == "false"  # Analyze Drift is skipped; the job output falls back
+        assert wf["jobs"]["plan-and-analyze"]["outputs"]["drift_detected"] == \
+            "${{ steps.analyze.outputs.drift_detected || 'unknown' }}"
+    elif (art / "detection_run.json").exists():  # Analyze Drift runs after a failed evidence step
+        proc, outputs, _ = _analyze(wf, tmp_path, engine_shim, art / "plan.json" if (art / "plan.json").exists()
+                                    else plan, art / "detection_run.json", evidence="failure")
+        assert proc.returncode != 0 and outputs["drift_detected"] == "unknown"
+
+
+def _conditions(wf):
+    for job_name, job in wf["jobs"].items():
+        if "if" in job:
+            yield job_name, job["if"]
+        for step in job.get("steps", []):
+            if "if" in step:
+                yield f"{job_name} / {step['name']}", step["if"]
+
+
+def test_g18_no_condition_treats_drift_differently_from_no_drift(wf):
+    gated = []
+    for where, cond in _conditions(wf):
+        if "drift_detected" in cond:
+            gated.append(where)
+            assert "drift_detected == 'true'" in cond and "drift_detected == 'false'" in cond, where
+        for token in ("has_drift", "drift_status", "plan_exit_code"):
+            assert token not in cond, where
+    assert gated == ["plan-and-analyze / Drift Investigation", "plan-and-analyze / Infracost Cost Estimate",
+                     "issues", "cost", "investigation"]
+
+
+def test_g18_only_known_steps_read_the_drift_result(wf):
+    # Every step that sees the drift result is executed by a test showing drift alone never fails it:
+    # Analyze Drift and Generate Plan Evidence (above), Require Investigation Success (above), Run Summary
+    # (below), Drift Investigation (outcome mapping) and Manage Drift Issues (tests/test_github_automation.py).
+    readers = set()
+    for job_name, job in wf["jobs"].items():
+        for step in job.get("steps", []):
+            text = json.dumps({"env": step.get("env", {}), "run": step.get("run", "")})
+            if re.search(r"drift_detected|DRIFT_DETECTED|has_drift|plan_exit_code|plan_rc", text):
+                readers.add(f"{job_name} / {step['name']}")
+    assert readers == {"plan-and-analyze / Generate Plan Evidence", "plan-and-analyze / Analyze Drift",
+                       "plan-and-analyze / Drift Investigation", "issues / Manage Drift Issues",
+                       "investigation / Require Investigation Success", "report / Run Summary"}
+
+
+def _run_summary(wf, tmp_path, drift, stage="success"):
+    summary = tmp_path / "run_summary.md"
+    summary.write_text("")
+    stages = "; ".join(f"{name}={stage if name == 'Analyze Drift' else 'success'}" for name in (
+        "Require main branch", "Checkout Code", "Generate Plan Evidence", "Analyze Drift", "Upload Drift Report"))
+    env = {"PATH": "/usr/bin:/bin", "GITHUB_STEP_SUMMARY": str(summary), "GITHUB_RUN_ID": str(CURRENT_RUN),
+           "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": "0" * 40, "TERRAFORM_VERSION": "1.14.7",
+           "DRIFT_ENVIRONMENT": "dev", "WORK_DIR": "terraform/environments/dev", "VAR_FILE": "dev.tfvars",
+           "PLAN_EXIT_CODE": "2", "DRIFT_STATUS": "detected" if drift == "true" else "none",
+           "DRIFT_DETECTED": drift, "CLASSIFICATION_COUNTS": "{}", "STAGE_OUTCOMES": stages,
+           "JOB_RESULTS": "Preflight job=success; Terraform Plan & Drift Analysis job=success",
+           "INIT_OUTCOME": "success", "VALIDATE_OUTCOME": "success", "UPLOAD_OUTCOME": "success"}
+    script = tmp_path / "run_summary.sh"
+    script.write_text(steps_by_name(wf["jobs"]["report"])["Run Summary"]["run"])
+    proc = subprocess.run([BASH, "-e", str(script)], env=env, capture_output=True, text=True, timeout=60)
+    return proc, summary.read_text()
+
+
+@pytest.mark.parametrize("drift", ["true", "false"])
+def test_run_summary_reports_drift_as_a_valid_result(wf, tmp_path, drift):
+    proc, summary = _run_summary(wf, tmp_path, drift)
+    assert proc.returncode == 0, proc.stderr
+    assert "| Result | **VALID** |" in summary and f"| drift_detected | `{drift}` |" in summary
+    assert "| Plan exit code | `2`" in summary
+    proc, summary = _run_summary(wf, tmp_path, drift, stage="failure")  # a process error: never "no drift"
+    assert proc.returncode == 0  # reporting only; the failed step turned the run red
+    assert "FAILED - drift status UNKNOWN" in summary and "| drift_detected | `unknown` |" in summary
 
 
 # --------------------------------------------------------------------------- ci/azure-constraints.txt

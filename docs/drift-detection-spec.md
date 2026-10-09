@@ -601,8 +601,12 @@ pricing queries and its usage telemetry are the only accepted egress.
   `continue-on-error` upload) when the result is publishable: succeeded, incomplete, or failed but
   bindable.
 - **`investigation` job** (`contents: read` only): verifies the downloaded investigation against the
-  downloaded public drift report and writes a counts-only summary. It then fails unless the
-  investigation succeeded, its upload succeeded and the verification passed.
+  downloaded public drift report and writes a counts-only summary. It then fails unless its upload
+  succeeded, the verification passed and the investigation succeeded or is `incomplete`. `incomplete`
+  passes with a warning: it is a finding (some facts not confirmed by available evidence), and it only
+  occurs when drift exists. A `failed` investigation fails the job. An investigation is required
+  only for a drifted run (`drift_detected=true`); if it never ran there, the job fails. On a no-drift
+  run, an investigation that did not run passes (not required).
 - **Unaffected**: `drift_detected`, the drift report and artifact, issues, cost and the `report` job.
 - **Bounds**: there is no step-level timeout (one would fail the plan job). The script bounds itself
   (`timeout 1500` / `300`), and `plan-and-analyze` has a 45-minute limit. The AI workflow downloads the

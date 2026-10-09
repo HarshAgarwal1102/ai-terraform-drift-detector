@@ -137,7 +137,10 @@ These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist
   drift results, and they never touch the drift-detection workflow.
 - Detection works **without an LLM**. A failed detection is reported as *unknown*, never
   as "no drift".
-- "Drift detected" is a valid result, not a pipeline failure.
+- "Drift detected" is a valid result, not a pipeline failure. A run with drift succeeds with
+  `drift_detected=true`. A detection or process error fails the run with `drift_detected=unknown`.
+  Terraform plan exit code 2 means *pending changes*, not necessarily drift; the classification
+  decides.
 - No autonomous `terraform apply`. Remediation will require explicit human approval.
 
 ---
@@ -475,8 +478,12 @@ The investigation never changes `drift_detected`, the drift report, issues, cost
   and counts only).
   - An incomplete or failed-but-bindable investigation is still uploaded (the AI report then shows
     why).
-  - The `investigation` job passes only when the investigation succeeded, was uploaded and binds to
-    the public drift report.
+  - The `investigation` job needs the investigation to be uploaded and to bind to the public drift
+    report. It then passes when the investigation succeeded, and also passes with a warning when it
+    is `incomplete` (some facts not confirmed by available evidence). It fails when the
+    investigation failed, or when a drifted run has no investigation. On a no-drift run the
+    investigation is not required, so skipping it does not fail the job. A failed investigation
+    turns the run red but never changes `drift_detected` and is never "no drift".
 - **Install**: the Azure SDK is installed in a separate venv pinned exactly by
   [`ci/azure-constraints.txt`](ci/azure-constraints.txt).
 
