@@ -4416,6 +4416,11 @@ In addition:
       - B must be 0 from the fix commit onward; Control A and Control B verify it in both jobs. The primary scenario's pre-fix occurrences are a one-time recorded finding (see "Job logs"); the primary scenario is not re-run to erase them.
     - **C (exception)**: the official `actions/download-artifact` is kept, and no custom downloader is built. It always logs the redirect URL with `core.info`, query string removed (v4 `d3f86a10` and v8 alike), and has no input to turn it off. A narrow exception is approved (see "Job logs").
     - Every other job-log rule is unchanged: any other GUID, and any email or UPN, ARM path, IP address, token-like string or live subscription, tenant or user value, still fails.
+  - **D-5 (Local WHO: no current-CLI identity comparison; user-approved 2026-10-10)**:
+    - The historical caller comes only from the Azure Activity Log operation that `drift-engine who` re-matches (G12): the event's recorded `caller`, from the operation group that equals the public operation.
+    - The account currently signed in to Azure CLI identifies the local session, not who made a past Portal change. So the caller comparison with `az account show` and the user's "same account" confirmation, both added in the 2026-10-10 revision, are removed from Step 4 and Pass.
+    - `az account show` stays only as the Step 2 subscription-scope check. G3, G12 and the Phase 9B end-to-end acceptance list are unchanged.
+    - Step 4 gains a WHO evidence acceptance criterion: exactly one distinct, non-empty recorded caller in the matched `who` result, and `caller_status: recorded` on the public operation. An empty or multi-caller result fails even if `who` exits 0. The limitation for partially missing or rejected caller rows is documented; no code change.
   - Locked G-decisions (G1–G18), the Phase 9B end-to-end acceptance list and every completed task record are unchanged. Run #29's and run #30's records under Task 9B.5 stay as history.
 - **Objective**: Prove the product requirement with real Azure evidence through CI (a fresh primary scenario plus two controls). Then close Phase 9B and return Phases 6 and 7 to 🟢; Phase 10 resumes.
 - **Dependencies**:
@@ -4531,14 +4536,14 @@ In addition:
       - **Terraform state: address → ARM ID only.** It is the current stored state, but it is the same state the CI plan read as the drift entry's `before` (plan runs never write state), and ARM IDs are name-derived.
         - A state change after the primary run (apply, import, `state mv`, rename) fails closed (`address_unknown`, `invalid_resource_id` or `no_match`), never with a wrong caller.
         - Activity Log rows ingested after CI's query could change a group and give `no_match`; the primary criterion's `settled: true` covers this. Beyond 90 days the result is `retention_exceeded`.
-      - **`az account show`: comparison reference only** (Steps 2 and 4), never a caller source.
+      - **`az account show`: subscription-scope check only** (Step 2). It identifies the account signed in to Azure CLI now, not who made a past change, so it is never a caller source and is never compared with the recorded caller (D-5).
     - **Inputs**, all under the gitignored `.artifacts/task-9B.6-ci-proof/` and never committed:
       - the primary run's downloaded, digest-verified `drift_investigation.json` and `drift_report.json` (`primary/extracted/…`), unchanged;
       - a local Terraform state JSON in `who-local/terraform-state.json`.
     - **Terraform state JSON is sensitive, local-only data**: `show -json` writes every managed attribute, including sensitive values in plain text. It stays in the 0700 `who-local/` folder with mode 0600, git-ignored. Its content, the IDs in it and its address map are never printed, copied elsewhere, uploaded, attached to an issue or committed. Claude reads it only for the Step 2 checks.
     - **Where Steps 1 and 3 run**: in the user's own terminal, outside the Claude app.
       - They are never run through Claude's tools or in the app's Terminal panel, which Claude can read. This keeps state content and the printed caller out of the conversation.
-      - Claude never asks the user to paste or otherwise share their output. The user reports only each command's exit code (and the yes/no answers in Step 4 and Pass).
+      - Claude never asks the user to paste or otherwise share their output. The user reports only each command's exit code.
     - **Step 1 (user, local, read-only): Terraform evidence.** Run from the repository root with the user's own `az login` on the dev subscription and Terraform 1.14.7:
       - `mkdir -p .artifacts/task-9B.6-ci-proof/who-local && chmod 700 .artifacts/task-9B.6-ci-proof/who-local`
       - `ARM_USE_AZUREAD=true terraform -chdir=terraform/environments/dev init -input=false -lockfile=readonly`
@@ -4564,17 +4569,17 @@ In addition:
       - `failure` is null;
       - the result statuses are all `matched`, with one result per public operation (1 for the primary scenario);
       - `public_binding.drift_report_sha256` equals the canonical SHA-256 of the downloaded primary drift report, and `public_binding.run_id` equals the primary run;
-      - **caller comparison** (in memory, never printed): the matched recorded caller against the user name of the live `az account show` session.
-        - It is compared first exactly, then case-insensitively (UPNs and email addresses are case-insensitive). No other normalization is applied (for example, no prefix or guest-suffix stripping).
-        - It is recorded as `caller_comparison: exact`, `case_insensitive` or `mismatch`. A mismatch is always recorded as `mismatch` and never reported as a match.
-        - A mismatch can be a format difference: Azure may record some account types, such as personal Microsoft or guest accounts, differently from what Azure CLI shows. The code cannot verify this; only the real run shows it.
-        - **On `mismatch`**: the user compares, on their own terminal, the recorded caller that `who` printed with the account used for the primary portal change, and answers yes/no in chat. The user writes no caller text into chat or the plan.
+      - **WHO evidence acceptance (D-5)**:
+        - For each public operation there is exactly one local `who` result with the same `op_id`, and it has `status: matched` (exactly one matching operation group). Its `callers` list holds exactly one distinct, non-empty caller. `who` lists the distinct named callers of the matched group, so this is one caller value, not one Activity Log row.
+        - The corresponding public investigation operation (the same `op_id`) must have `caller_status: recorded`.
+        - An empty caller list or multiple distinct callers fails this acceptance criterion, even if `who` exits with code 0.
+        - **Documented limitation**: the current local `who_evidence` output cannot distinguish a fully recorded caller from a partially missing or rejected set of caller rows when the remaining rows contain one named caller. The public investigation's `caller_status` reflects the CI query, not the later local re-query, and does not close this gap.
+        - This criterion does not claim to prove that the recorded principal was the human actor who caused the drift (G3).
+        - Only the caller count and `caller_status` are checked and recorded; the caller itself is never printed.
     - **Pass**:
       - `who` exits 0;
-      - all Step 2 checks and the Step 4 `failure`, status, count and binding checks are true;
-      - `caller_comparison` is `exact` or `case_insensitive`, or it is `mismatch` and the user answers **yes** in the mismatch check. A `mismatch` with "no" or "unsure" fails this criterion;
-      - the user confirms (yes/no) that the primary portal tag change was made with the same account as the `az login` session.
-    - **Recorded in the plan**: only the exit code, the status counts, the binding-hash match, the booleans, the `caller_comparison` value, the user's yes/no answers and the date. No caller (or any part of it), no description of how a mismatching caller differs, and no ID or state content is recorded. The local files stay 0600 under `.artifacts/` (G12).
+      - all Step 2 checks and the Step 4 `failure`, status, count, binding and WHO evidence acceptance checks are true.
+    - **Recorded in the plan**: only the exit code, the status counts, the binding-hash match, the booleans and the date. No caller (or any part of it) and no ID or state content is recorded. The local files stay 0600 under `.artifacts/` (G12).
   - [ ] **Determinism** (corrected 2026-10-10 after code verification): for each scenario, the AI report regenerated locally is byte-identical to the downloaded `ai_analysis_report.json` and `ai_analysis_report.md` (equal SHA-256).
     - **Inputs only**: the scenario's extracted, digest-verified `drift_report.json` and `drift_investigation.json`, used unchanged (not reformatted, re-serialized or edited).
       - `ai-analysis` reads no other file. It makes no Azure, Activity Log or network call and reads no clock (verified in `src/ai_engine/cli.py` and `src/ai_engine/nodes/report_generator.py`).
