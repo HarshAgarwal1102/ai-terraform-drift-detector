@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure (⬜ NOT STARTED; next eligible task, not started automatically, Execution Rule 8). Its plan was revised on 2026-10-10 with the user's decisions D-1 to D-3 (a fresh primary run; job-log check scoped to the investigation and AI logs; G9 anchor and phase-count reconciliation). The user reviewed and locked the revised plan on 2026-10-10, including the code-verified Local WHO and Determinism corrections. Its in-sync anchor is the latest in-sync drift report before its primary run (G9; as of 2026-10-10, run #30 `37963733177`). Task 9B.5 completed 2026-10-09: G18 CI result policy (`4ba7668`), CI Activity Log authentication fix (`62bdf65`), no-drift real CI proof run #28 and drifted real CI proof run #29 with all artifact-content checks passed. Phase 10 stays on hold until Phase 9B is completed (Task 9B.6).
+- **Current Active Task**: Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure (🟡 WORK IN PROGRESS since 2026-10-10: primary scenario executed as run #32 `38023838144`, its evidence partly recorded; Control A and Control B not yet executed; see the Task 9B.6 progress record). Its plan was revised on 2026-10-10 with the user's decisions D-1 to D-3 (a fresh primary run; job-log check scoped to the investigation and AI logs; G9 anchor and phase-count reconciliation). The user reviewed and locked the revised plan on 2026-10-10, including the code-verified Local WHO and Determinism corrections. Its in-sync anchor is the latest in-sync drift report before its primary run (G9): run #31 `38023441753`, which superseded run #30 `37963733177` and which the primary investigation accepted. Task 9B.5 completed 2026-10-09: G18 CI result policy (`4ba7668`), CI Activity Log authentication fix (`62bdf65`), no-drift real CI proof run #28 and drifted real CI proof run #29 with all artifact-content checks passed. Phase 10 stays on hold until Phase 9B is completed (Task 9B.6).
 - **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -2901,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.5 and 9B.4A complete; Task 9B.5 completed 2026-10-09 with the no-drift real CI proof run #28 and the drifted real CI proof run #29, all artifact checks passed; Task 9B.6 not started; its plan was revised, reviewed and locked by the user on 2026-10-10)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.5 and 9B.4A complete; Task 9B.5 completed 2026-10-09 with the no-drift real CI proof run #28 and the drifted real CI proof run #29, all artifact checks passed; Task 9B.6 🟡 work in progress since 2026-10-10 (primary scenario run #32; Controls A and B not yet executed); its plan was revised, reviewed and locked by the user on 2026-10-10)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -4394,7 +4394,8 @@ In addition:
         - **Evidence byte-equivalence** against HEAD (temporary `git worktree`, removed): 14 of 14 identical.
 
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS (primary scenario executed; Controls A and B not yet executed)
+- **Started**: 2026-10-10
 - **Plan revision (2026-10-10, user-approved decisions; reviewed and locked by the user on 2026-10-10)**:
   - **D-1 (fresh primary run)**: the primary scenario is repeated with a fresh real Azure drift run. Task 9B.5's run #29 is **not** primary evidence; it is cited only as prior evidence that the pipeline works.
   - **D-2 (job-log scope)**: the public job-log privacy check covers only the investigation and AI logs (see "Leak scan"). The Phase 5 diagnostic-log exposure, which includes the `Verify Azure OIDC Authentication` step, stays a documented Phase 12 known limitation.
@@ -4437,7 +4438,7 @@ In addition:
      - the working tree is clean and `main` = `origin/main`;
      - no drift-detection run is in progress;
      - `aitdd-dev-main-rg` has exactly its configured tags;
-     - the latest in-sync drift report within retention is identified and recorded as the expected anchor (as of 2026-10-10: run #30 `37963733177`; a later in-sync scheduled run supersedes it, per G9);
+     - the latest in-sync drift report within retention is identified and recorded as the expected anchor (as of 2026-10-10: run #30 `37963733177`; a later in-sync run, scheduled or dispatched, supersedes it, per G9. For the primary scenario this was the in-sync dispatch run #31 `38023441753`, see the progress record);
      - the time of the next scheduled run (02:00 UTC cron; recently starting around 08:00 UTC) is noted.
   1. **Primary scenario**:
      - The user adds one test tag with a neutral, non-identity value (no email, name or ID) to `aitdd-dev-main-rg` in the Azure Portal.
@@ -4620,6 +4621,72 @@ In addition:
   - Every Azure change is made by the user. Claude only reads (Activity Log, artifacts, public job data).
   - Test tag values appear in the public drift and AI reports as Terraform evidence, so they must be neutral (no email, name or ID). An identity-like value would fail the leak scan.
   - Run #29 (Task 9B.5) already showed the expected primary-scenario shape (`sole_capable_operation`, R4 `restore_declared`, WHO withheld). It is cited as prior evidence only (D-1).
+- **Progress record (2026-10-10, evidence-backed; every acceptance checkbox above stays unchecked until all its items are recorded)**:
+  - **Runs** (public GitHub API; all attempt 1):
+
+    | Drift run | Commit | Event, created (UTC) | Conclusion | Role | AI run (commit, conclusion) |
+    | --- | --- | --- | --- | --- | --- |
+    | #31 `38023441753` | `717a2f0` | dispatch, 04:15:42 | success | In-sync anchor (G9). **Verified**: the primary investigation accepted it as its anchor (`github-38023441753-1`); G9 accepts only a report in which the address is `in_sync`. **Inferred**: `Drift Investigation` took 9 s, consistent with no settling wait (no drifted target). | #14 `38023538926` (`717a2f0`, success) |
+    | #32 `38023838144` | `717a2f0` | dispatch, 04:22:31 | success | **Primary scenario.** **Inferred**: drift issue #8 came from this run. It was created at 04:33:52, inside this run's `Drift Issues` job window (04:33:43–04:33:53), and its title names the resource group address. | #15 `38024516418` (`717a2f0`, success) |
+    | #33 `38036342826` | `717a2f0` | schedule, 07:59:57 | success | Incidental scheduled run while the primary tag was present. **Verified**: public drift warning annotation, so not in-sync. | #16 `38037006275` (`717a2f0`, success) |
+    | #34 `38057933359` | `0e66f50` | dispatch, 14:00:49 | **cancelled** | **Manual cancellation by the user; reason not recorded.** **Verified**: confirmed by the user and by the public run annotation "The run was canceled by" the repository owner's GitHub account. `Drift Investigation` (step 13) ran 14:01:40–14:03:28 and was cancelled 108 s in. Upload, cost, `investigation`, `issues` and `report` did not run. Only `drift-report-38057933359` was uploaded. The public drift warning annotation is present, so the run is not in-sync. **Inferred**: the cancellation fell inside the G8 settling wait. It is not a Control A or Control B result. | #17 `38058113974` (`0e66f50`, success; it ran on the cancelled run, without an investigation artifact) |
+    | #35 `38058888141` | `0e66f50` (includes the D-4 B fix) | dispatch, 14:15:26 | success | **Not Control A**: the Activity Log check below shows no second tag write before it. **Verified**: public drift warning annotation (a drifted run), and no second drift issue was created (issue #8 unchanged). With only the primary tag present, it is not a scenario run. | #18 `38059640155` (`0e66f50`, success) |
+
+    - **Verified (as of 15:41Z)**: #33, #34 and #35 each carry the public drift warning annotation, so no in-sync run happened after #31, and the anchor for Control A is still #31. The only tag write since #31 is the primary one, so #33–#35 all observed the primary tag.
+    - Every artifact of runs #31–#35 and AI runs #14–#18 expires on 2026-11-09.
+  - **Activity Log check (Claude, read-only, 2026-10-10 15:41Z)**:
+    - **Method**: `activity_logs.collect_window` and `investigation.group_operations` (the G12 code, commit `717a2f0`; `src/` is unchanged at `0e66f50`) for `aitdd-dev-main-rg`, from 04:15:26Z (anchor #31 start − 60 s) to 15:41:46Z.
+    - **Result**:
+      - scope `complete` with 0 dropped events;
+      - exactly 2 events forming **1 operation group**: `Microsoft.Resources/tags/write`, 04:21:53.669Z–04:21:56.341Z, `successful`, relations `exact` + `extension`, available 04:23:46Z, caller type `user`, client `azure_portal`, `caller_status: recorded`, one distinct caller (not printed).
+      - **No second tag write exists** between the anchor and 15:41Z, so Control A has not been executed.
+    - Only timestamps, operation names, statuses and counts were printed.
+  - **Primary scenario (run #32 / AI run #15) evidence**:
+    - **PASS**:
+      - **Artifacts**: the 4 artifact ZIPs equal their GitHub digests. They hold flat regular files only, and the extracted files equal the ZIP members. GitHub digests (SHA-256), equal to the local ZIP SHA-256:
+        - `drift-report-38023838144`: `be9b4db25336b91e77b168800e234532463c32acf7fe5ef035b6d88acc356dfb`;
+        - `drift-investigation-38023838144`: `f4190749d545f20f0cf2965a5e942be41724aa7cafffcecfdfa75caf9079a545`;
+        - `infracost-report-38023838144`: `fd13a4fca5d8de5b407a11440d0fb36ec66dfa207c86996ed4815b381e097308`;
+        - `ai-analysis-report-38023838144` (AI run #15): `5317ad3a5c3b1800f0030adf3e4214a3329bc6b32ef79add19e96bdb6379b996`.
+      - **Anchor (outcome)**: #31 is the latest run before the dispatch, and the investigation and AI report use it as the last-in-sync reference (G9). The pre-check 0 identification and re-confirmation record is listed under NOT VERIFIED.
+      - **CI values**:
+        - `detection_run.json` records `plan_exit_code: 2`;
+        - the drift report has `has_drift: true`, `outcome: succeeded` and `external_drift` on `tags.owner` (desired `absent`, actual value present).
+      - **Inferred, not directly verified**: `drift_detected=true` / `drift_status=detected`. The step outputs appear only in the job log. They are deduced from the public "Drift detected in dev" annotation, which `drift-detection.yml` emits only in the branch that writes `drift_detected=${has_drift}` with `has_drift = true`.
+      - **Jobs**: all 6 jobs succeeded. `plan-and-analyze` took 655 s, of which `Drift Investigation` took 600 s (G8 `not_before` = `run.finished_at` 04:23:28Z + 10 min). `investigation` took 17 s, `issues` 10 s, `cost` 10 s and `report` 3 s. AI run #15 took 25 s.
+      - **Investigation**: `outcome: complete`, `failure: null`, `binding.evidence_outcome: complete`, completeness `settled: true` (1 poll, `queried_at` 04:33:28Z).
+      - **AI report v2**:
+        - verdict `sole_capable_operation`, `property_link: inferred_not_provable`;
+        - one operation `Microsoft.Resources/tags/write`, `successful`, `exact` + `extension`, `before_observation`;
+        - `recorded_caller` `recorded`, `user`, `azure_portal`, `pipeline_identity: false`, identity `withheld`; actor attribution `not_confirmed_by_available_evidence`;
+        - LLM `provider: none`, `not_attempted`, nothing sent;
+        - recommendation `restore_declared` (R4) with the accept-remote note, `approval_required: true`, `automatic_apply: false`, `execution_allowed: false`.
+      - **WHEN to the second**: the operation's start (first row) and end (last Succeeded row) equal the Azure record when truncated to whole seconds, and the last row is `Succeeded` (Activity Log check above).
+      - **Hash binding**: the canonical public drift report SHA-256 `7095c361c8dddbdbffacc12560811775a31ecc83e9c78411439793a04693e4a0` is the same in the cost, investigation and AI artifacts.
+      - **Leak scan**:
+        - the investigation passes `load_public` (contract and full G11 leak scan);
+        - `leak_findings` returns 0 findings in every JSON file;
+        - there are 0 GUIDs, emails/UPNs, ARM paths, IPs or JWTs, and 0 live subscription, tenant or user values (compared in memory);
+        - the only token-like strings are the public run commit SHA (`717a2f0…`) and Terraform type names.
+      - **Determinism**:
+        - regenerated at AI run #15's `headSha` `717a2f0` in a temporary scratchpad worktree, with a fresh Python 3.13.12 venv (3.12 is not available locally);
+        - the workflow pin check passed (all 43 pins);
+        - the command was the exact `env -i … AI_LLM_PROVIDER=none ai-analysis --report … --investigation …` and exited 0;
+        - the regenerated files are byte-identical to the downloaded files: `ai_analysis_report.json` `9ab2fb24fd581e12e421b6d1d85fee7fed6879640660ec245d7a75a252995b2c` and `ai_analysis_report.md` `0c8a5e8e0e82b1a108de20f5cd3e6d5b1f76d837fbbc8c9830340cded0b3c86b` (downloaded = regenerated for each);
+        - **Output path deviation**: the output is in `primary/regenerated-717a2f0/`, not the criterion's `primary/regenerated/`. That folder already existed, from an earlier regeneration (same hashes) with no recorded provenance; it is not used as evidence.
+      - **Local WHO (Steps 2 and 4 only)**:
+        - Step 2: the folder is 0700, the file is 0600 and git-ignored, `terraform_version` is `1.14.7`, every drift report address is in the state, and the ARM ID parses with resource group `aitdd-dev-main-rg` and the live subscription;
+        - the lock file is unchanged;
+        - Step 4: `failure: null`, 1 result `matched`, exactly 1 distinct non-empty caller, public `caller_status: recorded`, `public_binding` run `github-38023838144-1` and the hash matches;
+        - the caller was not printed or recorded.
+    - **NOT VERIFIED** (missing evidence; not passed):
+      - **Job-log scan record**: D-4 records only the GUID categories for runs #32 and #15 (A = 2, B = 4, C = 8). The archive-to-run mapping, coverage, the other categories and the `***` mask count are not recorded. The archives are outside the repository, and Claude has no access to them (Execution Rule 16).
+      - **Values printed only in job logs or step summaries**: `investigation_status` / `investigation_detail`, `drift_detected` / `drift_status` (inferred above), the `report` job's "Result VALID", and the runner image and Azure CLI version.
+      - **Local WHO, user steps**: the exit codes of Step 1 (`init`, `show -json`) and Step 3 (`who`; Pass requires exit 0), and whether Step 3 ran in a fresh environment installed from the primary run's commit `717a2f0`. These are not recorded; the existence of `who_evidence.local.json` with `failure: null` does not establish them.
+      - **Anchor process**: no record that the anchor was identified in pre-check 0 and re-confirmed immediately before the dispatch.
+  - **Control A: not executed** (no second tag write; see above). Run #35 does not count. The scenario is still possible: as of 15:41Z the primary tag is present and no in-sync run has happened since anchor #31.
+  - **Control B: not executed.** Issue #8 is still open (public API, as of 2026-10-10 16:08Z).
+  - Phase 9B is not closed, and Phase 10 is not started.
 - **Completion Notes**:
   - None.
 
@@ -4964,18 +5031,51 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
 
 Phase 13 builds a web-based management dashboard consuming live platform APIs and data to visualize drift status, security risks, cost impacts, and remediation workflows.
 
+> **Required feature: caller recorded by Azure for every detected drift (user, 2026-10-10, finalized the same day)**: this is a required dashboard feature, not an optional enhancement. It is documented only; nothing is implemented, and Tasks 13.1–13.3 stay ⬜ NOT STARTED.
+> - **Display**: every detected drift row/card shows a field labelled **`Caller recorded by Azure`**:
+>   - **human user**: the recorded caller's available name;
+>   - **service principal or managed identity**: the identity's available name or identifier, as Azure recorded it;
+>   - **`Unknown`**: only when the caller cannot be determined reliably, the relevant operation cannot be uniquely correlated, the required Activity Log record is unavailable, or the lookup fails.
+>
+>   The dashboard never fabricates a name, substitutes an unrelated identity, or guesses who performed a change.
+> - **Lookup**: the dashboard backend (`src/dashboard_api/`) retrieves the caller on demand from Azure Activity Log. It correlates the record with the drift's identified change using the existing Phase 9B matching logic, reused from `src/drift_engine/who.py` and its supporting modules. It never invokes the local-only `drift-engine who` command.
+> - **Exposure**:
+>   - The frontend gets caller information only through the backend. Browser code holds no Azure credentials and never queries Azure.
+>   - Caller identity is returned only to authenticated and authorized dashboard users.
+> - **No persistence**: caller names and identifiers are never stored in the application database, reports, GitHub Actions artifacts or ordinary application logs. Public artifacts and general drift reports stay free of personal caller identity.
+> - **Meaning**: the field shows the identity Azure recorded. It does not prove which physical person performed the action. Not storing it in this application does not remove it from Azure, whose Activity Log keeps its own records under its configured retention policy.
+> - **Phase 9B unchanged**: these stay exactly as they are:
+>   - G8's 10-minute Activity Log settling margin;
+>   - G11's `caller_identity: withheld` rule for public artifacts;
+>   - G12's local-only `drift-engine who` command.
+
 #### Task 13.1 — Dashboard Data API & State Engine
 - **Status**: ⬜ NOT STARTED
-- **Objective**: Build lightweight Python backend API (FastAPI) to serve live drift reports, history, and status metrics.
-- **Dependencies**: Tasks 4.6, 8.3, 9A.1, 9B.5 (investigation and AI report v2 artifacts)
-- **Files/Areas**: `src/dashboard_api/`
+- **Objective**: Build lightweight Python backend API (FastAPI) to serve live drift reports, history, and status metrics, including the on-demand `Caller recorded by Azure` value for every detected drift (Phase 13 required feature).
+- **Dependencies**: Tasks 4.6, 8.3, 9A.1, 9B.5 (investigation and AI report v2 artifacts), 9B.6 (real-Azure proof of the Phase 9B WHO correlation the lookup reuses; added 2026-10-10)
+- **Files/Areas**: `src/dashboard_api/` (reuses matching logic from `src/drift_engine/who.py`, `activity_logs.py` and `investigation.py`; the `drift-engine who` command keeps its behaviour)
 - **Acceptance Criteria**:
   - [ ] Endpoints for `/api/summary`, `/api/drifts`, `/api/reports/{id}`, `/api/remediations`.
   - [ ] Consumes real `drift_report.json` and AI report artifacts.
+  - [ ] For every detected drift, the backend returns the `Caller recorded by Azure` value defined in the Phase 13 required feature: the recorded name or identifier, or `Unknown`. It is retrieved on demand from Azure Activity Log and correlated with the drift's identified change.
+  - [ ] Caller identity is returned only to authenticated and authorized users and is never persisted in the database, reports or logs.
 - **Validation**:
   - [ ] `pytest tests/test_dashboard_api.py` passes.
 - **Implementation Notes**:
   - Data layer for dynamic dashboard UI.
+  - **Correlation**:
+    - The drift's identified change is its decisive operation in the public investigation / AI report v2.
+    - Its record is found as `who.py` finds it: `activity_logs.collect_window` over the operation's start/end ± 1 s, grouping by `investigation.group_operations`, and exactly one group equal in operation name, start, end, outcome, relations, caller type and client application.
+    - `Unknown` applies when: there is no decisive operation; there is no match or more than one; the caller is missing or inconsistent; the record is past the 90-day retention; or the query fails.
+    - The investigation already applied G8, so the dashboard adds no shorter settling margin.
+    - If reuse needs a shared helper extracted from `who.py`, the `drift-engine who` behaviour and its tests stay unchanged.
+  - **Logging and caching**: logs carry fixed codes only. Responses carrying caller identity are sent with `Cache-Control: no-store`.
+  - **Tests cover**:
+    - a human name, and a service principal and a managed identity name or identifier;
+    - each `Unknown` case;
+    - unauthenticated and unauthorized requests;
+    - no caller identity in logs, the database or reports (using a sentinel caller in fixtures).
+  - **Design review first**: sign-in, authorization, and the backend's read-only Azure credential. Any new Azure resource, role or GitHub setting needs user approval (Execution Rules 12 and 13).
 - **Completion Notes**:
   - None.
 
@@ -4988,10 +5088,13 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
   - [ ] Overview Cards: Total Resources, Active Drifts, Security Exposure, Monthly Cost Impact.
   - [ ] Interactive tables filtering drifts by severity, resource type, and environment.
   - [ ] Detailed modal showing AI analysis, HCL diff, and remediation status.
+  - [ ] Every detected drift row/card shows its resource, changed property, expected and actual value, operation time, and the `Caller recorded by Azure` field (recorded name or identifier, or `Unknown`), obtained only through the backend.
 - **Validation**:
   - [ ] UI renders cleanly and dynamically updates from API data.
 - **Implementation Notes**:
   - Modern web interface with dark mode and visual feedback.
+  - Browser code holds no Azure credentials, never calls Azure, and does not write caller data to browser storage.
+  - Component tests render a human name, a service principal or managed identity name or identifier, and `Unknown`.
 - **Completion Notes**:
   - None.
 
@@ -4999,14 +5102,22 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 - **Status**: ⬜ NOT STARTED
 - **Objective**: Connect web dashboard frontend to backend API to ensure 100% real project data (zero mock data in final build).
 - **Dependencies**: Task 13.2
-- **Files/Areas**: `dashboard/`
+- **Files/Areas**: `dashboard/`, `docs/dashboard.md`
 - **Acceptance Criteria**:
   - [ ] Dashboard displays live drift reports generated from actual Azure scan runs.
   - [ ] Visual indicators reflect active PR and resolution states.
+  - [ ] For a real detected drift, the dashboard shows the identity Azure recorded, matching what `drift-engine who` shows locally for the same operation. Public artifacts and general drift reports still contain no caller identity (`caller_identity: withheld`).
+  - [ ] `docs/dashboard.md` explains the `Caller recorded by Azure` field: it is Azure's recorded caller, not proof of which physical person acted; what `Unknown` means; and that the application does not store it.
 - **Validation**:
-  - [ ] End-to-end user navigation test on active data.
+  - [ ] End-to-end user navigation test on active data, including the real-data caller check.
 - **Implementation Notes**:
   - Real-time visibility into infrastructure health.
+  - Real-data caller check:
+    - an authorized user sees the recorded identity;
+    - unauthenticated and unauthorized requests are refused;
+    - the backend's logs and database contain no caller identity.
+
+    The real Azure change and any login are user actions (Execution Rule 10).
 - **Completion Notes**:
   - None.
 
