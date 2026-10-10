@@ -4404,16 +4404,29 @@ In addition:
   - **Code-verified corrections (2026-10-10, user-approved)**: the Local WHO and Determinism criteria were checked against the code (`src/drift_engine/who.py`, `src/ai_engine/cli.py`, `src/ai_engine/nodes/report_generator.py`, `.github/workflows/ai-analysis.yml`) and made precise:
     - Local WHO: evidence roles stated, sensitive handling of the state JSON made executable, and the caller comparison defined with an explicit, identity-free mismatch path.
     - Determinism: exact AI-run commit, required `--investigation`, explicit `AI_LLM_PROVIDER=none`, unchanged inputs and a fresh pinned environment.
+  - **D-4 (job-log GUID policy and B fix; user-approved 2026-10-10, after the primary run)**:
+    - **Finding**: a complete scan of the job-log archives of primary run #32 (`38023838144`) and its AI run #15 (`38024516418`) found 14 GUIDs in the in-scope logs. All are GitHub platform output; this project's own steps contain none, and none is unclassified:
+      - **A = 2**: the GitHub-hosted runner's `Worker ID` (1 per job).
+      - **B = 4**: the `actions/checkout` temporary `HOME` path (`Checkout Code` and `Post Checkout Code`, 1 each, in both jobs).
+      - **C = 8**: the `actions/download-artifact` redirect URL (2 per line, 2 download steps per job).
+    - **A (exception)**: the runner prints the host-supplied `.setup_info` file in "Set up job", before any workflow step (`actions/runner` v2.337.0: `src/Runner.Worker/JobExtension.cs` lines 106–136, `src/Runner.Common/HostContext.cs` lines 510–513). No workflow setting reaches it. A narrow exception is approved (see "Job logs").
+    - **B (fixed, no exception)**: `set-safe-directory: false` is added to the `Checkout Code` step of the `investigation` job and of the `ai-analysis` job (see Files/Areas).
+      - The pinned `actions/checkout@v4` (`11d5960a`) logs the temporary `HOME` only when safe-directory or submodules are enabled. A local run of that exact code logged 1 + 1 such UUIDs (main + post) with `true` and 0 with `false`.
+      - Neither job runs git after checkout, and the safe-directory entry was only ever written to a temporary config that checkout removes itself, so later steps are unaffected.
+      - B must be 0 from the fix commit onward; Control A and Control B verify it in both jobs. The primary scenario's pre-fix occurrences are a one-time recorded finding (see "Job logs"); the primary scenario is not re-run to erase them.
+    - **C (exception)**: the official `actions/download-artifact` is kept, and no custom downloader is built. It always logs the redirect URL with `core.info`, query string removed (v4 `d3f86a10` and v8 alike), and has no input to turn it off. A narrow exception is approved (see "Job logs").
+    - Every other job-log rule is unchanged: any other GUID, and any email or UPN, ARM path, IP address, token-like string or live subscription, tenant or user value, still fails.
   - Locked G-decisions (G1–G18), the Phase 9B end-to-end acceptance list and every completed task record are unchanged. Run #29's and run #30's records under Task 9B.5 stay as history.
 - **Objective**: Prove the product requirement with real Azure evidence through CI (a fresh primary scenario plus two controls). Then close Phase 9B and return Phases 6 and 7 to 🟢; Phase 10 resumes.
 - **Dependencies**:
   - Task 9B.5 (🟢 2026-10-09: G18 in `4ba7668`, the Activity Log authentication fix in `62bdf65`) and Task 9B.4A.
-  - **User actions** (Execution Rule 10): the portal tag changes, approval for each dispatch, the 10 artifact downloads (Claude cannot download artifacts), and local WHO steps 1 and 3 (Terraform state JSON and `who`, run with the user's own `az login`).
+  - **User actions** (Execution Rule 10): the portal tag changes, approval for each dispatch, the 10 artifact downloads (Claude cannot download artifacts), the job-log archive downloads for each scenario's drift run and AI run (D-4), and local WHO steps 1 and 3 (Terraform state JSON and `who`, run with the user's own `az login`).
 - **Files/Areas**:
   - `.artifacts/task-9B.6-ci-proof/` (gitignored; downloaded artifacts per scenario, regenerated AI reports, local WHO output);
   - `PROJECT_PLAN.md`;
   - `README.md` (limitations and phase status at closure).
-  - No implementation file changes are planned. A failing criterion is reported as a blocker, and any fix needs a separate user decision.
+  - `.github/workflows/drift-detection.yml` and `.github/workflows/ai-analysis.yml`: the D-4 B fix only, one added line each (`set-safe-directory: false` on the `Checkout Code` step of the `investigation` job and of the `ai-analysis` job; user-approved 2026-10-10).
+  - No other implementation file changes are planned. A failing criterion is reported as a blocker, and any fix needs a separate user decision.
 - **Execution sequence** (one scenario at a time; Claude only reads Azure; every Azure change is the user's):
   0. **Pre-checks (Claude, read-only)**:
      - the working tree is clean and `main` = `origin/main`;
@@ -4471,14 +4484,16 @@ In addition:
     - `who.recorded_caller.status: multiple_operations` with `candidate_operations >= 2`, and actor attribution `not_confirmed_by_available_evidence`;
     - the recommendation is unchanged at `restore_declared` (R4), because verdicts never change the recommendation in policy v1;
     - the issues job updates the open drift issue (or leaves it unchanged) and creates no second issue for the resource;
-    - the cost job and the AI run succeed.
+    - the cost job and the AI run succeed;
+    - the run uses a `main` commit that includes the D-4 B fix, and its job-log check passes under the D-4 policy with **B = 0** in both the `investigation` and `ai-analysis` jobs.
   - [ ] **Control B**: the user removes all test tags, then dispatch. Required:
     - the run concludes **success** with `drift_detected=false`, plan exit `0` and classification `{"in_sync":5}`;
     - the investigation `succeeded` / `complete` with 0 resources and no anchor fetch;
     - the AI report v2 has 0 resources and no investigation claims;
     - the issues job closes the open drift issue (`state_reason: completed`, Task 8.3);
-    - the resource group then has exactly its configured tags (read-only check).
-  - [ ] **Leak scan (amended 2026-10-05, P2; job-log scope amended 2026-10-10, D-2)**:
+    - the resource group then has exactly its configured tags (read-only check);
+    - its job-log check passes under the D-4 policy with **B = 0** in both the `investigation` and `ai-analysis` jobs.
+  - [ ] **Leak scan (amended 2026-10-05, P2; job-log scope amended 2026-10-10, D-2; job-log GUID policy amended 2026-10-10, D-4)**:
     - **Required downloads (revision 2026-10-10, point 3; necessity per criterion)**:
       - **Every scenario (primary, Control A, Control B)**: `drift-report`, `drift-investigation` and `ai-analysis-report`. Each is consumed by a criterion in every scenario: the WHAT/WHEN/WHO/verdict/0-resource checks, determinism (the drift report and investigation are its inputs, the AI report its expected output), the leak scan, and for the primary scenario local WHO (`--public`, `--report`). None of them can be dropped.
       - **`infracost-report`**: downloaded for the **primary** scenario and checked locally like the others, including the end-to-end three-way `drift_report_sha256` match across cost, investigation and AI, as in Task 9B.5.
@@ -4492,7 +4507,22 @@ In addition:
       - no UPN, email or other caller identity; no GUID; no `/subscriptions/`, `/providers/` or `/resourceGroups/` path or other ARM/resource ID; no Activity Log or caller IP address; no token-like string;
       - the live subscription ID, tenant ID and signed-in user (compared in memory, never printed) appear in no file;
       - Terraform-configured IPs/CIDRs, URL values and the test tag value are Terraform evidence and allowed.
-    - **Job logs (D-2 scope)**: the public logs of the `Drift Investigation` step (`plan-and-analyze`), the `investigation` job and the `ai-analysis` job show only counts, fixed codes, timestamps, run ids and public artifact names. They contain no GUID, email or UPN, ARM path, IP address or token-like string. They are read in the signed-in in-app browser (GitHub requires a sign-in to view logs) and scanned in memory, with only counts reported.
+    - **Job logs (D-2 scope; GUID policy D-4)**: the public logs of the `Drift Investigation` step (`plan-and-analyze`), the `investigation` job and the `ai-analysis` job show only counts, fixed codes, timestamps, run ids and public artifact names.
+      - **Method**: the user downloads the complete job-log archives (job page → log dropdown → "Download log archive") into a 0700 folder outside the repository.
+        - Each archive is mapped to its run by the public API `check_suite_id`, its job set, timestamps inside the API job window and the run id in the in-scope content.
+        - Only the in-scope jobs are read, and for `plan-and-analyze` only the lines inside the `Drift Investigation` step's API time window.
+        - Lines are assigned to steps by the log's step markers, whose count must equal the API step count.
+        - Archives are read in memory only. No line, GUID, host or other value is printed; only counts and booleans are recorded.
+      - **Always a failure, with no exception**: any email or UPN, ARM path (`/subscriptions/`, `/providers/`, `/resourceGroups/`), IP address, JWT or other token-like string, or the live subscription ID, tenant ID or signed-in user (compared in memory). Allowed and counted: the public repository name and its URLs, public runner-image URLs, and GitHub `***` masks.
+      - **GUIDs are a failure, except exactly**:
+        - **A (GitHub-hosted runner `Worker ID`)**: at most 1 GUID per job, on the single line that fully matches `Worker ID: {<GUID>}`, inside the `##[group]Runner Image Provisioner` group of "Set up job", before the first step marker.
+        - **C (`actions/download-artifact` redirect URL)**: exactly 2 GUIDs per line, on lines that fully match `Redirecting to blob download url: https://<name>.blob.core.windows.net/actions-results/<GUID>/workflow-job-run-<GUID>/artifacts/<64 lowercase hex>.zip` with no query string; at most 1 such line per download step.
+      - **B (`actions/checkout` temporary `HOME`) is not exempt**: any occurrence fails from the D-4 B-fix commit onward.
+        - **One-time pre-fix finding, limited to exactly two run ids**: primary drift run `38023838144` (#32) and the AI run it triggered, `38024516418` (#15). Both ran before the D-4 B fix.
+          - Their 4 B GUIDs are recorded as a finding, not a failure: 2 in run `38023838144`'s `investigation` job and 2 in run `38024516418`'s `ai-analysis` job (`Checkout Code` and `Post Checkout Code`, 1 each).
+          - B must be 0 in both in-scope jobs (`investigation` and `ai-analysis`) of every other run this job-log criterion applies to: Control A, Control B and any re-run or new attempt of the primary scenario, all of which must run on a commit that includes the approved B fix. Incidental scheduled runs, including run `38036342826` (#33), and earlier runs are not scenario runs; this criterion does not evaluate or classify them, and running before the B fix does not make them failures.
+      - **Anything else fails**: any other GUID, a second A line in a job, a C line with a different shape or a query string, or more GUIDs than these limits. An unclassified hit stops the check for a user decision.
+      - **Recorded per run**: the A, B, C and unclassified GUID counts per job and step, the other categories, the `***` mask count and the scan coverage (lines scanned out of total).
     - **Excluded from the job-log check (known limitation, Phase 12)**: the Phase 5 diagnostic output of `Verify Azure OIDC Authentication` (`az account show`, with subscription and tenant IDs masked by GitHub as `***`) and the failure-only `plan.log` tail of `Generate Plan Evidence`. The exclusion is recorded with the results, and the limitation stays open for Phase 12.
     - **Deletion scenario**: its public projection is leak-free as fixture-verified in Task 9B.4A (the deletion path has no safe real producer). That evidence is cited, not re-run.
   - [ ] **Local WHO** (G12; the user runs every step that prints an identity; revision 2026-10-10, point 2; corrected 2026-10-10 after code verification):
@@ -4575,6 +4605,11 @@ In addition:
     - Current Active Task → Task 10.2 (not started automatically, Execution Rule 8).
 - **Validation**:
   - [ ] All of the above recorded with run ids, commit, each AI run's `headSha`, runner image, artifact digests and timings, plus any incidental scheduled runs during the window.
+  - [ ] For every scenario's drift run and AI run, the D-4 job-log scan is recorded:
+    - the archive-to-run mapping;
+    - the coverage (every API step has log lines; lines scanned out of total);
+    - per job: the A, B, C and unclassified GUID counts, the other categories and the `***` mask count.
+    - The 4 B GUIDs of runs `38023838144` and `38024516418` are recorded as the one-time pre-fix finding, not a failure; B must be 0 in both in-scope jobs of Control A, Control B and any re-run or new attempt of the primary scenario.
   - [ ] `latest_capable_operation` and the deletion-confirmed paths remain fixture-verified (no safe real producer) and are recorded as such, citing their task records (Tasks 9B.2–9B.4A).
 - **Implementation Notes**:
   - Every Azure change is made by the user. Claude only reads (Activity Log, artifacts, public job data).
