@@ -17,6 +17,11 @@ several sections is sent **once**, tagged with every section and its routing
 reason (`sections`). A section is `applicable` only if at least one of its
 changes was included; citations are later checked per section (`cited_keys`).
 
+Cost estimate direction (Task 10.3): with `cost_directions` (address -> the deterministic
+`estimate_direction` of `derive_cost_impact`), each resource with a change sent for
+the `cost` section carries `cost_estimate_direction`. Never an amount: prices,
+deltas and totals never reach a model.
+
 Origin facts (Task 6.5): with `origin_facts` (from the deterministic
 `derive_origin_risk` node), each change also carries `origin` {category,
 lifecycle, risk_factors} and each resource `risk_factors`, `moved`,
@@ -130,6 +135,7 @@ def build_llm_evidence(
     routes: Iterable[Mapping[str, Any]],
     limits: EvidenceLimits = EvidenceLimits(),
     origin_facts: Mapping[str, Any] | None = None,
+    cost_directions: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Allowlisted, deduplicated, size-bounded evidence for the routed changes.
 
@@ -195,16 +201,19 @@ def build_llm_evidence(
         if new_resource:
             addresses.append(resource["address"])
 
-    evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts)
+    directions = dict(cost_directions or {})
+    evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts, directions)
     while kept and len(render_evidence(evidence)) > limits.max_evidence_chars:
         resource, entry = kept.pop()
         omitted.append({"address": resource["address"], "path": entry["path"], "sections": list(entry["sections"])})
         values_cut = [v for v in values_cut if (v["address"], v["path"]) != (resource["address"], entry["path"])]
-        evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts)
+        evidence = _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts,
+                             directions)
     return evidence
 
 
-def _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts) -> dict[str, Any]:
+def _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, resource_facts,
+              directions=None) -> dict[str, Any]:
     addresses: list[str] = []
     for resource, _ in kept:
         if resource["address"] not in addresses:
@@ -220,6 +229,8 @@ def _assemble(kept, resources, omitted, values_cut, merged, routed_per_section, 
             item.update({"risk_factors": list(facts["risk_factors"]), "moved": facts["moved"],
                          "importing": facts["importing"], "action_reason": facts["action_reason"]})
         item["changes"] = [entry for r, entry in kept if r["address"] == address]
+        if address in (directions or {}) and any("cost" in entry["sections"] for entry in item["changes"]):
+            item["cost_estimate_direction"] = directions[address]  # Task 10.3: a direction only, never an amount
         out_resources.append(item)
     included = {section: sum(1 for _, e in kept if section in e["sections"]) for section in SECTIONS}
     record = {

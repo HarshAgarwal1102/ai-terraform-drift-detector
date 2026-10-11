@@ -70,6 +70,7 @@ from ai_engine.llm import invoke_llm
 from ai_engine.nodes.common import free_text_violation, strict_json_loads
 from ai_engine.nodes.investigation_facts import InvestigationSection, validate_investigation_section
 from ai_engine.nodes.cost_analysis import (
+    SUMMARY_WITHHELD,
     ConfigurationSection,
     CostSection,
     validate_configuration_section,
@@ -124,7 +125,9 @@ You receive deterministic drift evidence between <{EVIDENCE_TAG}> tags. Rules:
    Terraform's plan would do is fine; telling the reader what to do is not.
 7. No pricing data is provided. Never state amounts, prices, rates, savings, charges or
    currency. Monetary impact cannot be determined from this evidence; say so if relevant.
-   You may only give a qualitative direction for cost.
+   You may only give a qualitative direction for cost. A resource may carry a deterministic
+   `cost_estimate_direction` (increase, decrease, no_change, not_determinable): it is
+   authoritative, so your cost direction must never contradict it.
 8. The `investigation` object (when present) is deterministic Activity Log correlation. Its verdict,
    reason, property_link, actor_attribution, operations and timestamps are authoritative: never
    change, upgrade or contradict them. The Activity Log records operations, not property values:
@@ -271,8 +274,10 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
             # evidence_sent (Task 6.7): what the model was actually given (keys and sections, never values); empty
             # unless a call was made. The final report keeps it so citations can be verified independently.
             # investigation_sent (Task 9B.4): the investigated addresses and operation references sent.
+            # Task 10.3: a cost-tagged key also records the deterministic estimate direction sent (never an amount).
             sent = [{"address": r["address"], "path": list(c["path"]),
-                     "sections": [s for s in SECTIONS if s in c["sections"]]}
+                     "sections": [s for s in SECTIONS if s in c["sections"]],
+                     "estimate_direction": r.get("cost_estimate_direction") if "cost" in c["sections"] else None}
                     for r in evidence["resources"] for c in r["changes"]] if attempted and evidence else []
             return {"attempted": attempted, "status": outcome, "reason": reason, "provider": status.get("provider"),
                     "model": status.get("model"), "max_retries": max_retries,
@@ -293,8 +298,10 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
             return skip_all(f"LLM unavailable: {status.get('reason')}")
 
         all_routes = [route for section in SECTIONS for route in routes[section]]
+        impact = state.get("cost_impact") or {}
+        directions = impact.get("directions") if impact.get("status") == "complete" else None
         # EvidenceIntegrityError propagates: fail closed
-        evidence = build_llm_evidence(parsed, all_routes, limits, origin_facts=origin_facts)
+        evidence = build_llm_evidence(parsed, all_routes, limits, origin_facts=origin_facts, cost_directions=directions)
         evidence["investigation"] = build_investigation_evidence(facts, limits)
         evidence["sections"]["investigation"] = {"applicable": bool(evidence["investigation"]["resources"])}
         truncation = evidence["truncation"]
@@ -370,8 +377,13 @@ def make_analyze_drift(llm: Any | None, limits: EvidenceLimits = EvidenceLimits(
             if violation:
                 summary = None
                 rejected = rejected + [{"index": None, "reason": f"summary_{violation}"}]
-            results[section] = record(section, "ok", findings=findings, rejected_findings=rejected, summary=summary,
-                                      evidence=section_evidence(section))
+            reason = None
+            if section == "cost" and impact.get("status") == "complete":
+                # Task 10.3: a cross-resource free-text summary cannot be checked against the per-resource
+                # estimates, so the deterministic cost statements stand instead of it.
+                summary, reason = None, SUMMARY_WITHHELD
+            results[section] = record(section, "ok", reason, findings=findings, rejected_findings=rejected,
+                                      summary=summary, evidence=section_evidence(section))
         return finish(results, call_record(True, "ok", None, evidence), warnings)
 
     analyze_drift.__name__ = NODE

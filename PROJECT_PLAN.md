@@ -124,8 +124,8 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis (🟡 WORK IN PROGRESS: Task 10.1 🟢 completed 2026-10-04; Task 10.2 🟢 completed 2026-10-11; Task 10.3 ⬜ NOT STARTED)
-- **Current Active Task**: Task 10.3 — AI Cost Impact Explanation Engine (⬜ NOT STARTED; it starts with its design review and is not started automatically, Execution Rule 8). Task 10.2 completed on 2026-10-11: `drift_engine.cost` (library, `cost_delta_version` 1); see its completion notes. Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
+- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis (🟡 WORK IN PROGRESS: Task 10.1 🟢 completed 2026-10-04; Task 10.2 🟢 completed 2026-10-11; Task 10.3 🟡 implemented and validated locally, pending real CI verification)
+- **Current Active Task**: Task 10.3 — AI Cost Impact Explanation Engine (🟡 WORK IN PROGRESS since 2026-10-11: implementation complete and validated locally (AI report v3, `ai-analysis --cost`); pending real CI verification, which needs a separate user-approved dispatch, user decision 2026-10-11). Task 10.2 completed on 2026-10-11: `drift_engine.cost` (library, `cost_delta_version` 1); see its completion notes. Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 9 of 14 (Phases 1–9). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -3164,6 +3164,7 @@ Phase 9B owns the end-to-end drift investigation requirement. When Terraform det
   - **Module boundary (user-approved 2026-10-04, decision F)**: `drift_engine.investigation_public` is the only investigation-related module `ai_engine` may import. An AST test forbids any `ai_engine` import of `investigation`, `who`, `activity_logs` or `attribution`; a subprocess test checks that importing `investigation_public` loads none of them.
   - **LLM input**: only the sanitized deterministic investigation model (G11 fields plus the Terraform evidence already allowed, taken from the **public** drift report from Task 9B.4A on); never raw Activity Log data, identities or IDs.
   - **Module boundary addendum (2026-10-05, Task 9B.4A)**: `ai_engine` may also import the public drift report module (`drift_engine.report_public`); the allowlist test is extended accordingly.
+  - **Module boundary addendum (2026-10-11, Task 10.3)**: `ai_engine` may also import `drift_engine.cost` (Task 10.2), which loads no restricted module; the allowlist test is extended accordingly (see Task 10.3).
   - **CI**: the LLM stays disabled (`AI_LLM_PROVIDER=none`, CLI refusal unchanged). Enabling a real LLM is a later, separate user decision and not part of Phase 9B.
   - **Limits on the LLM**: it may explain consistency, impact and risk. It may not change a verdict, property link, attribution, recommendation, severity or option, and may not cite an operation or timestamp absent from the model.
   - **Guards** reject actor naming, identity-like strings and claims stronger than the deterministic verdict (e.g. "X changed tags.owner", "this operation caused the drift").
@@ -4798,7 +4799,7 @@ In addition:
 ---
 
 ### PHASE 10 — FinOps / Cost Analysis
-**Status**: 🟡 WORK IN PROGRESS — Task 10.1 🟢 completed 2026-10-04; Task 10.2 🟢 completed 2026-10-11; Task 10.3 ⬜ NOT STARTED (the on-hold decision of 2026-10-04 ended when Phase 9B completed on 2026-10-11).
+**Status**: 🟡 WORK IN PROGRESS — Task 10.1 🟢 completed 2026-10-04; Task 10.2 🟢 completed 2026-10-11; Task 10.3 🟡 implemented and validated locally, pending real CI verification (user decision 2026-10-11; the on-hold decision of 2026-10-04 ended when Phase 9B completed on 2026-10-11).
 
 Phase 10 integrates Infracost to provide deterministic cost estimates for configuration drift and infrastructure changes.
 
@@ -5014,19 +5015,43 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
   - **Limitations**: library only, not called by a workflow; the priced path is verified only with the synthetic fixture (dev is all free); Infracost's `name` format for module and `for_each` addresses has not been seen in real output (a differing format is reported as `unmatched`, never as drift); subresources are not attributed separately; `mixed` amounts are never split.
 
 #### Task 10.3 — AI Cost Impact Explanation Engine
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS (implementation complete and validated locally; pending real CI verification, user decision 2026-10-11)
+- **Started**: 2026-10-11
 - **Objective**: Pass Infracost cost delta data into LangGraph node `analyze_cost` to generate human-readable financial explanations.
-- **Dependencies**: Task 10.2, Task 6.4, Task 9A.1, Task 9B.4 (AI report v2 contract)
-- **Files/Areas**: `src/ai_engine/nodes/cost_analysis.py`
+- **Dependencies**: Task 10.2, Task 6.4, Task 9A.1, Task 9B.4 (AI report v2 contract; v3 adds cost, Task 10.3)
+- **Files/Areas**: `src/ai_engine/nodes/cost_analysis.py`; plus (approved design) `src/ai_engine/cli.py`, `graph.py`, `evidence.py`, `nodes/analyze_drift.py`, `nodes/report_generator.py`, `verify.py`, `.github/workflows/ai-analysis.yml`, `tests/test_ai_cost_impact.py` (new), the AI tests pinning report v2, `tests/test_investigation_public.py` (G14 allowlist), `tests/mutation/mutants.json`, `README.md`, `docs/drift-detection-spec.md`.
+  - **Unchanged**: `src/drift_engine/` (including `cost.py`), `drift-detection.yml`, the sanitiser, `schemas/`, `ci/*-constraints.txt` (no new dependency), `terraform/`, recommendation policy v1.
+- **Design (locked 2026-10-11; user decisions 1-5 and the three follow-up decisions)**:
+  - **Report v3** (decision 1): `report_version` / `versions.report` "3". It differs from v2 only in cost: `versions.cost_delta`, `provenance.cost_input_sha256`, the `cost` block, `resources[].cost`, the cost findings' `estimate_direction` / `estimate` / `monetary_impact` / `pricing_source`, `llm.evidence_sent[].estimate_direction`, and the status-dependent cost limitations. The `ai-analysis.yml` summary reads only unchanged fields (plus a status-only `Cost` row), so it stays compatible. Reading v2 artifacts is left to Task 13.1.
+  - **Single source of amounts** (decision 5): `ai-analysis --cost DIR` reads exactly `infracost.json` and `cost_run.json` (strict JSON, 10 MiB cap each) and calls only `drift_engine.cost.cost_delta`; the full validated `cost_delta` v1 document is embedded in the report.
+  - **Statuses** (decision 2): `complete`; `not_available` (`cost_input_not_provided`: no `--cost`, e.g. the cost job failed); `rejected` with a fixed code (the six `cost_delta` codes plus `cost_input_unreadable` / `cost_input_incomplete`). `rejected` still writes the report (exit 0); stderr prints only `cost rejected (<code>)`. Only `complete` carries amounts: the other two have `cost_delta: null`, `monetary_impact: not_determinable_from_evidence`, `pricing_source: null`, `resources[].cost: null`, exactly one amount-free status statement, and the v2 "No pricing data" limitation. A cost input inconsistent with its status, or bound to another drift report, is an internal error (exit 70), never a result.
+  - **Hashes**: `provenance.cost_input_sha256` = `{infracost, cost_run}` canonical SHA-256 (Task 10.2 canonicalization: sorted keys, compact separators, UTF-8) of the parsed documents; set once both parsed (also when rejected by a `cost_delta` code), `null` otherwise.
+  - **Deterministic statements** (decision 3): `derive_cost_impact` (before the LLM) produces fixed `cost.*.v1` statements from `cost_delta` fields only: status, per-resource estimate or "not determinable" with its reason, one per non-empty subtotal (only `confirmed_drift` is drift cost) or `cost.no_drift_cost.v1`, the plan total labelled "not a drift cost", and a reconciliation statement when Infracost's totals do not reconcile. Per-resource statements live in `resources[].cost.statements`; the Phase 9B narrative is unchanged.
+  - **LLM** (follow-up decisions 1-3): the opt-in LLM receives only each cost resource's deterministic `estimate_direction` (increase / decrease / no_change / not_determinable) through the evidence gateway, recorded per cost key in `llm.evidence_sent`, never an amount; the amount guard is unchanged. A cost finding that contradicts it is rejected (`direction_conflicts_with_estimate`, counted, explanation never published). The cost section's free-text summary is withheld when cost is `complete`. In CI there is no LLM.
+  - **Verifier**: recomputes `cost_delta` from the same input with drift_engine.cost and requires the embedded document to equal it; checks status, reason, `monetary_impact`, `pricing_source`, hashes, versions and binding; every statement against its fixed template, filled independently; each resource's cost entry; the cost limitations; each finding's estimate, direction and the absence of contradiction; the withheld summary; the direction per cost key in `evidence_sent`; and, unless `complete`, no amount or currency in the deterministic cost output.
+  - **Workflow** (decision 4): `ai-analysis.yml` downloads `infracost-report-<run id>` by pattern (missing is no failure), passes `--cost` only when the directory exists, and adds a status-only `Cost` summary row. Permissions (`contents: read`, `actions: read`) and secrets (none) are unchanged. No CI dispatch yet. Under D-4 this adds one `actions/download-artifact` redirect line per AI job (allowed: one per download step).
+  - **G14 module boundary addendum (2026-10-11, Task 10.3)**: `ai_engine` may also import `drift_engine.cost` (required by decision 5). It loads only `investigation_public`, `models` and `report_public` (pinned by `tests/test_cost.py`), never a restricted module; the allowlist test is extended accordingly.
 - **Acceptance Criteria**:
-  - [ ] AI output explains exact monthly cost increase/decrease using Infracost numbers.
-  - [ ] AI does not invent or estimate unverified prices.
+  - [x] AI output explains exact monthly cost increase/decrease using Infracost numbers. *(Deterministic `cost.*.v1` statements and `resources[].cost` with the exact `cost_delta` amounts, e.g. "+$106.58/month (106.58 USD per month; current configuration 119.72 USD per month, declared configuration 13.14 USD per month); attribution drift; Infracost list-price estimate, not actual Azure billing"; in CI there is no LLM, so the deterministic statements are the explanation, as in Phase 9B.)*
+  - [x] AI does not invent or estimate unverified prices. *(The LLM never receives or writes an amount (direction only; amount guard unchanged); a missing price stays "not determinable", never zero; `not_available` / `rejected` publish no amount; the verifier recomputes every amount.)*
 - **Validation**:
-  - [ ] Verify AI cost report matches Infracost JSON numbers.
+  - [x] Verify AI cost report matches Infracost JSON numbers. *(`tests/test_ai_cost_impact.py`: the embedded document equals `cost_delta` recomputed from the real sanitised Infracost v0.10.46 samples, every statement is checked against its template, and the verifier recomputes on every run.)*
+  - [ ] Real CI verification (user decision 2026-10-11): one user-approved drift-detection dispatch whose triggered `ai-analysis.yml` run downloads the cost report, records the cost status in the report and the summary (no amount in the summary) and succeeds. Task 10.3 and Phase 10 stay 🟡 until then.
 - **Implementation Notes**:
   - Strict financial accuracy without LLM pricing hallucinations.
+  - Per-resource cost statements are in `resources[].cost.statements`, not in `analysis.narrative` (the Phase 9B narrative and its verifier check are unchanged).
 - **Completion Notes**:
-  - None.
+  - **Implementation complete 2026-10-11; pending real CI verification** (design locked with user decisions 1–5 and three follow-up decisions; implementation approved the same day; the user accepted the G14 addendum, `resources[].cost.statements` and no stderr line for `not_available`).
+  - **Tests**:
+    - `tests/test_ai_cost_impact.py`: 41 passed; `cost_analysis.py` 100% line and branch coverage. Covers exact amounts (complete), null never zero (unpriced), `not_available` and every rejection code with no amount, isolation (drift, investigation and recommendation identical with and without cost), direction-only LLM input, published consistent finding, rejected conflicting findings (`likely_decrease`, `likely_neutral`), kept summary without cost, the amount guard, verifier tampering (amounts, embedded totals, statements, attribution, limitations, hashes, version, direction, estimate, summary, binding), contract guards, determinism, the Markdown cost section, the internal-error paths, the no-drift-cost and reconciliation statements, oversize input and the CLI.
+    - Existing AI tests updated only for report v3, the new graph node and state fields, the workflow steps and summary row, and the validated cost finding shape; `tests/test_investigation_public.py` allowlist extended by `drift_engine.cost` (G14 addendum).
+    - Full suite (`pytest --cov=src/drift_engine tests/`, Python 3.13.12, pinned venv): **2480 passed**, 3971 subtests, 0 failed, coverage 99.49% (gate 85%); `unittest` discovery 963 OK.
+    - AI safeguard mutation corpus (`scripts/run_mutation_checks.py`): 11 new cost mutants added; 202 of 202 caught. Two existing mutants targeted code that this task changed (`new-origin-not-sent`, `g-cost-not-constant`) and were retargeted to the same safeguard in the new code; both are caught.
+    - A test exposed a misleading reconciliation wording (a residual of $0.00 described as "differ by"); the `cost.reconciliation.v1` template now states the number of differing checks and missing amounts, then the unattributed amount.
+  - **Workflow**: YAML parses; every `run:` block passes `bash -n`; the changed check and summary steps are executed by the workflow tests; permissions and secrets unchanged. actionlint and ShellCheck were not run (not installed; no download without approval).
+  - **Real data (local, read-only)**: `ai-analysis --cost` on the cycle-2 R2 artifacts (`.artifacts/task-9B.6-ci-proof/cycle2/primary/`) exits 0 with the verifier passing: cost `complete`, the tag-drifted resource group `no_price_resource_type` with no amount, plan total `0` as Infracost wrote it, investigation `complete` and verdict `sole_capable_operation` unchanged.
+  - **Pending (by user decision)**: a real `ai-analysis.yml` run with the cost download needs a separate, user-approved drift-detection dispatch. Dev is all free, so it can only prove the unpriced path.
+  - **Limitations**: the priced path is fixture-verified only; amounts are list-price estimates for Terraform-managed resources, never actual Azure billing; resources outside Terraform and usage-based charges are not covered; a consistent finding's free-text explanation is inference whose wording cannot be proven semantically (its direction field is verified).
 
 ---
 

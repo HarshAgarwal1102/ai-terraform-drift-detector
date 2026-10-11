@@ -22,6 +22,11 @@ name: "Phase 9A - AI Analysis (no LLM)"
 # the evidence, not from the source run's conclusion (a valid run whose issues job
 # failed is still analysed).
 #
+# Cost (Task 10.3): the source run's infracost-report-<run id> artifact is downloaded by
+# pattern too. Missing (e.g. the cost job failed) -> report v3 cost status not_available;
+# present -> `ai-analysis --cost` binds it to the public drift report through
+# drift_engine.cost; an unusable one is cost status rejected (a fixed code) and the report
+# is still written. Cost never changes the drift result. The summary shows the status only.
 # Exact binding: the report's run.run_id must be github-<source run id>-<source run
 # attempt>, the source run must be on main and triggered by schedule or
 # workflow_dispatch; anything else fails without an AI artifact.
@@ -98,6 +103,15 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/source
 
+      # Task 10.3: same pattern rule; a missing cost report is not a failure (cost status not_available).
+      - name: Download source cost report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: infracost-report-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/source
+
       - name: Check for a valid detection result
         id: present
         run: |
@@ -108,6 +122,12 @@ jobs:
             echo "investigation=${investigation}" >> "${GITHUB_OUTPUT}"
           else
             echo "investigation=" >> "${GITHUB_OUTPUT}"
+          fi
+          cost="${RUNNER_TEMP}/source/infracost-report-${SOURCE_RUN_ID}"
+          if [ -d "${cost}" ]; then
+            echo "cost=${cost}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "cost=" >> "${GITHUB_OUTPUT}"
           fi
           if [ -f "${report}" ]; then
             echo "present=true" >> "${GITHUB_OUTPUT}"
@@ -205,11 +225,15 @@ jobs:
         env:
           REPORT: ${{ steps.present.outputs.report }}
           INVESTIGATION: ${{ steps.present.outputs.investigation }}
+          COST: ${{ steps.present.outputs.cost }}
         run: |
           set -euo pipefail
           args=(--report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis")
           if [ -n "${INVESTIGATION}" ]; then
             args+=(--investigation "${INVESTIGATION}")
+          fi
+          if [ -n "${COST}" ]; then
+            args+=(--cost "${COST}")
           fi
           ai-analysis "${args[@]}"
 
@@ -229,6 +253,7 @@ jobs:
                    "| Remediation options | \(.remediation.options | length) |",
                    "| AI sections analysed | \([.analysis[] | select(.status == "ok")] | length) of \(.analysis | length) |",
                    "| Investigation | `\(.investigation.status)` |",
+                   "| Cost | `\(.cost.status)`\(if .cost.reason then " (`\(.cost.reason)`)" else "" end) |",
                    "| LLM | `\(.llm.provider // "none")` / `\(.llm.status)` |"' "${report}"
             echo "| Artifact | \`ai-analysis-report-${SOURCE_RUN_ID}\` (30 days) |"
           } >> "${GITHUB_STEP_SUMMARY}"

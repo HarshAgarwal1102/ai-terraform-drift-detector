@@ -38,11 +38,12 @@ Remediation is planned, not built (Phase 11). See
 - **Phase 9A — AI Analysis Integration** is complete: Task 9A.1 (the `ai-analysis` CLI and
   the no-LLM `ai-analysis.yml` workflow) was validated in a real CI run.
 - **Phase 10 — FinOps / Cost Analysis** is in progress: Task 10.1 (Infracost cost estimate in
-  the drift workflow) is complete and was validated in a real CI run. See
-  [Cost Estimate](#-cost-estimate-task-101). Task 10.2 (cost delta correlated with drift, a
-  library) is complete; see [Cost delta](#cost-delta-task-102).
-- **Current active task: Task 10.3 — AI Cost Impact Explanation Engine** (Phase 10), which
-  starts with its design review.
+  the drift workflow, validated in a real CI run; see [Cost Estimate](#-cost-estimate-task-101))
+  and Task 10.2 (cost delta correlated with drift; see [Cost delta](#cost-delta-task-102)) are
+  complete. Task 10.3 (deterministic cost impact in the AI report v3; see
+  [AI Analysis](#-ai-analysis-task-9a1)) is implemented and validated locally.
+- **Current active task: Task 10.3 — AI Cost Impact Explanation Engine** (Phase 10), pending real
+  CI verification (a separate, approved dispatch).
 
 | Phase | Status |
 |---|---|
@@ -58,7 +59,7 @@ Remediation is planned, not built (Phase 11). See
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
-| 10 — FinOps / cost analysis | 🟡 In progress (10.1 Infracost integration and 10.2 cost delta complete; 10.3 not started) |
+| 10 — FinOps / cost analysis | 🟡 In progress (10.1 and 10.2 complete; 10.3 AI cost impact implemented, pending real CI verification) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -107,6 +108,9 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
     severity are never changed.
   - The `ai-analysis` command and the no-LLM `ai-analysis.yml` workflow (Task 9A.1) run it
     after every valid detection run. See [AI Analysis](#-ai-analysis-task-9a1).
+  - Report v3 (Task 10.3) adds the deterministic cost impact from the run's cost estimate:
+    exact list-price estimates (never billing), with confirmed drift kept apart from other
+    amounts; the LLM never sees or states an amount.
 - **Activity Log attribution** (Phase 7): `drift-engine activity-logs` collects Azure Activity
   Log evidence (opt-in `[azure]` extra), and `drift-engine attribute` correlates it with
   drifted resources, falling back to "unknown" when logs are missing.
@@ -124,14 +128,13 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   but never changes the drift result. See [Cost Estimate](#-cost-estimate-task-101).
 - **Cost delta** (Task 10.2): `drift_engine.cost` correlates that artifact with the run's
   public drift report and returns per-resource monthly cost deltas, keeping confirmed drift
-  separate from configuration, mixed, ambiguous and unmatched amounts. It's a library; no
-  workflow calls it yet. See [Cost delta](#cost-delta-task-102).
+  separate from configuration, mixed, ambiguous and unmatched amounts. It's a library; the
+  AI analysis (Task 10.3) uses it. See [Cost delta](#cost-delta-task-102).
 
 ### 🔜 Planned (not yet implemented)
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- AI cost explanations based on Infracost numbers (Task 10.3).
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
   and no apply triggered by a merge.
@@ -417,6 +420,10 @@ The `ai-analysis` command runs the Phase 6 AI engine over a drift report and wri
 ```bash
 pip install -e ".[ai]"
 ai-analysis --report .artifacts/drift-report/drift_report.json --output-dir .artifacts/ai-analysis
+# with the run's investigation and cost estimate (report v3, Task 10.3)
+ai-analysis --report .artifacts/drift-report/drift_report.json \
+  --investigation .artifacts/drift-investigation/drift_investigation.json \
+  --cost .artifacts/infracost-report --output-dir .artifacts/ai-analysis
 ```
 
 The drift report is read-only input. The drift result, severity and `drift_detected` are
@@ -436,6 +443,29 @@ Actions the command refuses to run unless `AI_LLM_PROVIDER` is **explicitly** `n
 the AI sections are recorded as skipped and the LLM as not attempted. Enabling a real LLM in
 CI is a separate decision that needs approval (secrets, data leaving the runner, cost).
 
+**Cost impact (Task 10.3, report v3).** With `--cost` (the run's `infracost-report` directory),
+the report explains the estimated monthly cost impact with fixed, deterministic statements.
+Every amount comes from [`drift_engine.cost`](#cost-delta-task-102), whose full `cost_delta`
+v1 document is embedded in the report for traceability.
+- `cost.status` is `complete`, `not_available` (no `--cost`, e.g. the cost job failed) or
+  `rejected` (a fixed code such as `binding_mismatch` or `cost_input_incomplete`). Only
+  `complete` carries amounts; the other two publish one status statement and no amount, and the
+  report is still written. Cost never changes the drift result, the investigation or the
+  recommendation.
+- Amounts are Infracost **list-price estimates** for Terraform-managed resources, **not actual
+  Azure billing**. Only the confirmed-drift subtotal is drift cost; the Infracost plan total is
+  labelled as drift and pending configuration changes combined. A missing price stays
+  "not determinable", never zero.
+- The opt-in LLM receives only each resource's deterministic `estimate_direction` (increase,
+  decrease, no change, not determinable), never an amount. A cost finding that contradicts it is
+  rejected and counted (`direction_conflicts_with_estimate`), its text never published, and the
+  cost section's free-text summary is withheld when cost is `complete`.
+- The independent verifier recomputes the cost delta from the same input and checks every amount,
+  attribution, status, statement, limitation and direction before anything is written.
+- Report v3 differs from v2 only in these cost fields (`report_version` "3", `versions.cost_delta`,
+  `provenance.cost_input_sha256`, the `cost` block, `resources[].cost`, the cost findings'
+  estimate fields and `llm.evidence_sent[].estimate_direction`).
+
 **Workflow.** [`ai-analysis.yml`](.github/workflows/ai-analysis.yml) runs after each
 completed "Phase 5 - Drift Detection" run on `main` (`workflow_run`). It's separate, so an AI
 failure can never change the detection run's result. It:
@@ -451,13 +481,15 @@ failure can never change the detection run's result. It:
   job (Task 9B.5);
 - passes the run's `drift-investigation-<run_id>` artifact, when present, to
   `ai-analysis --investigation`, which validates it and binds it to the public drift report
-  (report v2; missing means every drifted resource is `not_investigated`);
+  (missing means every drifted resource is `not_investigated`);
+- passes the run's `infracost-report-<run_id>` artifact, when present, to `ai-analysis --cost`
+  (Task 10.3; missing means cost `not_available`, an unusable one `rejected`);
 - requires the report's `run.run_id` to be `github-<source run id>-<source run attempt>`;
   a report from another run or attempt fails the job;
 - installs the AI stack only through [`ci/ai-constraints.txt`](ci/ai-constraints.txt),
   which pins every resolved package exactly, and fails if anything installed is unpinned;
-- writes a step summary with counts only (resources, remediation options, AI sections, LLM
-  status) and publishes nothing to issues.
+- writes a step summary with counts only (resources, remediation options, AI sections,
+  investigation and cost status, LLM status; never an amount) and publishes nothing to issues.
 
 **Artifact.** `ai-analysis-report-<source run id>` (the two report files, 30 days). It has the
 same public-exposure profile as the public drift report (Task 9B.4A: `ai-analysis` accepts only
@@ -611,8 +643,9 @@ python3 scripts/sanitize_infracost.py --check "$PWD/.artifacts/infracost-report"
 ### Cost delta (Task 10.2)
 
 `drift_engine.cost.cost_delta(public_report, infracost, cost_run)` turns one run's
-`infracost-report` into a `cost_delta_version` 1 document. It's a library function: there's no
-CLI command or workflow step for it, and it reads no file, clock or network.
+`infracost-report` into a `cost_delta_version` 1 document. It's a library function with no CLI
+command of its own, and it reads no file, clock or network. `ai-analysis --cost` (Task 10.3)
+uses it and embeds the document in the AI report.
 
 ```python
 import json
@@ -792,7 +825,7 @@ Later phases added the test files below. Their per-task counts are in the
 - `test_activity_logs.py`, `test_attribution*.py`: Phase 7;
 - `test_github_*.py`: Phase 8;
 - `test_tflint_integration.py`, `test_trivy_config.py`: Phase 9;
-- `test_infracost.py`, `test_cost.py`: Phase 10.
+- `test_infracost.py`, `test_cost.py`, `test_ai_cost_impact.py`: Phase 10.
 
 | Test file | Covers | Tests |
 |---|---|---|
@@ -1117,7 +1150,7 @@ registration holds zero credentials.
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
-| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration and 10.2 cost delta complete (10.3 AI cost explanation planned) |
+| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration and 10.2 cost delta complete; 10.3 AI cost impact (report v3) pending real CI verification |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
 | 13 | Professional dashboard | ⬜ Planned |
@@ -1173,8 +1206,9 @@ registration holds zero credentials.
   `timeGenerated`). The dev environment costs $0, so non-zero CI pricing hasn't been observed;
   the sign rule was verified with a live run on a synthetic plan. A usage-based resource without
   usage data (null quantities) would fail sanitisation (`sanitize_failed`).
-- The cost delta (Task 10.2) is a library that no workflow calls yet. Its priced path is
-  verified only with the synthetic fixture, because every dev resource type is free. Infracost's
+- The cost delta (Task 10.2) and the AI cost impact (Task 10.3) have their priced path
+  verified only with the synthetic fixture, because every dev resource type is free; a real dev
+  run reports the drifted resource group as `no_price_resource_type` with no amount. Infracost's
   resource `name` format for module and `for_each` addresses hasn't been seen in real output;
   if it differs from the Terraform address, those amounts are reported as `unmatched`, never
   attributed to drift.

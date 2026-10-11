@@ -42,6 +42,17 @@ What is checked:
   `llm.investigation_sent` and the investigation section's citations,
   consistency and deterministic fields; the free-text guards re-run with the
   references actually sent.
+- cost impact (Task 10.3, report v3), against the cost input it was given:
+  `cost_delta` is recomputed here with drift_engine.cost (the only source of
+  amounts) and must equal the embedded document; status, reason,
+  `monetary_impact`, `pricing_source`, the input hashes (Task 10.2
+  canonicalization), versions and binding; every run-level and per-resource
+  statement against its fixed template, filled here independently; each
+  resource's cost entry; the cost limitation lines; each cost finding's
+  estimate, `estimate_direction` (the sign, restated here) and the absence of
+  any contradicting direction; the withheld cost summary; the direction
+  recorded per cost key in `llm.evidence_sent`; and, for `not_available` /
+  `rejected`, that no amount or currency appears anywhere in the cost output.
 
 `ai-analysis` runs this check on every report before writing it (design review
 D4): any problem means exit 70 and nothing written.
@@ -58,14 +69,17 @@ import re
 import shlex
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from pydantic import ValidationError
 
 from ai_engine.nodes.common import EvidenceRefs, free_text_violation, timestamp_forms
+from ai_engine.nodes.cost_analysis import COST_TEMPLATES, GROUP_LABELS, NOT_PROVIDED, PRICING_SOURCE, SUMMARY_WITHHELD
 from ai_engine.nodes.investigation_facts import TEMPLATES
 from ai_engine.nodes.remediation import ACCEPT_REMOTE_NOTE, COMMAND_CATALOGUE
-from ai_engine.nodes.report_generator import AiAnalysisReport, render_markdown
+from ai_engine.nodes.report_generator import COST_LIMITATIONS, AiAnalysisReport, render_markdown
+from drift_engine import cost as cost_engine
 from drift_engine import investigation_public as pub
 
 SECTIONS = ("security", "cost", "configuration", "root_cause", "risk")
@@ -145,9 +159,12 @@ def _section_eligible(section: str, resource: Mapping[str, Any], change: Mapping
 
 
 def verify_report(report_json: Mapping[str, Any], drift_report_json: Mapping[str, Any],
-                  investigation_json: Mapping[str, Any] | None = None) -> list[str]:
+                  investigation_json: Mapping[str, Any] | None = None,
+                  cost_input_json: Mapping[str, Any] | None = None) -> list[str]:
     """Problems found in `report_json` against `drift_report_json` and, when the report was generated with one,
-    the public `investigation_json` (empty list = valid)."""
+    the public `investigation_json` (empty list = valid). `cost_input_json` is what the report's cost was built
+    from: None (not provided), {"infracost": ..., "cost_run": ...} (the parsed documents) or {"rejected": code}
+    (the directory could not be read)."""
     try:
         report = AiAnalysisReport.model_validate_json(json.dumps(report_json)).model_dump(mode="json")
     except ValidationError as exc:
@@ -279,7 +296,157 @@ def verify_report(report_json: Mapping[str, Any], drift_report_json: Mapping[str
                 problems.extend(_verify_finding(section, index, finding, sent, changes, truncated))
 
     problems.extend(_verify_remediation(report, drift, changed, changes))
+    problems.extend(_verify_cost(report, drift, cost_input_json))
     return problems
+
+
+# --------------------------------------------------------------------------- cost impact (Task 10.3)
+
+_AMOUNT = re.compile(r"[$€£¥₹]|\bUSD\b|\d")
+
+
+def _sign_direction(delta: str | None) -> str:
+    if delta is None:
+        return "not_determinable"
+    value = Decimal(delta)
+    return "increase" if value > 0 else "decrease" if value < 0 else "no_change"
+
+
+_CONTRADICTS = {"likely_increase": {"decrease", "no_change"}, "likely_decrease": {"increase", "no_change"},
+                "likely_neutral": {"increase", "decrease"}, "undetermined": set()}
+
+
+def _fill(template_id: str, **slots: Any) -> dict[str, str]:
+    return {"id": template_id, "text": COST_TEMPLATES[template_id].format(**slots)}
+
+
+def _per_month(value: str | None) -> str:
+    return "not reported" if value is None else f"{value} USD per month"
+
+
+def _expected_cost_statements(status: str, reason: str | None, doc: Mapping[str, Any] | None) -> list[dict]:
+    if status != "complete":
+        return ([_fill("cost.status_not_available.v1")] if status == "not_available"
+                else [_fill("cost.status_rejected.v1", code=reason)])
+    totals = doc["totals"]
+    out = [_fill("cost.status_complete.v1")]
+    for group in ("confirmed_drift", "configuration", "mixed", "ambiguous", "unmatched"):
+        sub = totals[group]
+        if sub["with_cost"] or sub["without_cost"]:
+            amount = ("not determinable from available evidence" if sub["monthly_cost_delta"] is None
+                      else f"{sub['display']} ({sub['monthly_cost_delta']} USD per month)")
+            out.append(_fill("cost.group.v1", label=GROUP_LABELS[group], amount=amount, with_cost=sub["with_cost"],
+                             incomplete="" if sub["complete"] else
+                             f"; incomplete: {sub['without_cost']} without a price"))
+        elif group == "confirmed_drift":
+            out.append(_fill("cost.no_drift_cost.v1"))
+    plan = totals["infracost_plan_delta"]
+    out.append(_fill("cost.plan_delta.v1", display=plan["display"], delta=plan["monthly_cost_delta"]))
+    recon = doc["reconciliation"]
+    if recon["status"] == "residual":
+        values = [p["residual"] for p in recon["projects"] if p["has_diff"]]
+        values += [recon["root_vs_projects"]["residual"], recon["root_vs_total_minus_past"]["residual"]]
+        out.append(_fill("cost.reconciliation.v1", checks=sum(1 for v in values if Decimal(v) != 0),
+                         missing=sum(p["lines_without_amount"] for p in recon["projects"]),
+                         display=totals["unreconciled"]["display"],
+                         delta=totals["unreconciled"]["monthly_cost_delta"]))
+    return out
+
+
+def _expected_resource_statement(entry: Mapping[str, Any]) -> dict[str, str]:
+    if entry["monthly_cost_delta"] is None:
+        return _fill("cost.resource_unpriced.v1", address=entry["address"], cost_status=entry["cost_status"],
+                     attribution=entry["attribution"])
+    return _fill("cost.resource.v1", address=entry["address"], display=entry["display"],
+                 delta=entry["monthly_cost_delta"], past=_per_month(entry["past_monthly_cost"]),
+                 desired=_per_month(entry["desired_monthly_cost"]), attribution=entry["attribution"])
+
+
+def _expected_cost(drift: Mapping[str, Any], cost_input: Mapping[str, Any] | None) -> tuple[str, Any, Any, Any]:
+    """(status, reason, cost_delta document, input hashes) recomputed from the cost input."""
+    if cost_input is None:
+        return "not_available", NOT_PROVIDED, None, None
+    if "rejected" in cost_input:
+        return "rejected", cost_input["rejected"], None, None
+    infracost, cost_run = cost_input["infracost"], cost_input["cost_run"]
+    hashes = {"infracost": _fingerprint(infracost), "cost_run": _fingerprint(cost_run)}
+    try:
+        return "complete", None, cost_engine.cost_delta(drift, infracost, cost_run), hashes
+    except cost_engine.CostDeltaError as exc:
+        return "rejected", exc.code, None, hashes
+
+
+def _verify_cost(report: Mapping[str, Any], drift: Mapping[str, Any],
+                 cost_input: Mapping[str, Any] | None) -> list[str]:
+    out: list[str] = []
+    add = out.append
+    status, reason, doc, hashes = _expected_cost(drift, cost_input)
+    cost, src = report["cost"], report["provenance"]
+    complete = status == "complete"
+    if (cost["status"], cost["reason"]) != (status, reason):
+        add("cost: status or reason differs from the cost input")
+    if cost["cost_delta"] != doc:
+        add("cost: cost_delta is not the document computed from the cost input")
+    if cost["monetary_impact"] != ("estimated_list_price" if complete else "not_determinable_from_evidence") \
+            or cost["pricing_source"] != (PRICING_SOURCE if complete else None):
+        add("cost: monetary_impact / pricing_source do not match the cost status")
+    if src["cost_input_sha256"] != hashes:
+        add("provenance: cost_input_sha256 does not match the cost input")
+    if src["versions"]["cost_delta"] != ("1" if complete else None):
+        add("provenance: version cost_delta does not match the cost status")
+    if complete and (src["drift_report_sha256"], src["run_id"], src["environment"]) != (
+            doc["binding"]["drift_report_sha256"], doc["binding"]["run_id"], doc["binding"]["environment"]):
+        add("cost: the cost_delta binding differs from the report provenance")
+    if cost["statements"] != _expected_cost_statements(status, reason, doc):
+        add("cost: statements are not the fixed cost statements of the cost input")
+    entries = {e["address"]: e for e in (doc["resources"] if complete else [])}
+    if complete and set(entries) != {r["address"] for r in report["resources"]}:
+        add("cost: cost entries do not correspond one-to-one to the report's resources")
+    for resource in report["resources"]:
+        entry = entries.get(resource["address"])
+        expected = {**entry, "statements": [_expected_resource_statement(entry)]} if entry else None
+        if resource["cost"] != expected:
+            add(f"resource {resource['address']}: cost entry differs from the cost input")
+    # limitations: exactly the cost lines of this status
+    all_cost_lines = {line for lines in COST_LIMITATIONS.values() for line in lines if "{code}" not in line}
+    expected_lines = [line.format(code=reason) for line in COST_LIMITATIONS[status]]
+    present = [line for line in report["limitations"]
+               if line in all_cost_lines or line.startswith("The cost estimate was rejected (")]
+    if present != expected_lines:
+        add("limitations: cost lines do not match the cost status")
+    # AI cost section: estimates attached by code, no contradicting direction, summary withheld when complete
+    section = report["analysis"]["cost"]
+    if complete and section["status"] == "ok" and (section["summary"] is not None or
+                                                    section["reason"] != SUMMARY_WITHHELD):
+        add("analysis.cost: the summary must be withheld when the cost estimate is complete")
+    for index, finding in enumerate(section["findings"]):
+        where = f"analysis.cost.findings[{index}]"
+        entry = entries.get(finding["address"])
+        estimate = ({k: entry[k] for k in ("attribution", "cost_status", "monthly_cost_delta", "display")}
+                    if entry else None)
+        delta = estimate["monthly_cost_delta"] if estimate else None
+        expected_direction = _sign_direction(delta)
+        if finding["estimate"] != estimate or finding["estimate_direction"] != expected_direction:
+            add(f"{where}: estimate or estimate_direction differs from the cost input")
+        if finding["monetary_impact"] != ("estimated_list_price" if delta is not None else
+                                          "not_determinable_from_evidence") \
+                or finding["pricing_source"] != (PRICING_SOURCE if estimate else None):
+            add(f"{where}: monetary_impact / pricing_source do not match the estimate")
+        if expected_direction in _CONTRADICTS[finding["direction"]]:
+            add(f"{where}: direction contradicts the deterministic estimate")
+    # the direction sent with each cost key (never an amount)
+    for key in report["llm"]["evidence_sent"]:
+        entry = entries.get(key["address"]) if "cost" in key["sections"] else None
+        expected = _sign_direction(entry["monthly_cost_delta"]) if entry else None
+        if key["estimate_direction"] != expected:
+            add(f"llm: evidence_sent {key['address']} {'.'.join(key['path'])} records the wrong estimate direction")
+    # defensive: no amount or currency in the deterministic cost output unless complete (AI text is covered by the
+    # cost-claim guard re-run above on every AI text; ordinary digits such as "TLS 1.2" stay allowed there)
+    if not complete and (any(_AMOUNT.search(s["text"]) for s in cost["statements"])
+                         or any(r["cost"] for r in report["resources"])
+                         or any(f["estimate"] for f in section["findings"])):
+        add("cost: an amount or currency appears although the cost status is not complete")
+    return out
 
 
 # --------------------------------------------------------------------------- investigation (Task 9B.4)

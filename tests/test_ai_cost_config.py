@@ -347,7 +347,10 @@ def test_cost_findings_are_qualitative_and_pricing_free():
     result = analyze(state, ScriptedLLM(reply))["inferences"]["analyze_cost"]
     assert result["status"] == "ok"
     [kept] = result["findings"]
-    assert kept["monetary_impact"] == "not_determinable_from_evidence" and kept["pricing_source"] is None
+    # Task 10.3: the validated finding carries only the deterministic direction (none without a cost input);
+    # monetary_impact, pricing_source and any amount are attached by the report builder, never by the LLM path.
+    assert kept["estimate_direction"] == "not_determinable"
+    assert not {"monetary_impact", "pricing_source", "estimate"} & set(kept)
     assert kept["direction"] == "likely_increase" and kept["basis"] == "inference"
     assert (kept["classification"], kept["action"], kept["deterministic_severity"]) == \
         ("external_drift", "update", "MEDIUM")
@@ -377,7 +380,7 @@ def test_free_resource_is_still_not_determinable():
     reply = envelope(cost=[cost_finding(address=address, paths=(path,), cost_driver="resource_lifecycle",
                                         direction="likely_neutral")])
     [kept] = analyze(state, ScriptedLLM(reply))["inferences"]["analyze_cost"]["findings"]
-    assert kept["monetary_impact"] == "not_determinable_from_evidence"
+    assert kept["estimate_direction"] == "not_determinable"
 
 
 @requires_ai
@@ -537,7 +540,7 @@ def test_sku_change_end_to_end(scenario, address, path):
     config = update["inferences"]["analyze_configuration"]
     assert cost["status"] == config["status"] == "ok"
     assert [(f["address"], f["cited_paths"]) for f in cost["findings"]] == [(address, [path])]
-    assert cost["findings"][0]["monetary_impact"] == "not_determinable_from_evidence"
+    assert cost["findings"][0]["estimate_direction"] == "not_determinable"  # no cost input (Task 10.3)
     assert [(f["address"], f["cited_paths"]) for f in config["findings"]] == [(address, [path])]
     assert len(llm.prompts) == 1
 

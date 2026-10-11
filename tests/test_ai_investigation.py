@@ -138,7 +138,7 @@ class _AiBase(_PubBase, RealShapeTests):
 class ScenarioTests(_AiBase):
     def test_verified_portal_tag_edit_meets_the_phase_acceptance(self):
         report, public = self.ai(self.real())
-        self.assertEqual((report["report_version"], report["investigation"]["status"]), ("2", "complete"))
+        self.assertEqual((report["report_version"], report["investigation"]["status"]), ("3", "complete"))
         self.assertEqual(report["provenance"]["investigation_sha256"], pub.canonical_sha256(public))
         r = self.resource(report, RG_ADDR)
         # WHAT (Terraform evidence)
@@ -374,7 +374,8 @@ class ScenarioTests(_AiBase):
         md = render_markdown(report)
         headings = [line for line in md.splitlines() if line.startswith("## ")]
         self.assertEqual(headings, ["## Summary", "## What changed", "## Recorded Azure operations", "## When",
-                                    "## Who", "## Correlation", "## Analysis", "## Recommendation & options",
+                                    "## Who", "## Correlation", "## Analysis", "## Cost impact (estimate)",
+                                    "## Recommendation & options",
                                     "## Limitations", "## Provenance"])
         a, _ = self.ai(public=public)
         self.assertEqual(json.dumps(a, sort_keys=True), json.dumps(report, sort_keys=True))

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Safeguard mutants (Tasks 6.3-6.7, 9B.4, 9B.4A). Each replaces `old` (must occur exactly once in `file`) with `new`; the AI test suite must then fail. Run: python scripts/run_mutation_checks.py",
+  "description": "Safeguard mutants (Tasks 6.3-6.7, 9B.4, 9B.4A, 10.3). Each replaces `old` (must occur exactly once in `file`) with `new`; the AI test suite must then fail. Run: python scripts/run_mutation_checks.py",
   "tests": [
     "tests/test_ai_config.py",
     "tests/test_ai_parse_drift.py",
@@ -10,7 +10,8 @@
     "tests/test_ai_report.py",
     "tests/test_ai_engine.py",
     "tests/test_ai_investigation.py",
-    "tests/test_public_report.py"
+    "tests/test_public_report.py",
+    "tests/test_ai_cost_impact.py"
   ],
   "mutants": [
     {
@@ -346,8 +347,8 @@
     {
       "id": "new-origin-not-sent",
       "file": "src/ai_engine/nodes/analyze_drift.py",
-      "old": "        evidence = build_llm_evidence(parsed, all_routes, limits, origin_facts=origin_facts)",
-      "new": "        evidence = build_llm_evidence(parsed, all_routes, limits)"
+      "old": "        evidence = build_llm_evidence(parsed, all_routes, limits, origin_facts=origin_facts, cost_directions=directions)",
+      "new": "        evidence = build_llm_evidence(parsed, all_routes, limits, cost_directions=directions)"
     },
     {
       "id": "new-explanation-cap-relaxed",
@@ -556,8 +557,8 @@
     {
       "id": "g-cost-not-constant",
       "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "class CostBoundary(Strict):\n    monetary_impact: Literal[\"not_determinable_from_evidence\"]",
-      "new": "class CostBoundary(Strict):\n    monetary_impact: str"
+      "old": "    monetary_impact: Literal[\"estimated_list_price\", \"not_determinable_from_evidence\"]\n    pricing_source: Literal[\"infracost_list_prices_usd_no_usage_file\"] | None\n    statements: Annotated[list[Statement], Field(min_length=1)]",
+      "new": "    monetary_impact: str\n    pricing_source: Literal[\"infracost_list_prices_usd_no_usage_file\"] | None\n    statements: Annotated[list[Statement], Field(min_length=1)]"
     },
     {
       "id": "g-nondeterministic-output",
@@ -1158,6 +1159,72 @@
       "file": "src/ai_engine/cli.py",
       "old": "        report = PublicDriftReport.model_validate(raw)",
       "new": "        report = __import__(\"drift_engine.models\", fromlist=[\"DriftReport\"]).DriftReport.model_validate(raw)"
+    },
+    {
+      "id": "cost-conflicting-direction-published",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "        if direction_conflicts(finding.direction, estimate):",
+      "new": "        if False:"
+    },
+    {
+      "id": "cost-summary-not-withheld",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "            if section == \"cost\" and impact.get(\"status\") == \"complete\":",
+      "new": "            if False:"
+    },
+    {
+      "id": "cost-amount-sent-to-llm",
+      "file": "src/ai_engine/evidence.py",
+      "old": "            item[\"cost_estimate_direction\"] = directions[address]  # Task 10.3: a direction only, never an amount",
+      "new": "            item[\"cost_estimate_direction\"] = directions[address]\n            item[\"cost_amount\"] = \"106.58 USD\""
+    },
+    {
+      "id": "cost-direction-not-sent",
+      "file": "src/ai_engine/evidence.py",
+      "old": "    directions = dict(cost_directions or {})",
+      "new": "    directions = {}"
+    },
+    {
+      "id": "cost-direction-sign-flipped",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "    return \"increase\" if sign > 0 else \"decrease\" if sign < 0 else \"no_change\"",
+      "new": "    return \"decrease\" if sign > 0 else \"increase\" if sign < 0 else \"no_change\""
+    },
+    {
+      "id": "cost-binding-recheck-skipped",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "        if document[\"binding\"][\"drift_report_sha256\"] != canonical_sha256(state[\"drift_report\"]):",
+      "new": "        if False:"
+    },
+    {
+      "id": "verify-cost-recompute-skipped",
+      "file": "src/ai_engine/verify.py",
+      "old": "    if cost[\"cost_delta\"] != doc:",
+      "new": "    if False:"
+    },
+    {
+      "id": "cost-limitations-dropped",
+      "file": "src/ai_engine/nodes/report_generator.py",
+      "old": "    limitations = list(BASE_LIMITATIONS) + cost_limitations(impact[\"status\"], impact[\"reason\"])",
+      "new": "    limitations = list(BASE_LIMITATIONS)"
+    },
+    {
+      "id": "cli-cost-rejection-hidden",
+      "file": "src/ai_engine/cli.py",
+      "old": "            cost, cost_check = rejected_cost(documents), {\"rejected\": documents}",
+      "new": "            cost, cost_check = None, None"
+    },
+    {
+      "id": "evidence-sent-direction-dropped",
+      "file": "src/ai_engine/nodes/analyze_drift.py",
+      "old": "                     \"estimate_direction\": r.get(\"cost_estimate_direction\") if \"cost\" in c[\"sections\"] else None}",
+      "new": "                     \"estimate_direction\": None}"
+    },
+    {
+      "id": "cost-not-billing-note-dropped",
+      "file": "src/ai_engine/nodes/cost_analysis.py",
+      "old": "_ESTIMATE_NOTE = \"Infracost list-price estimate, not actual Azure billing\"",
+      "new": "_ESTIMATE_NOTE = \"Infracost estimate\""
     }
   ]
 }

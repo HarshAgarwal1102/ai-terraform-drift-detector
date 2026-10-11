@@ -725,6 +725,14 @@ The contract stays valid as resources are added:
    `security-scan.yml` on code changes, without Azure access. Their findings are lint or
    security-scan failures, never drift results. They never run inside or gate
    `drift-detection.yml`, and they never publish drift outputs, issues or labels.
+10. **Cost amounts are deterministic (Task 10.3).** Every amount in the AI report comes from
+    `drift_engine.cost` (§8.3, "Cost delta"), embedded unchanged as the `cost_delta` v1 document
+    and stated with fixed `cost.*.v1` templates. The LLM never receives or writes an amount: it
+    may receive only each resource's deterministic `estimate_direction`, a cost finding that
+    contradicts it is rejected, and the free-text cost summary is withheld when cost is
+    `complete`. Without a usable cost input (`not_available` / `rejected`) no amount is published.
+    Amounts are list-price estimates, never actual Azure billing, and cost never changes the
+    drift result, the investigation or the recommendation.
 
 ## 11. Verification Evidence
 

@@ -1,11 +1,20 @@
-"""Deterministic report generation (Tasks 6.6, 9B.4: report v2). No LLM call.
+"""Deterministic report generation (Tasks 6.6, 9B.4, 10.3: report v3). No LLM call.
 
 `generate_report` (a LangGraph node after `analyze_drift`) builds the strict
-`AiAnalysisReport` JSON (report version 2) from validated state only: the drift
+`AiAnalysisReport` JSON (report version 3) from validated state only: the drift
 report, the deterministic routing/origin/remediation fields, the deterministic
 investigation facts (`investigation_facts`: WHAT / WHEN / WHO / correlation with
-their fixed statements), the recommendation of policy v1, and the six AI
+their fixed statements), the recommendation of policy v1, the deterministic cost
+impact (`cost_impact`, Task 10.3: the embedded `cost_delta` v1 document, `cost.*.v1`
+statements, per-resource cost entries; estimates, never billing), and the six AI
 sections as already validated (rejected findings are counted, never shown).
+
+Report v3 (Task 10.3) differs from v2 only in cost: `report_version` /
+`versions.report` "3", `versions.cost_delta`, `provenance.cost_input_sha256`,
+the top-level `cost` block (`status` complete / not_available / rejected, `reason`,
+`cost_delta`, `monetary_impact`, `pricing_source`, `statements`), `resources[].cost`,
+`llm.evidence_sent[].estimate_direction`, the cost findings' `estimate_direction` /
+`estimate`, and the status-dependent cost limitations.
 The result is the write-once `AiState.report`.
 
 Evidence and inference stay apart: `what` is Terraform evidence, `operations`
@@ -42,7 +51,16 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, JsonValue, model_validator
 
 from ai_engine.nodes.common import CitedPath, Strict
-from ai_engine.nodes.cost_analysis import ConfigTopic
+from ai_engine.nodes.cost_analysis import (
+    DIRECTIONS,
+    NOT_DETERMINABLE,
+    NOT_PROVIDED,
+    PRICING_SOURCE,
+    REJECTION_CODES,
+    ConfigTopic,
+    direction_conflicts,
+    estimate_direction,
+)
 from ai_engine.nodes.investigation_facts import (
     NOT_CONFIRMED,
     REPORT_REASONS,
@@ -54,12 +72,13 @@ from ai_engine.nodes.investigation_facts import (
 from ai_engine.nodes.remediation import CATALOGUE_VERSION, POLICY_VERSION, Recommendation, RemediationOption
 from ai_engine.nodes.root_cause import Channel, Hypothesis, RiskKind
 from ai_engine.nodes.security_analysis import Exposure, Impact
+from drift_engine import cost as cost_engine
 from drift_engine import investigation_public as pub
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
 
-REPORT_VERSION = "2"
+REPORT_VERSION = "3"
 JSON_FILE = "ai_analysis_report.json"
 MARKDOWN_FILE = "ai_analysis_report.md"
 SECTION_KEYS = {"security": "analyze_security", "cost": "analyze_cost", "configuration": "analyze_configuration",
@@ -74,11 +93,26 @@ BASE_LIMITATIONS = (
     "Client application azure_cli also covers Terraform run locally with Azure CLI authentication.",
     "Completeness-dependent statements cover only the Activity Log events available at the investigation's query "
     "time (queried_at); Microsoft publishes no ingestion SLA.",
-    "No pricing data: monetary impact is not determinable from this evidence (Phase 10).",
     "Recommendations follow the deterministic recommendation policy v1; investigation verdicts and caller data never "
     "change them. Nothing has been executed; every option needs human approval (Phase 11).",
     "HCL value fragments do not say where a value is defined (resource block, module input or tfvars).",
 )
+NO_PRICING_LIMITATION = "No pricing data: monetary impact is not determinable from this evidence (Phase 10)."
+COST_LIMITATIONS = {  # Task 10.3: exactly these lines per cost status
+    "complete": ("Cost figures are Infracost list-price estimates (USD, no usage file) for Terraform-managed resources "
+                 "only, not actual Azure billing; resources outside Terraform and usage-based charges are not "
+                 "covered.",
+                 "Only the confirmed-drift subtotal is drift cost; mixed, ambiguous, configuration and unmatched "
+                 "amounts and the Infracost plan total are not."),
+    "not_available": (NO_PRICING_LIMITATION, "No cost estimate was provided (cost_input_not_provided)."),
+    "rejected": (NO_PRICING_LIMITATION, "The cost estimate was rejected ({code})."),
+}
+
+
+def cost_limitations(status: str, reason: str | None) -> list[str]:
+    return [line.format(code=reason) for line in COST_LIMITATIONS[status]]
+
+
 STATUS_LIMITATIONS = {
     "not_available": "No drift investigation was provided: event time (WHEN), the recorded caller (WHO) and the "
                      "correlation are not confirmed by available evidence.",
@@ -102,7 +136,8 @@ class Statement(Strict):
 
 
 class Versions(Strict):
-    report: Literal["2"]
+    report: Literal["3"]
+    cost_delta: Literal["1"] | None
     investigation_public: Literal["1"] | None
     capable_operations_table: Literal["1"] | None
     deletion_rules: Literal["2"] | None
@@ -111,9 +146,16 @@ class Versions(Strict):
     remediation_catalogue: Literal["1"]
 
 
+class CostInputSha256(Strict):
+    """Canonical SHA-256 (Task 10.2 canonicalization) of the parsed cost input documents."""
+    infracost: Sha256
+    cost_run: Sha256
+
+
 class Provenance(Strict):
     drift_report_sha256: Sha256
     investigation_sha256: Sha256 | None
+    cost_input_sha256: CostInputSha256 | None
     classification_version: str
     run_id: str | None
     environment: str | None
@@ -308,6 +350,11 @@ class ResourceRemediation(Strict):
     recommendation: ResourceRecommendation
 
 
+class ResourceCostEntry(cost_engine.ResourceCost):
+    """A `cost_delta` v1 resource entry, copied unchanged, with its fixed `cost.*.v1` statement."""
+    statements: Annotated[list[Statement], Field(min_length=1)]
+
+
 class ResourceEntry(Strict):
     address: str
     type: str
@@ -320,9 +367,12 @@ class ResourceEntry(Strict):
     correlation: Correlation
     analysis: ResourceAnalysis
     remediation: ResourceRemediation
+    cost: ResourceCostEntry | None
 
     @model_validator(mode="after")
     def _consistent(self) -> ResourceEntry:
+        if self.cost is not None and self.cost.address != self.address:
+            raise ValueError("a resource's cost entry is its own")
         not_drift = self.investigation_scope == "not_drift"
         flags = (self.when.status == "not_applicable", self.who.recorded_caller.status == "not_applicable",
                  self.who.actor_attribution.status == "not_applicable", self.correlation.status == "not_applicable")
@@ -354,15 +404,36 @@ class SecurityReportFinding(Strict):
     basis: Literal["inference"]
 
 
+class CostEstimate(Strict):
+    """The deterministic estimate of the cited resource, copied from `cost_delta` by code (never by the LLM)."""
+    attribution: Literal["drift", "configuration", "mixed", "ambiguous"]
+    cost_status: str
+    monthly_cost_delta: cost_engine.Money | None
+    display: str | None
+
+
 class CostReportFinding(Strict):
     address: Address
     cited_paths: Annotated[list[CitedPath], Field(min_length=1)]
     cost_driver: Literal["sku_or_tier", "capacity_or_count", "resource_lifecycle", "other"]
     direction: Literal["likely_increase", "likely_decrease", "likely_neutral", "undetermined"]
-    monetary_impact: Literal["not_determinable_from_evidence"]
-    pricing_source: None
+    estimate_direction: Literal[DIRECTIONS]  # authoritative (Task 10.3)
+    estimate: CostEstimate | None
+    monetary_impact: Literal["estimated_list_price", "not_determinable_from_evidence"]
+    pricing_source: Literal["infracost_list_prices_usd_no_usage_file"] | None
     deterministic_severity: Severity
     classification: str
+
+    @model_validator(mode="after")
+    def _estimate_consistent(self) -> CostReportFinding:
+        delta = self.estimate.monthly_cost_delta if self.estimate else None
+        if self.estimate_direction != estimate_direction(delta):
+            raise ValueError("estimate_direction is not the sign of the estimate")
+        if (self.monetary_impact == "estimated_list_price") != (delta is not None):
+            raise ValueError("monetary_impact is estimated_list_price exactly when the estimate has an amount")
+        if direction_conflicts(self.direction, self.estimate_direction):
+            raise ValueError("a published cost finding never contradicts the estimate direction")
+        return self
     action: str | None
     explanation: Explanation
     basis: Literal["inference"]
@@ -475,6 +546,7 @@ class EvidenceKey(Strict):
     path: Annotated[list[str], Field(min_length=1)]
     sections: Annotated[list[Literal["security", "cost", "configuration", "root_cause", "risk"]],
                         Field(min_length=1)]
+    estimate_direction: Literal[DIRECTIONS] | None  # Task 10.3: the direction sent with a cost key, never an amount
 
 
 class InvestigationKey(Strict):
@@ -503,22 +575,53 @@ class ReportRemediation(Strict):
     reason: str | None
 
 
-class CostBoundary(Strict):
-    monetary_impact: Literal["not_determinable_from_evidence"]
-    pricing_source: None
+class CostImpact(Strict):
+    """Task 10.3: the run's cost impact. Amounts exist only when `complete` (the embedded, validated
+    `cost_delta` v1 document); `not_available` and `rejected` carry one status statement and no amount."""
+    status: Literal["complete", "not_available", "rejected"]
+    reason: Literal[(NOT_PROVIDED, *REJECTION_CODES)] | None  # type: ignore[valid-type]
+    cost_delta: cost_engine.CostDelta | None
+    monetary_impact: Literal["estimated_list_price", "not_determinable_from_evidence"]
+    pricing_source: Literal["infracost_list_prices_usd_no_usage_file"] | None
+    statements: Annotated[list[Statement], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _consistent(self) -> CostImpact:
+        complete = self.status == "complete"
+        if (self.cost_delta is not None) != complete or (self.pricing_source is not None) != complete:
+            raise ValueError("cost_delta and pricing_source exist exactly when the cost status is complete")
+        if (self.monetary_impact == "estimated_list_price") != complete:
+            raise ValueError("monetary_impact is estimated_list_price exactly when the cost status is complete")
+        expected_reason = {"complete": self.reason is None, "not_available": self.reason == NOT_PROVIDED,
+                           "rejected": self.reason in REJECTION_CODES}
+        if not expected_reason[self.status]:
+            raise ValueError("cost reason does not match its status")
+        if not complete and len(self.statements) != 1:
+            raise ValueError("an unavailable or rejected cost has exactly one status statement")
+        return self
 
 
 class AiAnalysisReport(Strict):
-    report_version: Literal["2"]
+    report_version: Literal["3"]
     provenance: Provenance
     summary: Summary
     investigation: InvestigationRun
     resources: list[ResourceEntry]
     analysis: Analysis
     remediation: ReportRemediation
-    cost: CostBoundary
+    cost: CostImpact
     llm: LlmInfo
     limitations: list[str]
+
+    @model_validator(mode="after")
+    def _cost_consistent(self) -> AiAnalysisReport:
+        complete = self.cost.status == "complete"
+        if any((r.cost is not None) != complete for r in self.resources):
+            raise ValueError("resources carry a cost entry exactly when the cost status is complete")
+        for finding in self.analysis.cost.findings:
+            if (finding.estimate is not None) != complete or (finding.pricing_source is not None) != complete:
+                raise ValueError("a cost finding carries an estimate exactly when the cost status is complete")
+        return self
 
 
 # --------------------------------------------------------------------------- build (deterministic)
@@ -543,6 +646,27 @@ def _strip(value: Any) -> Any:
     return json.loads(json.dumps(value))
 
 
+ESTIMATE_FIELDS = ("attribution", "cost_status", "monthly_cost_delta", "display")
+
+
+def _cost_finding(finding: Mapping[str, Any], impact: Mapping[str, Any]) -> dict[str, Any]:
+    """A validated LLM cost finding with the cited resource's deterministic estimate attached by code."""
+    entry = impact["resources"].get(finding["address"]) if impact["status"] == "complete" else None
+    estimate = {field: entry[field] for field in ESTIMATE_FIELDS} if entry else None
+    delta = estimate["monthly_cost_delta"] if estimate else None
+    # estimate_direction stays as validated against the evidence sent; the model checks it equals the estimate's sign
+    return {**finding, "estimate": estimate,
+            "monetary_impact": "estimated_list_price" if delta is not None else NOT_DETERMINABLE,
+            "pricing_source": PRICING_SOURCE if estimate else None}
+
+
+def _cost_block(impact: Mapping[str, Any]) -> dict[str, Any]:
+    complete = impact["status"] == "complete"
+    return {"status": impact["status"], "reason": impact["reason"], "cost_delta": impact["cost_delta"],
+            "monetary_impact": "estimated_list_price" if complete else NOT_DETERMINABLE,
+            "pricing_source": PRICING_SOURCE if complete else None, "statements": impact["statements"]}
+
+
 def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
     drift_report = state["drift_report"]
     parsed = state["parsed_drift"]
@@ -550,6 +674,7 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
     investigation = _strip(state["investigation_facts"])
     plan_state = state["remediation_plan"]
     call = state["llm_call"]
+    impact = _strip(state["cost_impact"])
     run = drift_report.get("run") or {}
     plan = drift_report.get("plan") or {}
     summary = drift_report.get("summary") or {}
@@ -587,9 +712,10 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
             "analysis": {"basis": "deterministic", "narrative": narrative},
             "remediation": {"option_ids": [o["option_id"] for o in plan_state["options"] if o["address"] == address],
                             "recommendation": recommendation},
+            "cost": impact["resources"].get(address) if impact["status"] == "complete" else None,
         })
 
-    limitations = list(BASE_LIMITATIONS)
+    limitations = list(BASE_LIMITATIONS) + cost_limitations(impact["status"], impact["reason"])
     if investigation["status"] in STATUS_LIMITATIONS:
         limitations.append(STATUS_LIMITATIONS[investigation["status"]])
     if not call["attempted"]:
@@ -602,10 +728,12 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
         "report_version": REPORT_VERSION,
         "provenance": {"drift_report_sha256": drift_report_sha256(drift_report),
                        "investigation_sha256": investigation["sha256"],
+                       "cost_input_sha256": impact["input_sha256"],
                        "classification_version": drift_report["classification_version"],
                        "run_id": run.get("run_id"), "environment": run.get("environment"),
                        "plan_timestamp": plan.get("timestamp"),
                        "versions": {"report": REPORT_VERSION,
+                                    "cost_delta": cost_engine.COST_DELTA_VERSION if impact["cost_delta"] else None,
                                     "investigation_public": versions["investigation_public"],
                                     "capable_operations_table": versions["capable_operations_table"],
                                     "deletion_rules": versions["deletion_rules"], "statements": STATEMENTS_VERSION,
@@ -626,12 +754,14 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
         "remediation": {key: plan_state[key] for key in ("catalogue_version", "recommendation_policy_version",
                                                            "options", "approval_required", "automatic_apply",
                                                            "reason")},
-        "cost": {"monetary_impact": "not_determinable_from_evidence", "pricing_source": None},
+        "cost": _cost_block(impact),
         "llm": {key: call.get(key) for key in ("attempted", "status", "reason", "provider", "model", "max_retries")}
         | {"evidence_sent": list(call.get("evidence_sent") or []),
            "investigation_sent": list(call.get("investigation_sent") or [])},
         "limitations": limitations,
     }
+    cost_section = report["analysis"]["cost"]
+    cost_section["findings"] = [_cost_finding(f, impact) for f in cost_section["findings"]]
     return AiAnalysisReport.model_validate_json(json.dumps(report)).model_dump(mode="json")
 
 
@@ -741,12 +871,14 @@ def _finding_lines(finding: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def _section_lines(name: str, section: Mapping[str, Any]) -> list[str]:
+def _section_lines(name: str, section: Mapping[str, Any], cost_status: str) -> list[str]:
     lines = [f"### {SECTION_TITLES[name]}", "",
              f"Status: **{md_text(section['status'])}**" + (f" ({md_text(section['reason'])})"
                                                            if section["reason"] else "")]
     if name == "cost":
-        lines += ["", "Monetary impact: **not determinable from evidence** (no pricing data)."]
+        lines += ["", "Monetary impact: see **Cost impact (estimate)**; the deterministic estimate direction is "
+                      "authoritative and no AI text states an amount." if cost_status == "complete" else
+                  "Monetary impact: **not determinable from evidence** (no pricing data)."]
     if name == "root_cause":
         lines += ["", "Hypotheses about the kind of origin only. Attribution comes only from the deterministic "
                       "investigation (see Who)."]
@@ -896,7 +1028,8 @@ def _correlation_lines(resource: Mapping[str, Any]) -> list[str]:
 
 def render_markdown(report_json: Mapping[str, Any]) -> str:
     """Markdown for a report, from its validated JSON form only. Order: Summary, What changed, Recorded Azure
-    operations, When, Who, Correlation, Analysis, Recommendation & options, Limitations, Provenance."""
+    operations, When, Who, Correlation, Analysis, Cost impact (estimate), Recommendation & options, Limitations,
+    Provenance."""
     report = AiAnalysisReport.model_validate_json(json.dumps(report_json)).model_dump(mode="json")
     src, summary, llm, inv = report["provenance"], report["summary"], report["llm"], report["investigation"]
     resources = report["resources"]
@@ -919,6 +1052,9 @@ def render_markdown(report_json: Mapping[str, Any]) -> str:
     lines.append(f"- Drift investigation: **{md_text(inv['status'])}**"
                  + (f" ({md_text(inv['failure']['stage'])}/{md_text(inv['failure']['reason'])})"
                     if inv["failure"] else ""))
+    cost = report["cost"]
+    lines.append(f"- Cost estimate: **{md_text(cost['status'])}**" + (f" ({md_text(cost['reason'])})"
+                                                                    if cost["reason"] else ""))
     if not resources:
         lines.append("- No changed resources: there are no investigation claims.")
     for resource in resources:
@@ -955,7 +1091,13 @@ def render_markdown(report_json: Mapping[str, Any]) -> str:
         lines += [f"#### {md_code(resource['address'])}", ""] + _statements(resource["analysis"]["narrative"]) + [""]
     lines += ["### AI interpretation (inference)", ""]
     for name in SECTION_TITLES:
-        lines += _section_lines(name, report["analysis"][name])
+        lines += _section_lines(name, report["analysis"][name], cost["status"])
+    lines += ["## Cost impact (estimate)", "",
+              "Basis: deterministic Infracost list-price estimate (`cost_delta` v1). Not actual Azure billing; "
+              "Terraform-managed resources only.", ""] + _statements(cost["statements"]) + [""]
+    for resource in resources:
+        if resource["cost"] is not None:
+            lines += _heading(resource) + _statements(resource["cost"]["statements"]) + [""]
     remediation = report["remediation"]
     lines += ["## Recommendation & options", "",
               "Recommendations follow the deterministic recommendation policy v1; investigation verdicts and caller "
@@ -983,6 +1125,9 @@ def render_markdown(report_json: Mapping[str, Any]) -> str:
               f"- Drift report SHA-256: {md_code(src['drift_report_sha256'])}",
               "- Investigation SHA-256: " + (md_code(src["investigation_sha256"]) if src["investigation_sha256"]
                                               else md_text("none (no investigation provided)")),
+              "- Cost input SHA-256: " + (f"infracost {md_code(src['cost_input_sha256']['infracost'])}, cost_run "
+                                          f"{md_code(src['cost_input_sha256']['cost_run'])}"
+                                          if src["cost_input_sha256"] else md_text("none")),
               f"- Classification version: {md_text(src['classification_version'])}; run: {md_text(src['run_id'])}; "
               f"environment: {md_text(src['environment'])}; plan timestamp: {md_text(src['plan_timestamp'])}",
               "- Versions: " + md_text(", ".join(f"{k} {v if v is not None else 'none'}" for k, v in versions.items())),

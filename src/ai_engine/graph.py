@@ -23,6 +23,10 @@
   like `drift_report`. `investigation_facts` are the deterministic WHAT / WHEN /
   WHO / correlation facts and statements of `derive_investigation`; the
   investigation is authoritative and nothing later can change them. Write-once.
+- `cost` (optional, Task 10.3) is the cost input of `cost_analysis.load_cost_input`: status `complete`
+  (the validated `cost_delta` v1 document of drift_engine.cost), `not_available` or `rejected` (a fixed
+  code). `cost_impact` is its deterministic form (`derive_cost_impact`): statements, per-resource cost
+  entries and estimate directions. Both are read-only and write-once; only the direction ever reaches the LLM.
 - `remediation_plan` holds the deterministic remediation options of
   `plan_remediation` (Task 6.6) and the recommendation of policy v1 per
   resource (Task 9B.4); nothing is ever executed. Write-once.
@@ -39,7 +43,7 @@
 - `warnings` collects non-fatal problems such as an unreachable endpoint.
 
 The graph runs START -> `initialize` -> `parse_drift` -> `classify_drift` ->
-`route_cost_config` -> `derive_origin_risk` -> `derive_investigation` ->
+`route_cost_config` -> `derive_cost_impact` -> `derive_origin_risk` -> `derive_investigation` ->
 `plan_remediation` -> `analyze_drift` -> `generate_report` -> END. Every deterministic node runs
 before the LLM. `analyze_drift` is the only node that receives the LLM client
 and makes **at most one logical LLM call per run** (security, cost and
@@ -70,7 +74,7 @@ from ai_engine.nodes.report_generator import generate_report
 from ai_engine.nodes.root_cause import derive_origin_risk
 from ai_engine.nodes.analyze_drift import make_analyze_drift
 from ai_engine.nodes.investigation_facts import derive_investigation
-from ai_engine.nodes.cost_analysis import route_cost_config
+from ai_engine.nodes.cost_analysis import derive_cost_impact, route_cost_config
 from ai_engine.nodes.security_analysis import classify_drift
 from drift_engine.logs import log_event
 
@@ -162,6 +166,8 @@ write_once_report = _write_once("report")
 write_once_investigation = _write_once("investigation")
 write_once_investigation_facts = _write_once("investigation_facts")
 write_once_llm = _write_once("llm")
+write_once_cost = _write_once("cost")
+write_once_cost_impact = _write_once("cost_impact")
 
 
 def merge_once(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> FrozenDict:
@@ -194,6 +200,8 @@ class AiState(TypedDict, total=False):
     origin_facts: Annotated[dict[str, Any], write_once_origin_facts]
     investigation: Annotated[dict[str, Any], write_once_investigation]
     investigation_facts: Annotated[dict[str, Any], write_once_investigation_facts]
+    cost: Annotated[dict[str, Any], write_once_cost]
+    cost_impact: Annotated[dict[str, Any], write_once_cost_impact]
     remediation_plan: Annotated[dict[str, Any], write_once_remediation_plan]
     report: Annotated[dict[str, Any], write_once_report]
     llm_call: Annotated[dict[str, Any], write_once_llm_call]
@@ -239,6 +247,7 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_node("parse_drift", parse_drift)
     graph.add_node("classify_drift", classify_drift)
     graph.add_node("route_cost_config", route_cost_config)
+    graph.add_node("derive_cost_impact", derive_cost_impact)
     graph.add_node("derive_origin_risk", derive_origin_risk)
     graph.add_node("derive_investigation", derive_investigation)
     graph.add_node("plan_remediation", plan_remediation)
@@ -248,7 +257,8 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
     graph.add_edge("initialize", "parse_drift")
     graph.add_edge("parse_drift", "classify_drift")
     graph.add_edge("classify_drift", "route_cost_config")
-    graph.add_edge("route_cost_config", "derive_origin_risk")
+    graph.add_edge("route_cost_config", "derive_cost_impact")
+    graph.add_edge("derive_cost_impact", "derive_origin_risk")
     graph.add_edge("derive_origin_risk", "derive_investigation")
     graph.add_edge("derive_investigation", "plan_remediation")
     graph.add_edge("plan_remediation", "analyze_drift")
@@ -259,17 +269,22 @@ def build_graph(config: AiConfig | None = None, llm: Any | None = None, limits: 
 
 def run_analysis(drift_report: Mapping[str, Any], config: AiConfig | None = None, llm: Any | None = None,
                  limits: EvidenceLimits = EvidenceLimits(),
-                 investigation: Mapping[str, Any] | None = None) -> AiState:
+                 investigation: Mapping[str, Any] | None = None, cost: Mapping[str, Any] | None = None) -> AiState:
     """Run the graph over a parsed `drift_report.json` (and optionally the public drift investigation bound to
     it) and return the final state.
 
     The caller's objects are never shared with the graph: the reducers deep-copy them into read-only
     containers on input. `derive_investigation` re-checks the investigation (leak scan, public contract,
-    binding to this drift report, scope) and raises InvestigationInputError otherwise.
+    binding to this drift report, scope) and raises InvestigationInputError otherwise. `cost` is the result of
+    `ai_engine.nodes.cost_analysis.load_cost_input` / `cost_input`; without it the cost status is `not_available`.
     """
     inputs: dict[str, Any] = {"drift_report": drift_report}
     if investigation is not None:
         if not isinstance(investigation, Mapping) or not investigation:  # an empty one would read as "not given"
             raise ValueError("investigation must be the parsed drift_investigation.json object")
         inputs["investigation"] = investigation
+    if cost is not None:
+        if not isinstance(cost, Mapping) or not cost:
+            raise ValueError("cost must be the cost input of load_cost_input / cost_input")
+        inputs["cost"] = cost
     return build_graph(config=config, llm=llm, limits=limits).invoke(inputs)

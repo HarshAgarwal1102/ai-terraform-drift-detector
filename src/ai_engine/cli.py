@@ -8,6 +8,8 @@ read-only and the AI output is a separate document.
 
     ai-analysis --report drift_report.json --output-dir out/
     ai-analysis --report drift_report.json --investigation drift_investigation.json --output-dir out/
+    ai-analysis --report drift_report.json --investigation drift_investigation.json --cost infracost-report/ \
+        --output-dir out/
 
 Without `--investigation` the report records `investigation.status =
 not_available` and every drifted resource `not_investigated`
@@ -15,6 +17,12 @@ not_available` and every drifted resource `not_investigated`
 (drift_engine.investigation_public): strict JSON, leak-free, the public contract,
 and bound to this exact drift report (canonical SHA-256, run id, plan timestamp,
 observation window, drifted resources). Otherwise nothing is written (exit 1).
+
+With `--cost` (Task 10.3) the directory must hold exactly the sanitised `infracost.json` and
+`cost_run.json` of the same run (Task 10.1). drift_engine.cost (Task 10.2) computes every amount; a
+directory or document that cannot be used gives cost status `rejected` with a fixed code, the report is
+still written (exit 0) and the drift result is unaffected. Without `--cost` the status is
+`not_available`. Only the status and code are printed, never a value, path or file content.
 
 Before anything is written, the generated report is checked by the independent
 verifier `ai_engine.verify.verify_report` against the drift report and the
@@ -69,6 +77,8 @@ def _parser() -> argparse.ArgumentParser:
                         help="directory for ai_analysis_report.json and ai_analysis_report.md")
     parser.add_argument("--investigation", default=None,
                         help="public drift investigation (drift_investigation.json) bound to the drift report")
+    parser.add_argument("--cost", default=None, metavar="DIR",
+                        help="infracost-report directory (infracost.json and cost_run.json) of the same run")
     return parser
 
 
@@ -152,6 +162,18 @@ def main(argv: list[str] | None = None) -> int:
             _error(f"{investigation}. Nothing was written.")
             return EXIT_REJECTED
 
+    cost, cost_check = None, None
+    if args.cost is not None:
+        from ai_engine.nodes.cost_analysis import cost_input, read_cost_documents, rejected_cost
+
+        documents = read_cost_documents(args.cost)
+        if isinstance(documents, str):
+            cost, cost_check = rejected_cost(documents), {"rejected": documents}
+        else:
+            cost, cost_check = cost_input(loaded, documents["infracost"], documents["cost_run"]), documents
+    if cost is not None and cost["status"] == "rejected":  # not_available shows in the summary line only
+        _error(f"cost rejected ({cost['reason']}); the report records it and the drift result is unaffected")
+
     try:
         config = load_config(os.environ)
     except AiConfigError as exc:
@@ -159,8 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
 
     try:
-        state = run_analysis(loaded, config=config, investigation=investigation)
-        problems = verify_report(state["report"], loaded, investigation)
+        state = run_analysis(loaded, config=config, investigation=investigation, cost=cost)
+        problems = verify_report(state["report"], loaded, investigation, cost_check)
         if problems:  # D4: the independent verifier must accept the report before anything is written
             _error(f"the generated report failed verification ({len(problems)} problem(s)). Nothing was written; "
                    "the drift result is unaffected.")
@@ -178,7 +200,8 @@ def main(argv: list[str] | None = None) -> int:
     llm = report["llm"]
     print(f"AI analysis report written: {paths['json']} and {paths['markdown']} "
           f"(resources {len(report['resources'])}, remediation options {len(report['remediation']['options'])}, "
-          f"investigation {report['investigation']['status']}, LLM {llm['provider'] or 'none'}/{llm['status']})")
+          f"investigation {report['investigation']['status']}, cost {report['cost']['status']}, "
+          f"LLM {llm['provider'] or 'none'}/{llm['status']})")
     return EXIT_OK
 
 

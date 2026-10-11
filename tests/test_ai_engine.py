@@ -36,7 +36,7 @@ from ai_engine.nodes.common import (
     normalize_for_guards,
     strict_json_loads,
 )
-from ai_engine.nodes.cost_analysis import route_cost_config, validate_cost_section, CostSection
+from ai_engine.nodes.cost_analysis import derive_cost_impact, route_cost_config, validate_cost_section, CostSection
 from ai_engine.nodes.investigation_facts import derive_investigation
 from ai_engine.nodes.parse_drift import parse_drift
 from ai_engine.nodes.remediation import hcl_value, plan_remediation
@@ -647,7 +647,8 @@ def test_verify_report_failed_noise_and_unreadable_fragment_cases():
     report = json.loads(json.dumps(_run(added, "ok")["report"]))
     assert verify.verify_report(report, added) == []
     extra = 'module.resource_group.azurerm_resource_group.this["extra"]'
-    report["llm"]["evidence_sent"].append({"address": extra, "path": ["id"], "sections": ["configuration"]})
+    report["llm"]["evidence_sent"].append({"address": extra, "path": ["id"], "sections": ["configuration"],
+                                           "estimate_direction": None})
     assert any("not eligible for the configuration section" in p for p in verify.verify_report(report, added))
 
     drift = fixture_report("plan_evidence", "external_drift")  # tags.probe was removed in Azure: no readable value
@@ -708,7 +709,7 @@ def _graph_with_later(later, include_analysis=True):
 
     graph = StateGraph(AiState)
     steps = [("parse_drift", parse_drift), ("classify_drift", classify_drift), ("route_cost_config",
-             route_cost_config), ("derive_origin_risk", derive_origin_risk),
+             route_cost_config), ("derive_cost_impact", derive_cost_impact), ("derive_origin_risk", derive_origin_risk),
              ("derive_investigation", derive_investigation), ("plan_remediation", plan_remediation)]
     if include_analysis:
         steps += [("analyze_drift", make_analyze_drift(None)), ("generate_report", generate_report)]
@@ -905,7 +906,8 @@ def test_evidence_sent_must_be_empty_when_no_call_was_made():
     report = json.loads(json.dumps(_run(drift, "none")["report"]))
     assert report["llm"]["attempted"] is False and verify.verify_report(report, drift) == []
     report["llm"]["evidence_sent"].append({"address": "azurerm_storage_account.this", "path": ["tags", "owner"],
-                                           "sections": ["configuration"]})  # valid and eligible, but nothing was sent
+                                           "sections": ["configuration"], "estimate_direction": None})
+    # valid and eligible, but nothing was sent
     assert verify.verify_report(report, drift) == ["llm: evidence_sent / investigation_sent is not empty although no call was made"]
 
 
