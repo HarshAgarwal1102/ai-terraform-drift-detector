@@ -125,6 +125,31 @@ prints it and writes DIR/who_evidence.local.json (0600; DIR created 0700). A rec
 caller of an operation is evidence, never a statement of who caused the drift. Exit 0
 every operation matched, 1 otherwise, 2 usage or refusal, 70 internal, 73 write error.
 
+    drift-engine inventory --plan plan.json --report drift_report.json --output unmanaged_inventory.json
+
+Task 10.4: lists every resource group Terraform manages in plan.json (read-only, current az login
+session, `[azure]` extra) and compares each ARM resource ID, case-insensitively, with the IDs Terraform
+manages; writes the public unmanaged_inventory.json (inventory.py), bound to the PUBLIC drift report of
+the same plan. Types, names (unless identifier-like), resource groups, locations and allowlisted pricing
+inputs only; never a resource ID. Unmanaged resources are not drift and never change the drift result.
+Exit: 0 complete; 1 incomplete or failed (still written); 2 usage or unusable input (nothing written);
+70 internal error; 73 write error.
+
+    drift-engine unmanaged-cost --inventory unmanaged_inventory.json --report drift_report.json
+                                --output unmanaged_cost.json
+
+Task 10.4: prices the unmanaged resources with the public Azure Retail Prices API (list prices, USD;
+no Azure credential; unmanaged_cost.py) and writes unmanaged_cost.json. Exit: 0 priced (complete or
+partial: unknown estimates are listed as unavailable, never 0); 1 failed or not run (still written:
+a Retail Prices API failure or an incomplete inventory); 2 usage or unusable input; 70; 73.
+
+    drift-engine unmanaged-check --inventory unmanaged_inventory.json --cost unmanaged_cost.json
+                                 --report drift_report.json [--summary-markdown FILE]
+
+Task 10.4: validates both documents (leak scan, contracts, binding to the public drift report and to
+each other). Exit 0 valid, 1 rejected (a fixed code), 2 usage. --summary-markdown appends the
+step-summary section (counts, types, totals, one row per resource) to FILE.
+
 Restricted output (activity-logs, attribute, investigate) is never written to standard
 output in GitHub Actions (--output is required there), and their unexpected errors
 show the exception type only.
@@ -148,13 +173,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from drift_engine import (
-    __version__, activity_logs, attribution, comparator, investigation, investigation_public, report_public, severity,
-    who,
+    __version__, activity_logs, attribution, comparator, inventory, investigation, investigation_public, report_public,
+    severity, unmanaged_cost, who,
 )
 from drift_engine.classifier import evaluate
 from drift_engine.formatters import FORMATS, render
 from drift_engine.logs import LOG_FORMATS, LOG_LEVELS, configure_logging, log_event
 from drift_engine.models import DriftReport
+from drift_engine.parser import MAX_PLAN_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +316,42 @@ def _parser() -> argparse.ArgumentParser:
     who_cmd.add_argument("--log-level", choices=LOG_LEVELS,
                          help="emit structured logs at this level and above to standard error (default: off)")
     who_cmd.add_argument("--log-format", choices=LOG_FORMATS, default="text",
+                         help="log line format when --log-level is set (default: text)")
+    inventory_cmd = commands.add_parser(
+        "inventory",
+        help="list resources Terraform does not manage in its resource groups (read-only, Task 10.4)",
+        description="List every resource group Terraform manages in plan.json (read-only, current az login session) "
+                    "and write the public unmanaged_inventory.json. Unmanaged resources are not drift.",
+    )
+    inventory_cmd.add_argument("--plan", required=True, help="plan.json written by terraform show -json")
+    inventory_cmd.add_argument("--report", required=True,
+                               help="public drift report (analyze --public-output) of the same plan")
+    inventory_cmd.add_argument("--output", required=True, help="unmanaged_inventory.json to write")
+
+    cost_cmd = commands.add_parser(
+        "unmanaged-cost",
+        help="estimate the monthly list price of unmanaged resources (Azure Retail Prices API, Task 10.4)",
+        description="Price the unmanaged resources of an inventory with the public Azure Retail Prices API "
+                    "(USD list prices, no credential) and write unmanaged_cost.json. Not actual Azure billing.",
+    )
+    cost_cmd.add_argument("--inventory", required=True, help="unmanaged_inventory.json")
+    cost_cmd.add_argument("--report", required=True, help="public drift report the inventory is bound to")
+    cost_cmd.add_argument("--output", required=True, help="unmanaged_cost.json to write")
+
+    unmanaged_check = commands.add_parser(
+        "unmanaged-check",
+        help="validate unmanaged_inventory.json and unmanaged_cost.json (contract, leak scan, binding)",
+        description="Validate the unmanaged inventory and cost documents and their binding to the public drift "
+                    "report; optionally append the step-summary section.",
+    )
+    unmanaged_check.add_argument("--inventory", required=True, help="unmanaged_inventory.json")
+    unmanaged_check.add_argument("--cost", required=True, help="unmanaged_cost.json")
+    unmanaged_check.add_argument("--report", required=True, help="public drift report both are bound to")
+    unmanaged_check.add_argument("--summary-markdown", help="append the summary section (Markdown) to this file")
+    for sub in (inventory_cmd, cost_cmd, unmanaged_check):
+        sub.add_argument("--log-level", choices=LOG_LEVELS,
+                         help="emit structured logs at this level and above to standard error (default: off)")
+        sub.add_argument("--log-format", choices=LOG_FORMATS, default="text",
                          help="log line format when --log-level is set (default: text)")
     return parser
 
@@ -665,6 +727,113 @@ def who_lookup(args: argparse.Namespace) -> int:
     return EXIT_OK if result.complete else EXIT_FAILED
 
 
+def _read_json(path: str, limit: int = unmanaged_cost.MAX_INPUT_BYTES) -> Any:
+    """Strict JSON (duplicate keys and NaN rejected) of a file of at most `limit` bytes (default: the unmanaged
+    documents' 10 MiB), or None."""
+    data = _read_input(path, limit)
+    if data is None:
+        return None
+    try:
+        return investigation_public.strict_json(data)
+    except (ValueError, RecursionError, UnicodeDecodeError):
+        return None
+
+
+def _inventory_source() -> Any:
+    """The Azure Resource Manager source; the SDK is imported only when a request is made."""
+    return inventory.AzureResourceSource()
+
+
+def _price_source() -> Any:
+    return unmanaged_cost.RetailPricesApi()
+
+
+def collect_inventory(args: argparse.Namespace) -> int:
+    # plan.json: the plan parser's limit (50 MiB), as for `analyze` and `investigate`
+    plan, report = _read_json(args.plan, MAX_PLAN_BYTES), _read_json(args.report)
+    if plan is None or report is None:
+        print("ERROR: cannot read --plan or --report as JSON. Nothing was written.", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        document = inventory.collect_inventory(plan, report, _inventory_source())
+    except inventory.InventoryInputError as exc:
+        print(f"UNMANAGED INVENTORY NOT COLLECTED [{exc.code}]. Nothing was written; drift results are unaffected.",
+              file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        _write_atomic(args.output, inventory.render_inventory(document))
+    except OSError as exc:
+        print(f"ERROR: cannot write {args.output} ({type(exc).__name__}).", file=sys.stderr)
+        return EXIT_CANT_WRITE
+    errors = sorted({s.error for s in document.scopes if s.error} | {r.detail_error for r in document.resources
+                                                                     if r.detail_error})
+    print(f"unmanaged_inventory_outcome={document.outcome}  scopes={len(document.scopes)}  "
+          f"listed={document.counts.listed}  managed={document.counts.managed}  "
+          f"unmanaged={document.counts.unmanaged}  attached_to_managed={document.counts.attached_to_managed}"
+          + (f"  errors={','.join(errors)}" if errors else ""))
+    if document.outcome != "complete":
+        print(f"UNMANAGED INVENTORY {document.outcome.upper()} [{document.failure or 'incomplete'}]: the result is "
+              "not a complete inventory; drift results are unaffected.", file=sys.stderr)
+    return EXIT_OK if document.outcome == "complete" else EXIT_FAILED
+
+
+def price_unmanaged(args: argparse.Namespace) -> int:
+    raw, report = _read_json(args.inventory), _read_json(args.report)
+    if raw is None or report is None:
+        print("ERROR: cannot read --inventory or --report as JSON. Nothing was written.", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        if investigation_public.leak_findings(raw):
+            raise unmanaged_cost.UnmanagedInputError("leak")
+        document = inventory.load_inventory(raw)
+    except unmanaged_cost.UnmanagedInputError as exc:
+        print(f"UNMANAGED INVENTORY REJECTED [{exc.code}]. Nothing was written.", file=sys.stderr)
+        return EXIT_USAGE
+    except (ValidationError, ValueError):
+        print("UNMANAGED INVENTORY REJECTED [contract]. Nothing was written.", file=sys.stderr)
+        return EXIT_USAGE
+    if not unmanaged_cost.inventory_bound_to_report(document, report):
+        print("UNMANAGED INVENTORY REJECTED [binding_mismatch]. Nothing was written.", file=sys.stderr)
+        return EXIT_USAGE
+    cost = unmanaged_cost.estimate_costs(document, raw, _price_source())
+    try:
+        _write_atomic(args.output, unmanaged_cost.render_cost(cost))
+    except OSError as exc:
+        print(f"ERROR: cannot write {args.output} ({type(exc).__name__}).", file=sys.stderr)
+        return EXIT_CANT_WRITE
+    t = cost.totals
+    print(f"unmanaged_cost_status={cost.status}  resources={t.resources}  estimated={t.estimated}  "
+          f"partial={t.partial}  no_direct_charge={t.no_direct_charge}  unavailable={t.unavailable}  "
+          f"total={t.estimated_monthly_cost if t.estimated_monthly_cost is not None else 'not_determinable'}"
+          + ("" if t.complete or t.estimated_monthly_cost is None else " (at least: incomplete estimate)"))
+    if cost.status in ("failed", "not_run"):
+        print(f"UNMANAGED COST {cost.status.upper()} [{cost.failure}]: estimates are unavailable, never $0.",
+              file=sys.stderr)
+        return EXIT_FAILED
+    return EXIT_OK
+
+
+def check_unmanaged(args: argparse.Namespace) -> int:
+    raw, cost_raw, report = _read_json(args.inventory), _read_json(args.cost), _read_json(args.report)
+    try:
+        if raw is None or cost_raw is None or report is None:
+            raise unmanaged_cost.UnmanagedInputError("unreadable")
+        document, cost = unmanaged_cost.check_documents(raw, cost_raw, report)
+    except unmanaged_cost.UnmanagedInputError as exc:
+        print(f"UNMANAGED DOCUMENTS REJECTED [{exc.code}]", file=sys.stderr)
+        return EXIT_FAILED
+    if args.summary_markdown:
+        try:
+            with open(args.summary_markdown, "a", encoding="utf-8") as fh:
+                fh.write(unmanaged_cost.summary_markdown(document, cost))
+        except OSError as exc:
+            print(f"ERROR: cannot append to {args.summary_markdown} ({type(exc).__name__}).", file=sys.stderr)
+            return EXIT_CANT_WRITE
+    print(f"unmanaged_documents=valid  inventory={document.outcome}  unmanaged={document.counts.unmanaged}  "
+          f"pricing={cost.status}")
+    return EXIT_OK
+
+
 def _target_mode(path: str, private: bool = False) -> int:
     """Permission bits for the new report at `path`.
 
@@ -731,7 +900,8 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(args.log_level, args.log_format)
     command = {"activity-logs": collect_activity_logs, "attribute": attribute_drift,
                "investigate": investigate_drift, "investigation-check": check_public_investigation,
-               "who": who_lookup}.get(args.command, analyze)
+               "who": who_lookup, "inventory": collect_inventory, "unmanaged-cost": price_unmanaged,
+               "unmanaged-check": check_unmanaged}.get(args.command, analyze)
     try:
         return command(args)
     except KeyboardInterrupt:
@@ -750,6 +920,9 @@ def main(argv: list[str] | None = None) -> int:
             investigate_drift: "  No investigation was written; drift detection results are unaffected.",
             check_public_investigation: "  The public investigation was not validated.",
             who_lookup: "  No WHO evidence was written.",
+            collect_inventory: "  No unmanaged inventory was written; drift detection results are unaffected.",
+            price_unmanaged: "  No unmanaged cost estimate was written; drift detection results are unaffected.",
+            check_unmanaged: "  The unmanaged documents were not validated.",
         }.get(command, "  Drift status is UNKNOWN - this must not be treated as 'no drift'.")
         if command in _RESTRICTED_COMMANDS:
             # restricted data: an exception message can echo input values (callers, IDs)
@@ -759,8 +932,10 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INTERNAL_ERROR
 
 
+# Exception text is withheld for these commands (it can echo input values: callers, IDs, Azure error text).
 _RESTRICTED_COMMANDS = frozenset({collect_activity_logs, attribute_drift, investigate_drift,
-                                  check_public_investigation, who_lookup})
+                                  check_public_investigation, who_lookup, collect_inventory, price_unmanaged,
+                                  check_unmanaged})
 
 
 if __name__ == "__main__":

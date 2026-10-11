@@ -533,7 +533,10 @@ class BoundaryTests(unittest.TestCase):
 
     AI_ALLOWED = ("drift_engine.investigation_public", "drift_engine.logs", "drift_engine.models",
                   "drift_engine.report_public",  # + the public drift report (Task 9B.4A)
-                  "drift_engine.cost")  # + the cost delta (Task 10.3; it loads no restricted module, test_cost.py)
+                  "drift_engine.cost",  # + the cost delta (Task 10.3; it loads no restricted module, test_cost.py)
+                  # + the unmanaged contract and its estimate (Task 10.4; they load no restricted module,
+                  # tests/test_unmanaged_ai.py)
+                  "drift_engine.unmanaged_cost", "drift_engine.unmanaged_public")
 
     def test_ai_engine_imports_only_allowlisted_drift_engine_modules(self):
         """Task 9B.4 (G14): of drift_engine, ai_engine imports only the public investigation model, the

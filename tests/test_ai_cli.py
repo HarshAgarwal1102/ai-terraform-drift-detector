@@ -87,8 +87,9 @@ def test_writes_report_without_llm(tmp_path, capsys, fixture):
     assert data["llm"]["evidence_sent"] == []
     assert all(section["status"] == "skipped" for section in data["analysis"].values())
     assert data["remediation"]["automatic_apply"] is False
-    # report v3 (Task 10.3) without --investigation (Task 9B.4): nothing is investigated, no caller data
-    assert data["report_version"] == "3" and data["investigation"]["status"] == "not_available"
+    # report v4 (Task 10.4) without --investigation (Task 9B.4): nothing is investigated, no caller data
+    assert data["report_version"] == "4" and data["investigation"]["status"] == "not_available"
+    assert (data["unmanaged"]["status"], data["unmanaged"]["reason"]) == ("not_available", "unmanaged_input_not_provided")
     assert data["provenance"]["investigation_sha256"] is None and data["llm"]["investigation_sent"] == []
     for resource in data["resources"]:
         assert resource["correlation"]["reason"] in ("investigation_not_provided", None)
@@ -349,13 +350,15 @@ def test_no_secrets_azure_or_llm_credentials(workflow):
     steps = steps_by_name(workflow)
     users = [name for name, step in steps.items() if "github.token" in json.dumps(step)]
     assert users == ["Download source drift report", "Download source drift investigation",  # Task 9B.5
-                     "Download source cost report"]  # Task 10.3
+                     "Download source cost report",  # Task 10.3
+                     "Download source unmanaged resources report"]  # Task 10.4
 
 
 def test_steps_download_install_and_upload(workflow):
     steps = steps_by_name(workflow)
     assert list(steps) == ["Verify source run", "Download source drift report", "Download source drift investigation",
-                           "Download source cost report", "Check for a valid detection result",
+                           "Download source cost report", "Download source unmanaged resources report",
+                           "Check for a valid detection result",
                            "Checkout Code", "Setup Python", "Install AI analysis (pinned)",
                            "Validate and bind the drift report", "Run AI analysis (no LLM)", "Summary (counts only)",
                            "Upload AI analysis report"]
@@ -374,9 +377,16 @@ def test_steps_download_install_and_upload(workflow):
     assert cost["with"] == {"pattern": "infracost-report-${{ github.event.workflow_run.id }}",
                             "run-id": "${{ github.event.workflow_run.id }}",
                             "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
+    unmanaged = steps["Download source unmanaged resources report"]  # Task 10.4: pattern, missing is no failure
+    assert unmanaged["uses"] == "actions/download-artifact@v4" and "if" not in unmanaged
+    assert unmanaged["with"] == {"pattern": "unmanaged-resources-${{ github.event.workflow_run.id }}",
+                                 "run-id": "${{ github.event.workflow_run.id }}",
+                                 "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
     run = steps["Run AI analysis (no LLM)"]
     assert run["env"]["COST"] == "${{ steps.present.outputs.cost }}"
     assert 'if [ -n "${COST}" ]; then\n  args+=(--cost "${COST}")\nfi' in run["run"]
+    assert run["env"]["UNMANAGED"] == "${{ steps.present.outputs.unmanaged }}"
+    assert 'if [ -n "${UNMANAGED}" ]; then\n  args+=(--unmanaged "${UNMANAGED}")\nfi' in run["run"]
     # Task 9B.6 (D-4 B fix): no temporary-HOME GUID in the checkout log
     assert steps["Checkout Code"]["with"] == {"persist-credentials": False, "set-safe-directory": False}
     assert steps["Setup Python"]["with"] == {"python-version": "3.12"}
@@ -437,7 +447,7 @@ def test_source_run_verification(workflow, tmp_path, branch, event, ok):
 def test_missing_artifact_means_unknown_not_failure(workflow, tmp_path):
     result, outputs, summary = run_step(workflow, "Check for a valid detection result", tmp_path, {})
     assert result.returncode == 0
-    assert outputs == {"present": "false", "investigation": "", "cost": ""}
+    assert outputs == {"present": "false", "investigation": "", "cost": "", "unmanaged": ""}
     assert "Detection result unknown: no AI analysis" in summary
 
 
@@ -451,7 +461,7 @@ def test_present_artifact_is_detected(workflow, tmp_path):
     path = source_report(tmp_path, report("plan_evidence", "in_sync"))
     result, outputs, _ = run_step(workflow, "Check for a valid detection result", tmp_path, {})
     assert result.returncode == 0 and outputs == {"present": "true", "report": str(path), "investigation": "",
-                                                  "cost": ""}
+                                                  "cost": "", "unmanaged": ""}
     investigation = tmp_path / "runner" / "source" / "drift-investigation-123" / "drift_investigation.json"
     investigation.parent.mkdir(parents=True)
     investigation.write_text("{}")
@@ -461,6 +471,10 @@ def test_present_artifact_is_detected(workflow, tmp_path):
     cost.mkdir(parents=True)
     result, outputs, _ = run_step(workflow, "Check for a valid detection result", tmp_path, {})
     assert outputs["cost"] == str(cost)  # ai-analysis decides complete / rejected; absent means not_available
+    unmanaged = tmp_path / "runner" / "source" / "unmanaged-resources-123"  # Task 10.4: the directory, as for cost
+    unmanaged.mkdir(parents=True)
+    result, outputs, _ = run_step(workflow, "Check for a valid detection result", tmp_path, {})
+    assert outputs["unmanaged"] == str(unmanaged)
 
 
 def bound(fixture: str, run_id: str | None = "github-123-2", internal: bool = False) -> dict:
@@ -519,9 +533,10 @@ def test_summary_has_counts_only(workflow, tmp_path):
     assert result.returncode == 0, result.stderr
     rows = [line for line in summary.splitlines() if line.startswith("| ") and not line.startswith("| ---")]
     assert [row.split("|")[1].strip() for row in rows] == ["Field", "Source run", "Resources", "Remediation options",
-                                                           "AI sections analysed", "Investigation", "Cost", "LLM",
-                                                           "Artifact"]
+                                                           "AI sections analysed", "Investigation", "Cost",
+                                                           "Unmanaged resources", "LLM", "Artifact"]
     assert "| Investigation | `not_available` |" in summary
     assert "| Cost | `not_available` (`cost_input_not_provided`) |" in summary  # Task 10.3: status only, no amount
+    assert "| Unmanaged resources | `not_available` (`unmanaged_input_not_provided`) |" in summary  # Task 10.4
     assert "| Resources | 1 |" in summary and "| AI sections analysed | 0 of 6 |" in summary  # v3: still six sections
     assert "`none` / `not_attempted`" in summary

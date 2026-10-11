@@ -37,6 +37,7 @@ from ai_engine.nodes.common import (
     strict_json_loads,
 )
 from ai_engine.nodes.cost_analysis import derive_cost_impact, route_cost_config, validate_cost_section, CostSection
+from ai_engine.nodes.unmanaged_resources import derive_unmanaged
 from ai_engine.nodes.investigation_facts import derive_investigation
 from ai_engine.nodes.parse_drift import parse_drift
 from ai_engine.nodes.remediation import hcl_value, plan_remediation
@@ -709,7 +710,8 @@ def _graph_with_later(later, include_analysis=True):
 
     graph = StateGraph(AiState)
     steps = [("parse_drift", parse_drift), ("classify_drift", classify_drift), ("route_cost_config",
-             route_cost_config), ("derive_cost_impact", derive_cost_impact), ("derive_origin_risk", derive_origin_risk),
+             route_cost_config), ("derive_cost_impact", derive_cost_impact), ("derive_unmanaged", derive_unmanaged),
+             ("derive_origin_risk", derive_origin_risk),
              ("derive_investigation", derive_investigation), ("plan_remediation", plan_remediation)]
     if include_analysis:
         steps += [("analyze_drift", make_analyze_drift(None)), ("generate_report", generate_report)]

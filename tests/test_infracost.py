@@ -521,8 +521,10 @@ def steps_by_name(job: dict) -> dict:
 def test_cost_steps_follow_the_drift_report_upload(wf):
     steps = wf["jobs"]["plan-and-analyze"]["steps"]
     names = [s["name"] for s in steps]
-    # Task 9B.5 (G10): the investigation sits between the drift report upload and the cost step (which runs az logout)
-    assert names[-5:] == ["Upload Drift Report", "Drift Investigation", "Upload Drift Investigation",
+    # Task 9B.5 (G10): the investigation sits between the drift report upload and the cost step (which runs az logout);
+    # Task 10.4: so does the unmanaged inventory (Reader), right after the drift report upload
+    assert names[-7:] == ["Upload Drift Report", "Unmanaged Resource Inventory", "Upload Unmanaged Inventory",
+                          "Drift Investigation", "Upload Drift Investigation",
                           "Infracost Cost Estimate", "Upload Infracost Report"]
     cost, upload = steps[-2], steps[-1]
     assert cost["id"] == "cost" and upload["id"] == "cost_upload"
@@ -564,8 +566,9 @@ def test_secret_and_continue_on_error_are_confined(wf):
     assert sum("secrets.INFRACOST_API_KEY" in ln for ln in code) == 1
     exceptions = [(j, s["name"]) for j, job in wf["jobs"].items() for s in job.get("steps", [])
                   if "continue-on-error" in s]
-    # exactly two documented continue-on-error uploads (Task 10.1 D5, amended by Task 9B.5 / G10)
-    assert exceptions == [("plan-and-analyze", "Upload Drift Investigation"),
+    # exactly three documented continue-on-error uploads (Task 10.1 D5, amended by Task 9B.5 / G10 and Task 10.4)
+    assert exceptions == [("plan-and-analyze", "Upload Unmanaged Inventory"),
+                          ("plan-and-analyze", "Upload Drift Investigation"),
                           ("plan-and-analyze", "Upload Infracost Report")]
     assert not any("continue-on-error" in job for job in wf["jobs"].values())
 

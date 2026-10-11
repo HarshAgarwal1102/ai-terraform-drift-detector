@@ -306,8 +306,9 @@ def test_later_node_cannot_replace_parsed_drift():
 def test_compiled_graph_order():
     edges = {(e.source, e.target) for e in build_graph(config=load_config({})).get_graph().edges}
     assert edges == {(START, "initialize"), ("initialize", "parse_drift"), ("parse_drift", "classify_drift"),
-                     ("classify_drift", "route_cost_config"), ("route_cost_config", "derive_cost_impact"),
-                     ("derive_cost_impact", "derive_origin_risk"),  # Task 10.3
+                     ("classify_drift", "route_cost_config"),
+                     ("route_cost_config", "derive_cost_impact"),  # Task 10.3
+                     ("derive_cost_impact", "derive_unmanaged"), ("derive_unmanaged", "derive_origin_risk"),  # 10.4
                      ("derive_origin_risk", "derive_investigation"), ("derive_investigation", "plan_remediation"),
                      ("plan_remediation", "analyze_drift"),
                      ("analyze_drift", "generate_report"), ("generate_report", END)}

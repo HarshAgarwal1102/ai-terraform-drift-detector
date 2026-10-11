@@ -1263,7 +1263,7 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertEqual(self.wf["concurrency"], {
             "group": "drift-detection-${{ github.event.inputs.environment || 'dev' }}", "cancel-in-progress": False})
         self.assertEqual(sorted(self.jobs), ["cost", "investigation", "issues", "plan-and-analyze", "preflight",
-                                             "report"])  # Task 10.1, Task 9B.5
+                                             "report", "unmanaged"])  # Task 10.1, Task 9B.5, Task 10.4
         for name in ("preflight", "report"):
             self.assertNotIn("permissions", self.jobs[name])
         # Task 9B.5 (G10): plan-and-analyze adds actions: read for the anchor fetch, nothing else
@@ -1303,8 +1303,8 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertEqual(self.text.count("secrets.GITHUB_TOKEN"), 1)
         code_lines = [ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#")]
         self.assertEqual(sum("issues: write" in ln for ln in code_lines), 1)
-        # workflow default + plan-and-analyze (9B.5) + issues + cost (10.1) + investigation (9B.5)
-        self.assertEqual(sum("permissions:" in ln for ln in code_lines), 5)
+        # workflow default + plan-and-analyze (9B.5) + issues + cost (10.1) + investigation (9B.5) + unmanaged (10.4)
+        self.assertEqual(sum("permissions:" in ln for ln in code_lines), 6)
         self.assertNotIn("pull_request_target", self.text)
         self.assertNotIn("issue_comment", self.text)
 

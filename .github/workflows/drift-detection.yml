@@ -10,9 +10,10 @@ name: "Phase 5 - Drift Detection"
 # drifted resource (Task 8.1), evidence-based closing of those issues once the
 # resource is no longer drifted (Task 8.3), an Infracost cost estimate of the
 # same plan (Task 10.1), the public drift report (Task 9B.4A) and the drift
-# investigation (Task 9B.5).
+# investigation (Task 9B.5) and the unmanaged resource inventory with its list-price
+# estimate (Task 10.4).
 #
-# Jobs: preflight -> plan-and-analyze -> issues / cost / investigation / report.
+# Jobs: preflight -> plan-and-analyze -> issues / cost / investigation / unmanaged / report.
 #   preflight         main-branch guard and environment/path validation.
 #   plan-and-analyze  OIDC, Terraform init/validate, plan evidence, drift-engine
 #                     analyze, and upload of the two-file report artifact. Plan
@@ -48,6 +49,13 @@ name: "Phase 5 - Drift Detection"
 #                     Least privilege (contents: read; no id-token, no Azure, no
 #                     secrets). Never changes drift_detected, the drift report or
 #                     artifact, issues, cost or the report job.
+#   unmanaged         Task 10.4: prices the public unmanaged inventory (uploaded by
+#                     plan-and-analyze, Reader, read-only) with the public Azure Retail
+#                     Prices API, verifies it, uploads unmanaged-resources-<run_id> and
+#                     writes the summary. Unmanaged resources are a finding (warning),
+#                     never drift; a failed or incomplete inventory or a Retail Prices
+#                     API failure fails this job. Least privilege (contents: read; no
+#                     id-token, no Azure, no secrets).
 #   report            run summary, also after failures (reporting only).
 #
 # CI result policy (PROJECT_PLAN.md Phase 9B G18). Run status reflects process
@@ -59,6 +67,9 @@ name: "Phase 5 - Drift Detection"
 #   investigation incomplete -> success with a warning; investigation failed (or
 #                              required and never ran) -> the investigation job fails
 #   cost or issues failure  -> that job fails; drift_detected is unchanged
+#   unmanaged resources     -> success with a warning (Task 10.4, not drift); a failed or
+#                              incomplete inventory or a pricing API failure fails the
+#                              unmanaged job; drift_detected is unchanged
 # Terraform plan exit 2 means pending changes, not necessarily drift: the
 # classification decides drift, and exit 2 is never a failure or "unknown".
 #
@@ -219,6 +230,13 @@ jobs:
       investigation_detail: ${{ steps.investigation.outputs.investigation_detail }}
       investigation_publishable: ${{ steps.investigation.outputs.investigation_publishable }}
       investigation_upload_outcome: ${{ steps.investigation_upload.outcome }}
+      # Task 10.4 unmanaged inventory status, consumed only by the unmanaged job.
+      inventory_status: ${{ steps.inventory.outputs.inventory_status }}
+      inventory_failure: ${{ steps.inventory.outputs.inventory_failure }}
+      inventory_detail: ${{ steps.inventory.outputs.inventory_detail }}
+      inventory_unmanaged: ${{ steps.inventory.outputs.inventory_unmanaged }}
+      inventory_publishable: ${{ steps.inventory.outputs.inventory_publishable }}
+      inventory_upload_outcome: ${{ steps.inventory_upload.outcome }}
 
     steps:
       # Same commit as preflight (checkout defaults to github.sha); this runner
@@ -461,6 +479,57 @@ jobs:
           path: |
             ${{ runner.temp }}/drift/drift_report.json
             ${{ runner.temp }}/drift/detection_run.json
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
+
+      # Task 10.4: unmanaged resource inventory (read-only, Reader): every resource group
+      # Terraform manages in this plan is listed and each ARM ID is compared,
+      # case-insensitively, with the IDs Terraform manages. Runs right after the drift
+      # report upload (closest to the plan's refresh) and before the cost step's `az logout`.
+      # Third documented always-exit-0 step (D5 pattern): scripts/inventory_analysis.sh
+      # writes inventory_status / _failure / _detail / _unmanaged / _publishable and exits 0;
+      # an unexpected script failure is mapped to `script_error`. Unmanaged resources are
+      # not drift and never change this job, drift_detected, issues, cost, the investigation
+      # or report; the unmanaged job reports the outcome (and fails on a failed inventory).
+      # plan.json stays on this runner; only the public inventory (types, names, locations,
+      # pricing inputs; never a resource ID) is uploaded. No step-level timeout: the script
+      # bounds every blocking operation itself (venv 60 s, pip 180 s, pin check 30 s, inventory
+      # 300 s with a 240 s Azure deadline, public check 45 s; worst case about 615 s).
+      - name: Unmanaged Resource Inventory
+        id: inventory
+        if: ${{ steps.upload.outcome == 'success' && (steps.analyze.outputs.drift_detected == 'true' || steps.analyze.outputs.drift_detected == 'false') }}
+        env:
+          PLAN_JSON: ${{ runner.temp }}/drift/plan.json
+          PUBLIC_REPORT: ${{ runner.temp }}/drift/drift_report.json
+        run: |
+          set -uo pipefail
+          script_rc=0
+          ./scripts/inventory_analysis.sh || script_rc=$?
+          if [ "${script_rc}" -ne 0 ]; then
+            {
+              echo "inventory_status=failed"
+              echo "inventory_failure=script_error"
+              echo "inventory_detail=none"
+              echo "inventory_unmanaged="
+              echo "inventory_publishable=false"
+            } >> "${GITHUB_OUTPUT}"
+            rm -f "${RUNNER_TEMP}/unmanaged/public/unmanaged_inventory.json"
+            echo "::error::Unmanaged resource inventory failed unexpectedly (script exit ${script_rc}); drift result unaffected; the unmanaged job reports it."
+          fi
+          exit 0
+
+      # Task 10.4: third documented continue-on-error upload: the public inventory only,
+      # whenever it passed the public check (any outcome, so a failed inventory is reported
+      # with its codes). Its outcome is exported and the unmanaged job fails unless it is success.
+      - name: Upload Unmanaged Inventory
+        id: inventory_upload
+        if: ${{ steps.inventory.outputs.inventory_publishable == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: unmanaged-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/unmanaged/public/unmanaged_inventory.json
           retention-days: 30
           if-no-files-found: error
           overwrite: true
@@ -904,6 +973,171 @@ jobs:
             echo "::warning::Drift investigation incomplete: some facts are not confirmed by available evidence (see the investigation summary). A finding, not a failure; drift result unaffected."
           fi
           echo "investigation_status=${INVESTIGATION_STATUS}, upload=success, verification=success"
+
+  # Task 10.4: unmanaged Azure resources (outside Terraform) and their list-price estimate.
+  # Runs for every valid classification (literal "true" or "false"). Least privilege:
+  # contents: read only; no id-token, no Azure login, no secrets. It prices the uploaded
+  # public inventory with the public Azure Retail Prices API (prices.azure.com, GET only, no
+  # credential; the only egress), verifies both documents against the downloaded PUBLIC drift
+  # report, uploads unmanaged-resources-<run_id>, writes the summary section, and then decides
+  # the job result (Require Unmanaged Inventory, last so the summary still renders):
+  #   inventory complete + pricing complete/partial -> success; unmanaged resources found or
+  #     estimates unavailable/partial -> a warning (a finding, never a failure; decision 2);
+  #   inventory failed/incomplete/not uploaded, a Retail Prices API failure, a failed
+  #     verification or upload -> the job fails (explicit; never a clean or $0 result).
+  # Never changes drift_detected, the drift report or artifact, issues, cost, the
+  # investigation or the report job (report keeps needs: [preflight, plan-and-analyze]).
+  unmanaged:
+    name: "Unmanaged Resources (${{ github.event.inputs.environment || 'dev' }})"
+    needs: [preflight, plan-and-analyze]
+    if: ${{ !cancelled() && (needs.plan-and-analyze.outputs.drift_detected == 'true' || needs.plan-and-analyze.outputs.drift_detected == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      UPLOADED: ${{ needs.plan-and-analyze.outputs.inventory_upload_outcome == 'success' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          set-safe-directory: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Runtime dependencies only (pydantic, PyYAML); the Retail Prices client is the standard library.
+      - name: Install drift-engine
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input .
+
+      - name: Download Drift Report
+        uses: actions/download-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/drift-report
+
+      - name: Download Unmanaged Inventory
+        if: ${{ env.UPLOADED == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: unmanaged-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/unmanaged
+
+      # drift-engine unmanaged-cost: exit 0 priced (complete or partial), 1 failed or not run (still
+      # written), anything else unusable. The exit code is recorded; Require Unmanaged Inventory decides.
+      - name: Price Unmanaged Resources
+        id: price
+        if: ${{ env.UPLOADED == 'true' }}
+        run: |
+          set -uo pipefail
+          rc=0
+          drift-engine unmanaged-cost \
+            --inventory "${RUNNER_TEMP}/unmanaged/unmanaged_inventory.json" \
+            --report "${RUNNER_TEMP}/drift-report/drift_report.json" \
+            --output "${RUNNER_TEMP}/unmanaged/unmanaged_cost.json" || rc=$?
+          echo "pricing_exit_code=${rc}" >> "${GITHUB_OUTPUT}"
+          [ "${rc}" -eq 0 ] || [ "${rc}" -eq 1 ]
+
+      # Leak scan, contracts and binding (inventory -> PUBLIC drift report, cost -> inventory).
+      - name: Verify Unmanaged Documents
+        id: verify
+        if: ${{ !cancelled() && steps.price.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          drift-engine unmanaged-check \
+            --inventory "${RUNNER_TEMP}/unmanaged/unmanaged_inventory.json" \
+            --cost "${RUNNER_TEMP}/unmanaged/unmanaged_cost.json" \
+            --report "${RUNNER_TEMP}/drift-report/drift_report.json"
+
+      - name: Upload Unmanaged Resources Report
+        id: report_upload
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unmanaged-resources-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/unmanaged/unmanaged_inventory.json
+            ${{ runner.temp }}/unmanaged/unmanaged_cost.json
+          retention-days: 30
+          if-no-files-found: error
+          overwrite: true
+
+      # Fixed codes and counts first; then, for verified documents, the section written by
+      # unmanaged-check (types, names, estimates, statuses; never a resource ID).
+      - name: Unmanaged Summary
+        if: ${{ !cancelled() }}
+        env:
+          INVENTORY_STATUS: ${{ needs.plan-and-analyze.outputs.inventory_status }}
+          INVENTORY_FAILURE: ${{ needs.plan-and-analyze.outputs.inventory_failure }}
+          INVENTORY_DETAIL: ${{ needs.plan-and-analyze.outputs.inventory_detail }}
+          INVENTORY_UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.inventory_upload_outcome }}
+          PRICING_EXIT_CODE: ${{ steps.price.outputs.pricing_exit_code }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import os, re
+          code = lambda name: (os.environ.get(name) or "n/a") if re.fullmatch(r"[a-z0-9_=,.-]{0,400}", os.environ.get(name) or "") else "invalid"
+          print("### Unmanaged resource inventory (Task 10.4)")
+          print("")
+          print("| Field | Value |")
+          print("| --- | --- |")
+          for label, name in (("Inventory", "INVENTORY_STATUS"), ("Failure", "INVENTORY_FAILURE"),
+                              ("Detail", "INVENTORY_DETAIL"), ("Upload", "INVENTORY_UPLOAD_OUTCOME"),
+                              ("Pricing exit code", "PRICING_EXIT_CODE"), ("Verification", "VERIFY_OUTCOME")):
+              print(f"| {label} | `{code(name)}` |")
+          print("")
+          PY
+          if [ "${VERIFY_OUTCOME}" = "success" ]; then
+            drift-engine unmanaged-check \
+              --inventory "${RUNNER_TEMP}/unmanaged/unmanaged_inventory.json" \
+              --cost "${RUNNER_TEMP}/unmanaged/unmanaged_cost.json" \
+              --report "${RUNNER_TEMP}/drift-report/drift_report.json" \
+              --summary-markdown "${GITHUB_STEP_SUMMARY}"
+            echo "| Artifact | \`unmanaged-resources-${GITHUB_RUN_ID}\` (30 days) |" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      # Decision 2 (Task 10.4): findings never fail; failures are explicit.
+      - name: Require Unmanaged Inventory
+        if: ${{ !cancelled() }}
+        env:
+          INVENTORY_STATUS: ${{ needs.plan-and-analyze.outputs.inventory_status }}
+          INVENTORY_FAILURE: ${{ needs.plan-and-analyze.outputs.inventory_failure }}
+          INVENTORY_UPLOAD_OUTCOME: ${{ needs.plan-and-analyze.outputs.inventory_upload_outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          REPORT_UPLOAD_OUTCOME: ${{ steps.report_upload.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "${INVENTORY_STATUS}" != "complete" ]; then
+            echo "::error::Unmanaged resource inventory did not complete (status '${INVENTORY_STATUS:-not run}', failure '${INVENTORY_FAILURE:-n/a}'): the result is not a clean inventory. Drift result unaffected."
+            exit 1
+          fi
+          if [ "${INVENTORY_UPLOAD_OUTCOME}" != "success" ] || [ "${VERIFY_OUTCOME}" != "success" ] || [ "${REPORT_UPLOAD_OUTCOME}" != "success" ]; then
+            echo "::error::Unmanaged documents were not uploaded or verified (inventory upload '${INVENTORY_UPLOAD_OUTCOME:-n/a}', verification '${VERIFY_OUTCOME:-n/a}', report upload '${REPORT_UPLOAD_OUTCOME:-n/a}'). Drift result unaffected."
+            exit 1
+          fi
+          read -r status failure unmanaged unavailable partial < <(python3 -c 'import json, os, sys
+          d = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "unmanaged", "unmanaged_cost.json"), encoding="utf-8"))
+          t = d["totals"]
+          print(d["status"], d["failure"] or "-", t["resources"], t["unavailable"], t["partial"])')
+          case "${status}" in
+            complete | partial) ;;
+            *) echo "::error::Unmanaged cost estimate ${status} (${failure}): the Retail Prices API failed; estimates are unavailable, never \$0. Drift result unaffected."
+               exit 1 ;;
+          esac
+          if [ "${unmanaged}" -gt 0 ]; then
+            echo "::warning::${unmanaged} Azure resource(s) not managed by Terraform found in its resource groups (a finding, not drift and not a failure; see the summary)."
+          fi
+          if [ "${status}" = "partial" ]; then
+            echo "::warning::Unmanaged cost estimate is partial: ${unavailable} unavailable and ${partial} partial estimate(s); the total covers only the priced part."
+          fi
+          echo "inventory=complete, pricing=${status}, unmanaged=${unmanaged}"
 
   # Runs after failures too (not after cancellation) so every completed run
   # reports its result. It only reports: the run's red/green status comes from the

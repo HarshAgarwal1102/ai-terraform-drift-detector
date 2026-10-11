@@ -129,7 +129,7 @@ def test_complete_report_carries_exactly_the_cost_delta(drift, priced):
     documents = ca.read_cost_documents(priced)
     expected = cost_engine.cost_delta(drift, documents["infracost"], documents["cost_run"])
     cost = report["cost"]
-    assert (report["report_version"], cost["status"], cost["reason"]) == ("3", "complete", None)
+    assert (report["report_version"], cost["status"], cost["reason"]) == ("4", "complete", None)
     assert cost["cost_delta"] == expected  # embedded unchanged: cost.py is the only source of amounts
     assert (cost["monetary_impact"], cost["pricing_source"]) == ("estimated_list_price",
                                                                  "infracost_list_prices_usd_no_usage_file")

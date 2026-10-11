@@ -41,9 +41,12 @@ Remediation is planned, not built (Phase 11). See
   the drift workflow, validated in a real CI run; see [Cost Estimate](#-cost-estimate-task-101))
   and Task 10.2 (cost delta correlated with drift; see [Cost delta](#cost-delta-task-102)) are
   complete. Task 10.3 (deterministic cost impact in the AI report v3; see
-  [AI Analysis](#-ai-analysis-task-9a1)) is implemented and validated locally.
-- **Current active task: Task 10.3 — AI Cost Impact Explanation Engine** (Phase 10), pending real
-  CI verification (a separate, approved dispatch).
+  [AI Analysis](#-ai-analysis-task-9a1)) is implemented and validated locally. Task 10.4
+  (unmanaged Azure resource detection and list-price estimate; AI report v4; see
+  [Unmanaged Resources](#-unmanaged-resources-task-104)) is implemented and validated locally.
+- **Current active tasks: Task 10.3 — AI Cost Impact Explanation Engine** and **Task 10.4 —
+  Unmanaged Resource Detection & Cost Estimation** (Phase 10), both pending real CI and Azure
+  verification (a separate, approved dispatch).
 
 | Phase | Status |
 |---|---|
@@ -59,7 +62,7 @@ Remediation is planned, not built (Phase 11). See
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
-| 10 — FinOps / cost analysis | 🟡 In progress (10.1 and 10.2 complete; 10.3 AI cost impact implemented, pending real CI verification) |
+| 10 — FinOps / cost analysis | 🟡 In progress (10.1 and 10.2 complete; 10.3 AI cost impact and 10.4 unmanaged resources implemented, pending real CI verification) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -111,6 +114,8 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   - Report v3 (Task 10.3) adds the deterministic cost impact from the run's cost estimate:
     exact list-price estimates (never billing), with confirmed drift kept apart from other
     amounts; the LLM never sees or states an amount.
+  - Report v4 (Task 10.4) adds a separate section for Azure resources not managed by Terraform
+    and their list-price estimate (never drift, never part of the Infracost cost).
 - **Activity Log attribution** (Phase 7): `drift-engine activity-logs` collects Azure Activity
   Log evidence (opt-in `[azure]` extra), and `drift-engine attribute` correlates it with
   drifted resources, falling back to "unknown" when logs are missing.
@@ -263,7 +268,7 @@ each network inherits its resource group's name and location.
 ```
 .github/workflows/
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
-├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze (+ Infracost cost step) → issues / cost / report (Phases 5, 8, 10.1)
+├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze (+ unmanaged inventory, investigation, Infracost) → issues / cost / investigation / unmanaged / report (Phases 5, 8, 9B, 10)
 ├── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2), TruffleHog (9.3)
 └── ai-analysis.yml               # After each drift-detection run on main: no-LLM AI report artifact (9A.1)
 
@@ -283,6 +288,7 @@ scripts/
 ├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
 ├── github_automation.py          # Drift issue create/update/close (Tasks 8.1, 8.3)
 ├── infracost_analysis.sh         # Pinned Infracost breakdown of the run's plan.json, fail-closed checks (Task 10.1)
+├── inventory_analysis.sh         # Unmanaged resource inventory in CI: pinned venv, drift-engine inventory, public check (Task 10.4)
 ├── sanitize_infracost.py         # Allowlist sanitiser + run binding for the cost artifact; --check mode (Task 10.1)
 ├── run_mutation_checks.py        # AI-engine safeguard mutation harness (Task 6.7)
 ├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
@@ -301,7 +307,10 @@ src/drift_engine/                 # Python drift engine (Phase 4)
 ├── logs.py                       # Structured logging (4.7)
 ├── activity_logs.py              # Azure Activity Log collector, opt-in [azure] extra (7.1)
 ├── attribution.py                # Drift ↔ Activity Log correlation and fallback (7.2, 7.3)
-└── cost.py                       # Cost delta from the Infracost artifact, correlated with drift (10.2)
+├── cost.py                       # Cost delta from the Infracost artifact, correlated with drift (10.2)
+├── inventory.py                  # Unmanaged resource inventory: ARM listing + comparison, opt-in [azure] extra (10.4)
+├── unmanaged_public.py           # unmanaged_inventory.json contract (10.4)
+└── unmanaged_cost.py             # Azure Retail Prices API estimate of unmanaged resources (10.4)
 
 src/ai_engine/                    # LangGraph AI analysis engine (Phase 6; ai-analysis CLI in 9A.1)
 ├── cli.py                        # ai-analysis command (9A.1)
@@ -317,6 +326,7 @@ tests/
 ├── fixtures/plan_evidence/       # Sanitized real plan evidence (11 scenarios)
 ├── fixtures/*_plans/             # Synthetic plans for the AI-engine tests (Phase 6)
 ├── fixtures/infracost/           # Synthetic priced plan + raw Infracost v0.10.46 samples (Task 10.1)
+├── fixtures/retail_prices/       # Real Azure Retail Prices API samples, Central India (Task 10.4)
 ├── corpora/, mutation/           # Guard/injection corpora and safeguard mutants (Task 6.7)
 ├── scenarios/                    # Azure CLI tag-drift inject / revert / runner (Task 3.6)
 └── test_*.py                     # Unit tests (see Testing)
@@ -424,6 +434,9 @@ ai-analysis --report .artifacts/drift-report/drift_report.json --output-dir .art
 ai-analysis --report .artifacts/drift-report/drift_report.json \
   --investigation .artifacts/drift-investigation/drift_investigation.json \
   --cost .artifacts/infracost-report --output-dir .artifacts/ai-analysis
+# with the run's unmanaged resources (report v4, Task 10.4): the unmanaged-resources-<run id> directory
+ai-analysis --report .artifacts/drift-report/drift_report.json \
+  --unmanaged .artifacts/unmanaged-resources --output-dir .artifacts/ai-analysis
 ```
 
 The drift report is read-only input. The drift result, severity and `drift_detected` are
@@ -466,6 +479,20 @@ v1 document is embedded in the report for traceability.
   `provenance.cost_input_sha256`, the `cost` block, `resources[].cost`, the cost findings'
   estimate fields and `llm.evidence_sent[].estimate_direction`).
 
+**Unmanaged resources (Task 10.4, report v4).** With `--unmanaged` (the run's
+`unmanaged-resources-<run_id>` directory: `unmanaged_inventory.json` and `unmanaged_cost.json`),
+the report gets a separate `unmanaged` block and Markdown section "Unmanaged resources (outside
+Terraform)": status `complete` (both documents valid and bound to this drift report),
+`not_available` (no `--unmanaged`) or `rejected` (`unmanaged_input_unreadable`,
+`unmanaged_input_incomplete`, `contract`, `leak`, `binding_mismatch`; the report is still
+written). Fixed `unmanaged.*.v1` statements state the inventory outcome, the counts by type, each
+resource's estimate or why it has none, and the total (labelled separate from the Infracost
+estimate, never drift cost). Nothing in it reaches the LLM, and drift, cost, investigation and
+recommendation fields are identical with and without it. The verifier re-validates both documents
+and every statement. Report v4 differs from v3 only in this section (`report_version` "4",
+`versions.unmanaged_inventory` / `unmanaged_cost`, `provenance.unmanaged_input_sha256`, the
+`unmanaged` block and its limitation lines).
+
 **Workflow.** [`ai-analysis.yml`](.github/workflows/ai-analysis.yml) runs after each
 completed "Phase 5 - Drift Detection" run on `main` (`workflow_run`). It's separate, so an AI
 failure can never change the detection run's result. It:
@@ -484,12 +511,15 @@ failure can never change the detection run's result. It:
   (missing means every drifted resource is `not_investigated`);
 - passes the run's `infracost-report-<run_id>` artifact, when present, to `ai-analysis --cost`
   (Task 10.3; missing means cost `not_available`, an unusable one `rejected`);
+- passes the run's `unmanaged-resources-<run_id>` artifact, when present, to
+  `ai-analysis --unmanaged` (Task 10.4; missing means `not_available`, an unusable one `rejected`);
 - requires the report's `run.run_id` to be `github-<source run id>-<source run attempt>`;
   a report from another run or attempt fails the job;
 - installs the AI stack only through [`ci/ai-constraints.txt`](ci/ai-constraints.txt),
   which pins every resolved package exactly, and fails if anything installed is unpinned;
 - writes a step summary with counts only (resources, remediation options, AI sections,
-  investigation and cost status, LLM status; never an amount) and publishes nothing to issues.
+  investigation, cost and unmanaged status, the unmanaged count, LLM status; never an amount) and
+  publishes nothing to issues.
 
 **Artifact.** `ai-analysis-report-<source run id>` (the two report files, 30 days). It has the
 same public-exposure profile as the public drift report (Task 9B.4A: `ai-analysis` accepts only
@@ -683,6 +713,101 @@ In dev every resource type is free, so a real run gives `null` deltas with
 `no_price_resource_type`. The priced path is tested with the synthetic SKU fixture
 (`azurerm_service_plan.this`: `+$106.58/month` as confirmed drift).
 
+## 🧭 Unmanaged Resources (Task 10.4)
+
+Terraform only sees what is in its state, so a VM created in the Azure Portal inside a
+Terraform-managed resource group is invisible to drift detection
+([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)). Task 10.4 lists
+what actually exists in every **Terraform-managed resource group** and estimates the monthly list
+price of everything Terraform does not manage. It is a **separate finding**: it never creates,
+changes or invalidates `drift_detected`, the drift report, issues, the investigation or the
+Infracost cost estimate.
+
+```
+plan-and-analyze:  … → Upload Drift Report → Unmanaged Resource Inventory (Reader, GET only) → Upload Unmanaged Inventory → …
+unmanaged job:     download inventory → drift-engine unmanaged-cost (Retail Prices API) → unmanaged-check → upload → summary → require
+ai-analysis.yml:   downloads unmanaged-resources-<run id> → ai-analysis --unmanaged (report v4, separate section)
+```
+
+**Detection** (`drift_engine.inventory`, `drift-engine inventory`):
+- **Scope**: every resource group whose ARM ID is a Terraform-managed resource's ID in the run's
+  `plan.json` (an `azurerm_resource_group`; in dev, `aitdd-dev-main-rg`). Other resource groups
+  are never listed.
+- **Inventory**: `GET /subscriptions/<sub>/resourceGroups/<rg>/resources` (api-version
+  2021-04-01, every page). Then, for pricing and grouping only, one `GET <id>` per virtual
+  machine (with `instanceView`), disk, public IP and network interface. No other requests, never
+  a write: anything other than a GET to `management.azure.com` under a resource-group path is
+  blocked before a token is requested; no redirects; bounded retries, `Retry-After`, pages
+  (50), resources (5000), detail reads (500) and time (240 s; the CI script's hard bound is 300 s,
+  and its venv, pip install and checks are bounded too).
+- **Comparison**: each listed ARM ID is case-folded and compared with every managed ID in the
+  plan (prior state, planned values, resource changes and drift; `report_public.build_index`).
+  A match is managed. A disk whose `managedBy` is a Terraform-managed VM is
+  `attached_to_managed` (it may be that VM's inline OS disk): reported, never called unmanaged,
+  never priced. Everything else is `unmanaged`.
+- **Children and grouping**: a resource below another (a VM extension) gets a `parent` link; a
+  disk → VM, NIC → VM and public IP → NIC get an `attached_to` link (by reference only).
+  Duplicate listing entries are counted once (`duplicates_dropped`).
+- **Outcome**: `complete` only when every scope was listed completely and every required detail
+  was read; `incomplete` (a bound hit or a detail read failed) or `failed` (403, 404, throttling
+  after retries, invalid response, no credential) otherwise. **A failed or incomplete inventory
+  is never reported as clean.**
+
+**Cost estimate** (`drift_engine.unmanaged_cost`, `drift-engine unmanaged-cost`):
+- **Source**: the public, unauthenticated **Azure Retail Prices API**
+  (`prices.azure.com/api/retail/prices`, api-version `2023-01-01-preview`), USD,
+  `priceType eq 'Consumption'` (pay-as-you-go list prices). Infracost isn't used: it prices a
+  Terraform plan, and these resources are not in it. The requests carry only service, product,
+  SKU and region filters, never a resource name, ID or credential.
+- **One meter per resource, exactly**: a VM is priced by `armSkuName` + region + OS (the
+  `… Windows` product unless Azure Hybrid Benefit is set; Spot and Low Priority meters excluded)
+  for **compute only**. A managed disk is priced by its billed tier (the smallest tier at least
+  as large as `diskSizeGB`: P/E 1–80, Standard HDD from S4) and redundancy. A Standard IPv4 public
+  IP by `Standard IPv4 Static Public IP`. Hourly meters × 730 hours, monthly meters × 1, exact
+  `Decimal` arithmetic (JSON numbers parsed as `Decimal`).
+- **No double counting**: every resource is priced at most once, by its own type rule; a VM's
+  disks and public IP are separate resources and never part of the VM's price.
+- **Unknown is never $0**: no matching meter (`price_not_found`), several
+  (`ambiguous_price`), a missing input, Spot/Low Priority, an unsupported SKU or type (storage
+  accounts, Basic or Global IPs, Ultra/Premium v2 or shared disks, …) are `unavailable` with a
+  reason and no amount. Only a fixed list of types Azure does not bill by themselves (NICs, NSGs,
+  VNets, route tables, ASGs, VM extensions, SSH keys, auto-shutdown schedules) carry an explicit
+  `0` (`no_direct_charge`). Linux images with separately billed software (Red Hat, SUSE, SQL
+  Server, marketplace plans) are `partial` (compute only).
+- **Assumptions and exclusions** are published per resource as fixed codes: running 730 h/month
+  (also for a VM observed `deallocated`), pay-as-you-go, compute only; no data transfer, disk
+  transactions, snapshots, reservations, savings plans or usage-based charges.
+- **Status**: `complete`, `partial`, `failed` (a Retail Prices API request failed) or `not_run`
+  (the inventory was not complete). The total is labelled *"not actual Azure billing; separate
+  from the Infracost Terraform plan estimate; never drift cost"*. When any resource's estimate is
+  unavailable or partial, the summary and AI report show the total as *"At least $X/month —
+  incomplete estimate"*, never as a complete cost.
+
+**Publication** (decision 3): the artifact `unmanaged-resources-<run_id>`
+(`unmanaged_inventory.json` + `unmanaged_cost.json`, 30 days), the job summary and AI report v4
+show the ARM type, resource name, resource group, location, pricing inputs, estimate,
+assumptions and status. Never a full ARM resource ID, subscription ID, tag, IP address or any
+other property; a name that looks like an identifier (GUID, e-mail or `@`, URL, IP address, ARM
+or subscription path) is withheld. A generated suffix such as a portal OS disk's
+`<vm>_OsDisk_1_<32 hex>` is part of the name and is published. No GitHub issue is created for unmanaged resources.
+
+**CI result** (decision 2): unmanaged resources found → success with a warning; partial or
+unavailable estimates → warning; a failed or incomplete inventory, a Retail Prices API failure
+or a failed verification/upload → the `unmanaged` job fails. `drift_detected` never changes.
+
+**Permissions**: none new. The inventory reuses the existing OIDC login of `plan-and-analyze`
+and the identity's subscription **Reader** role (`*/read`). The `unmanaged` job has
+`contents: read` only (no `id-token`, Azure or secrets); its only egress is the Retail Prices API.
+
+**Local use** (read-only; needs `pip install -e ".[azure]"` and `az login`):
+
+```bash
+# plan.json and the public drift report of the same plan (generate_plan_json.sh + drift-engine analyze --public-output)
+drift-engine inventory --plan "$ARTIFACT_DIR/plan.json" --report "$ARTIFACT_DIR/drift_report.public.json" --output .artifacts/unmanaged/unmanaged_inventory.json
+drift-engine unmanaged-cost --inventory .artifacts/unmanaged/unmanaged_inventory.json --report "$ARTIFACT_DIR/drift_report.public.json" --output .artifacts/unmanaged/unmanaged_cost.json
+drift-engine unmanaged-check --inventory .artifacts/unmanaged/unmanaged_inventory.json --cost .artifacts/unmanaged/unmanaged_cost.json --report "$ARTIFACT_DIR/drift_report.public.json" --summary-markdown /dev/stdout
+```
+
 ---
 
 ## 🐍 Python Drift Engine
@@ -702,6 +827,7 @@ The script's output is unchanged.
 | `activity_logs.py` | 7.1 | `drift-engine activity-logs --plan --manifest [--lookback-days N] [--output]`: collects Azure Activity Log evidence (`activity_log_evidence.json`) for the drifted resources. Needs the opt-in `[azure]` extra and an Azure login; detection itself never imports it. |
 | `attribution.py` | 7.2, 7.3 | `drift-engine attribute --report --evidence [--output]`: correlates drifted resources with exact-resource write/delete operations and records the logged caller only where the correlation rules establish it, otherwise "unknown" (`drift_attribution.json`). Not used by any workflow; Phase 8 never publishes caller identity. |
 | `cost.py` | 10.2 | `cost_delta(public_report, infracost, cost_run)`: the cost delta of one run's sanitised Infracost artifact, correlated with drift and bound to the public drift report. Library only. See [Cost delta](#cost-delta-task-102). |
+| `inventory.py`, `unmanaged_public.py`, `unmanaged_cost.py` | 10.4 | `drift-engine inventory` / `unmanaged-cost` / `unmanaged-check`: read-only inventory of the Terraform-managed resource groups, case-insensitive comparison with the plan's managed IDs, and the Azure Retail Prices API list-price estimate of the unmanaged resources. Not drift. See [Unmanaged Resources](#-unmanaged-resources-task-104). |
 | `severity.py` | 4.5 | Deterministic, rules-based `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` per change and per resource. Examples: Key Vault access policies, NSG inbound rules open to any source and public storage access rate `CRITICAL`/`HIGH`; tags and descriptions rate `LOW`; proven noise rates `INFO`; changes no rule covers default to `MEDIUM`. |
 
 Install for development (a virtual environment is recommended):
@@ -1150,7 +1276,7 @@ registration holds zero credentials.
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
-| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration and 10.2 cost delta complete; 10.3 AI cost impact (report v3) pending real CI verification |
+| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration and 10.2 cost delta complete; 10.3 AI cost impact (report v3) and 10.4 unmanaged resources + list-price estimate (report v4) pending real CI verification |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
 | 13 | Professional dashboard | ⬜ Planned |
@@ -1183,6 +1309,16 @@ registration holds zero credentials.
   automatically (`resource_not_in_report`); close them by hand.
 - Terraform reports drift only for resources and attributes it manages. Unmanaged resources
   are invisible to this method ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)).
+  Task 10.4 lists them separately for the Terraform-managed resource groups only (other resource
+  groups, data-plane objects and child resources that ARM's resource list doesn't return are
+  not covered).
+- Unmanaged-resource estimates (Task 10.4) are Azure Retail Prices API list prices: no discounts,
+  reservations, savings plans, usage-based charges or actual billing; a VM is assumed to run 730
+  hours a month. Only VMs, managed disks (Standard/Premium SSD, Standard HDD) and Standard IPv4
+  public IPs are priced; other billable types are `unavailable`. The comparison needs Terraform's
+  `id` to equal the ARM ID; a resource whose provider ID differs would be listed as unmanaged.
+  Verified with real Retail Prices API samples and scripted ARM responses; not yet against real
+  Azure.
 - The report file is named `drift_classification.json`; the plan calls it `drift_report.json`.
   Both refer to the same document.
 - The AI workflow (Task 9A.1) runs without an LLM, so its report holds only deterministic

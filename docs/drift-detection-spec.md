@@ -273,6 +273,9 @@ For a resource with entries in both arrays and attribute *a*:
   Azure. Who or what changed it is out of Terraform's view (Phase 7, Activity Log).
 - Terraform does **not** surface drift on Azure properties or resources that the
   configuration does not manage. Unmanaged resources are invisible to this method.
+  Task 10.4 lists them by a separate, read-only Azure inventory of the Terraform-managed
+  resource groups (§8.3, "Unmanaged resources"); that inventory is never drift and never
+  changes this classification.
 - A changed resource that was **never recorded in state** (e.g. created out-of-band) is
   not detected.
 - **Relevance filtering is unproven.** In every MVP case, `relevant_attributes` covered the
@@ -613,6 +616,38 @@ drift result.
   published as `unreconciled`; the groups plus `unreconciled` always equal the plan delta.
 - **Display**: `+$106.58/month` style, rounded half-up to cents for display only; the exact
   decimal is always kept.
+
+**Unmanaged resources (Task 10.4; user decisions 2026-10-11):** a separate finding, never drift.
+- **Inventory** (`plan-and-analyze`, step `Unmanaged Resource Inventory`, after `Upload Drift Report` and
+  before the investigation and the cost step's `az logout`): `scripts/inventory_analysis.sh` installs
+  `.[azure]` into its own venv, pinned exactly by `ci/azure-constraints.txt`, and runs `drift-engine
+  inventory --plan <plan.json> --report <public drift report>`. Scope: every resource group whose ARM ID is
+  a managed resource's ID in this plan. `GET .../resources` (all pages) plus one `GET <id>` per unmanaged
+  VM (with `instanceView`), disk, public IP and NIC, with `AzureCliCredential` (the job's Reader session,
+  the cached ARM audience); any other method, host or path is blocked before a token is requested; no
+  redirects; bounded retries, `Retry-After`, pages, resources, detail reads and time.
+- **Comparison**: case-folded ARM IDs against every managed ID in the plan (`report_public.build_index`).
+  `attached_to_managed`: a disk whose `managedBy` is a managed VM (possibly its inline OS disk); reported,
+  never unmanaged, never priced. Parent and attachment links are references (`res-<n>`), never IDs.
+- **Outcome**: `complete`, `incomplete` (a bound or a failed detail read) or `failed` (listing failed);
+  never clean after a failure. The step always exits 0 (third documented D5 exception) and records
+  `inventory_status` / `_failure` / `_detail` / `_unmanaged` / `_publishable`. Its document is uploaded as
+  `unmanaged-inventory-<run_id>` (third documented `continue-on-error` upload) only after the leak scan,
+  the contract and the binding to the public drift report pass.
+- **Published** (`unmanaged_inventory.json`, `unmanaged_cost.json`, AI report v4, summary): ARM type,
+  resource name (withheld when identifier-like), resource group, location, allowlisted pricing inputs,
+  estimates, assumptions and statuses. Never an ARM resource ID, subscription ID, tag, IP address or other
+  property. No GitHub issue is created.
+- **Estimate** (`unmanaged` job: `contents: read` only, no Azure, no secrets): `drift-engine unmanaged-cost`
+  prices each unmanaged resource once with the public Azure Retail Prices API (USD, Consumption list
+  prices, 730 hours per month; exactly one matching meter, else `unavailable` with a reason; a fixed list
+  of types without direct charge is `0`; unknown is never `0`). The requests carry only service, product,
+  SKU and region filters. The total is never added to, compared with or subtracted from the Infracost
+  estimate (Phase 10 amendment: Infracost remains the only source of Terraform-plan amounts).
+- **Result** (decision 2): unmanaged resources and partial estimates are warnings; a failed or incomplete
+  inventory, a Retail Prices API failure or a failed verification or upload fails the `unmanaged` job.
+  `drift_detected`, the drift report and artifact, issues, cost, the investigation and the `report` job
+  are unaffected.
 
 **Drift investigation (Task 9B.5; PROJECT_PLAN.md Phase 9B G8-G13, G10):**
 - **Where and when**: after `Upload Drift Report` and before the cost step (which runs `az logout`),

@@ -118,7 +118,7 @@ two, and nothing else:
 
 | Identity Role | Scope | Purpose |
 |---|---|---|
-| **Reader** | Subscription | Read-only resource metadata so `terraform plan` can refresh state against live Azure. Grants `*/read` only. |
+| **Reader** | Subscription | Read-only resource metadata so `terraform plan` can refresh state against live Azure. Grants `*/read` only. Also sufficient for the Task 10.4 unmanaged inventory (`Microsoft.Resources/subscriptions/resourceGroups/resources/read` and the per-resource reads); no new role was needed. |
 | **Storage Blob Data Contributor** | `tfstate` **container** (`aitddtfstatesa001`) | Read, write, and lock the Terraform state blobs in that one container. |
 
 Deliberately **not** assigned to this identity:
@@ -151,7 +151,7 @@ pipeline.
 | Workflow | Trigger | Azure access | GitHub permissions |
 |---|---|---|---|
 | `terraform-auth-test.yml` (Phase 2) | push / PR to `main` (or `master`), manual | OIDC; `terraform fmt`, `validate`, read-only `plan` | `id-token: write`, `contents: read` |
-| `drift-detection.yml` (Phases 5, 8, 9B, 10) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only (Terraform plan and read-only Activity Log queries for the drift investigation); never `apply` | `plan-and-analyze`: `id-token: write`, `contents: read`, `actions: read` (anchor fetch); `issues`: `contents: read`, `issues: write`; `cost` and `investigation`: `contents: read`; none of these three has Azure access |
+| `drift-detection.yml` (Phases 5, 8, 9B, 10) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only (Terraform plan, read-only Activity Log queries for the drift investigation and read-only ARM resource listing of the Terraform-managed resource groups for the unmanaged inventory, Task 10.4); never `apply`, import or any write | `plan-and-analyze`: `id-token: write`, `contents: read`, `actions: read` (anchor fetch); `issues`: `contents: read`, `issues: write`; `cost`, `investigation` and `unmanaged`: `contents: read`; none of these four has Azure access (`unmanaged` calls only the public Azure Retail Prices API, without credentials) |
 | `ai-analysis.yml` (Phases 9A, 9B) | after each completed drift-detection run on `main` (`workflow_run`) | **None** | `contents: read`, `actions: read`; only `github.token`, to download the source run's public drift report and investigation |
 | `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC; TruffleHog uses `--no-verification`, so no candidate secret is sent anywhere) | `contents: read` only; no token |
 

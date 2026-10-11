@@ -53,6 +53,13 @@ What is checked:
   any contradicting direction; the withheld cost summary; the direction
   recorded per cost key in `llm.evidence_sent`; and, for `not_available` /
   `rejected`, that no amount or currency appears anywhere in the cost output.
+- unmanaged resources (Task 10.4, report v4), against the unmanaged input it was
+  given: both documents are re-validated here with drift_engine.unmanaged_cost
+  (leak scan, contracts, the inventory bound to this drift report, the cost bound
+  to the inventory, arithmetic) and must equal the embedded ones; status, reason,
+  `pricing_source`, the input hashes, versions and binding; every run-level and
+  per-resource statement against its fixed template, filled here independently;
+  and the unmanaged limitation lines. The section never reaches the LLM.
 
 `ai-analysis` runs this check on every report before writing it (design review
 D4): any problem means exit 70 and nothing written.
@@ -78,9 +85,13 @@ from ai_engine.nodes.common import EvidenceRefs, free_text_violation, timestamp_
 from ai_engine.nodes.cost_analysis import COST_TEMPLATES, GROUP_LABELS, NOT_PROVIDED, PRICING_SOURCE, SUMMARY_WITHHELD
 from ai_engine.nodes.investigation_facts import TEMPLATES
 from ai_engine.nodes.remediation import ACCEPT_REMOTE_NOTE, COMMAND_CATALOGUE
-from ai_engine.nodes.report_generator import COST_LIMITATIONS, AiAnalysisReport, render_markdown
+from ai_engine.nodes.report_generator import COST_LIMITATIONS, UNMANAGED_LIMITATIONS, AiAnalysisReport, render_markdown
+from ai_engine.nodes.unmanaged_resources import NOT_PROVIDED as UNMANAGED_NOT_PROVIDED
+from ai_engine.nodes.unmanaged_resources import PRICING_SOURCE as UNMANAGED_PRICING_SOURCE
+from ai_engine.nodes.unmanaged_resources import UNMANAGED_TEMPLATES
 from drift_engine import cost as cost_engine
 from drift_engine import investigation_public as pub
+from drift_engine import unmanaged_cost
 
 SECTIONS = ("security", "cost", "configuration", "root_cause", "risk")
 ALL_SECTIONS = SECTIONS + ("investigation",)
@@ -160,11 +171,13 @@ def _section_eligible(section: str, resource: Mapping[str, Any], change: Mapping
 
 def verify_report(report_json: Mapping[str, Any], drift_report_json: Mapping[str, Any],
                   investigation_json: Mapping[str, Any] | None = None,
-                  cost_input_json: Mapping[str, Any] | None = None) -> list[str]:
+                  cost_input_json: Mapping[str, Any] | None = None,
+                  unmanaged_input_json: Mapping[str, Any] | None = None) -> list[str]:
     """Problems found in `report_json` against `drift_report_json` and, when the report was generated with one,
     the public `investigation_json` (empty list = valid). `cost_input_json` is what the report's cost was built
     from: None (not provided), {"infracost": ..., "cost_run": ...} (the parsed documents) or {"rejected": code}
-    (the directory could not be read)."""
+    (the directory could not be read). `unmanaged_input_json` is the same for the unmanaged section:
+    None, {"inventory": ..., "cost": ...} or {"rejected": code}."""
     try:
         report = AiAnalysisReport.model_validate_json(json.dumps(report_json)).model_dump(mode="json")
     except ValidationError as exc:
@@ -297,7 +310,107 @@ def verify_report(report_json: Mapping[str, Any], drift_report_json: Mapping[str
 
     problems.extend(_verify_remediation(report, drift, changed, changes))
     problems.extend(_verify_cost(report, drift, cost_input_json))
+    problems.extend(_verify_unmanaged(report, drift, unmanaged_input_json))
     return problems
+
+
+# --------------------------------------------------------------------------- unmanaged resources (Task 10.4)
+
+
+def _ufill(template_id: str, **slots: Any) -> dict[str, str]:
+    return {"id": template_id, "text": UNMANAGED_TEMPLATES[template_id].format(**slots)}
+
+
+def _expected_unmanaged(drift: Mapping[str, Any], given: Mapping[str, Any] | None) -> tuple[str, Any, Any, Any, Any]:
+    """(status, reason, inventory, cost, hashes) recomputed from the unmanaged input."""
+    if given is None:
+        return "not_available", UNMANAGED_NOT_PROVIDED, None, None, None
+    if "rejected" in given:
+        return "rejected", given["rejected"], None, None, None
+    hashes = {"inventory": _fingerprint(given["inventory"]), "cost": _fingerprint(given["cost"])}
+    try:
+        inventory, cost = unmanaged_cost.check_documents(given["inventory"], given["cost"], drift)
+    except unmanaged_cost.UnmanagedInputError as exc:
+        return "rejected", exc.code, None, None, hashes
+    return "complete", None, inventory.model_dump(mode="json"), cost.model_dump(mode="json"), hashes
+
+
+def _expected_unmanaged_resource(entry: Mapping[str, Any]) -> dict[str, str]:
+    label = entry["name"] or f"{entry['ref']} (name withheld)"
+    location = entry["location"] or "location unknown"
+    if entry["monthly_cost"] is None:
+        return _ufill("unmanaged.resource_unpriced.v1", label=label, type=entry["type"], location=location,
+                      reason=entry["reason"])
+    estimate = entry["estimate_status"] + (f": {entry['reason']}" if entry["reason"] else "")
+    return _ufill("unmanaged.resource.v1", label=label, type=entry["type"], location=location,
+                  display=entry["display"], amount=entry["monthly_cost"], estimate=estimate)
+
+
+def _expected_unmanaged_statements(status: str, reason: Any, inventory: Any, cost: Any) -> list[dict]:
+    if status == "not_available":
+        return [_ufill("unmanaged.status_not_available.v1")]
+    if status == "rejected":
+        return [_ufill("unmanaged.status_rejected.v1", code=reason)]
+    c = inventory["counts"]
+    out = [_ufill("unmanaged.inventory.v1", outcome=inventory["outcome"], groups=len(inventory["scopes"]),
+                  listed=c["listed"], managed=c["managed"], unmanaged=c["unmanaged"],
+                  attached=c["attached_to_managed"])]
+    if inventory["outcome"] != "complete":
+        out.append(_ufill("unmanaged.inventory_not_complete.v1", outcome=inventory["outcome"],
+                          failure=inventory["failure"] or "incomplete"))
+    if inventory["unmanaged_by_type"]:
+        out.append(_ufill("unmanaged.by_type.v1",
+                          types=", ".join(f"{k} {v}" for k, v in inventory["unmanaged_by_type"].items())))
+    t = cost["totals"]
+    if t["estimated_monthly_cost"] is None:
+        out.append(_ufill("unmanaged.total_unavailable.v1", status=cost["status"],
+                          failure=cost["failure"] or "no resource has an estimate"))
+    else:
+        priced = t["resources"] - t["unavailable"] - t["partial"]
+        if t["complete"]:
+            out.append(_ufill("unmanaged.total.v1", display=t["display"], amount=t["estimated_monthly_cost"],
+                              priced=priced, resources=t["resources"]))
+        else:  # a lower bound: never the complete-total wording
+            out.append(_ufill("unmanaged.total_incomplete.v1", display=t["display"],
+                              amount=t["estimated_monthly_cost"], unavailable=t["unavailable"],
+                              partial=t["partial"], status=cost["status"], priced=priced, resources=t["resources"]))
+    return out
+
+
+def _verify_unmanaged(report: Mapping[str, Any], drift: Mapping[str, Any],
+                      given: Mapping[str, Any] | None) -> list[str]:
+    out: list[str] = []
+    add = out.append
+    status, reason, inventory, cost, hashes = _expected_unmanaged(drift, given)
+    section, src = report["unmanaged"], report["provenance"]
+    complete = status == "complete"
+    if (section["status"], section["reason"]) != (status, reason):
+        add("unmanaged: status or reason differs from the unmanaged input")
+    if section["inventory"] != inventory or section["cost"] != cost:
+        add("unmanaged: the embedded documents are not the validated unmanaged input")
+    if section["pricing_source"] != (UNMANAGED_PRICING_SOURCE if complete else None):
+        add("unmanaged: pricing_source does not match the unmanaged status")
+    if src["unmanaged_input_sha256"] != hashes:
+        add("provenance: unmanaged_input_sha256 does not match the unmanaged input")
+    if (src["versions"]["unmanaged_inventory"], src["versions"]["unmanaged_cost"]) != (
+            ("1", "1") if complete else (None, None)):
+        add("provenance: unmanaged versions do not match the unmanaged status")
+    if complete and (src["drift_report_sha256"], src["run_id"], src["environment"]) != (
+            inventory["binding"]["drift_report_sha256"], inventory["binding"]["run_id"],
+            inventory["binding"]["environment"]):
+        add("unmanaged: the inventory binding differs from the report provenance")
+    if section["statements"] != _expected_unmanaged_statements(status, reason, inventory, cost):
+        add("unmanaged: statements are not the fixed statements of the unmanaged input")
+    expected_resources = ([{"ref": e["ref"], "statements": [_expected_unmanaged_resource(e)]}
+                           for e in cost["resources"]] if complete else [])
+    if section["resources"] != expected_resources:
+        add("unmanaged: resource statements differ from the unmanaged input")
+    fixed = {line for lines in UNMANAGED_LIMITATIONS.values() for line in lines if "{code}" not in line}
+    present = [line for line in report["limitations"]
+               if line in fixed or line.startswith("The unmanaged resource inventory was rejected (")]
+    if present != [line.format(code=reason) for line in UNMANAGED_LIMITATIONS[status]]:
+        add("limitations: unmanaged lines do not match the unmanaged status")
+    return out
 
 
 # --------------------------------------------------------------------------- cost impact (Task 10.3)

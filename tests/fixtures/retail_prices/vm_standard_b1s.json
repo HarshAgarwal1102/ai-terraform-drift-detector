@@ -1,0 +1,63 @@
+{
+  "Count": 2,
+  "Items": [
+    {
+      "armRegionName": "centralindia",
+      "armSkuName": "Standard_B1s",
+      "currencyCode": "USD",
+      "effectiveStartDate": "2025-10-01T00:00:00Z",
+      "isPrimaryMeterRegion": true,
+      "location": "IN Central",
+      "meterId": "16a88a01-cdb6-4123-b983-bd35fabcf9f9",
+      "meterName": "B1s",
+      "productId": "DZH318Z0BQ35",
+      "productName": "Virtual Machines BS Series",
+      "retailPrice": 0.0112,
+      "savingsPlan": [
+        {
+          "retailPrice": 0.0049336,
+          "term": "3 Years",
+          "unitPrice": 0.0049336
+        },
+        {
+          "retailPrice": 0.0075656,
+          "term": "1 Year",
+          "unitPrice": 0.0075656
+        }
+      ],
+      "serviceFamily": "Compute",
+      "serviceId": "DZH313Z7MMC8",
+      "serviceName": "Virtual Machines",
+      "skuId": "DZH318Z0BQ35/00S0",
+      "skuName": "B1s",
+      "tierMinimumUnits": 0.0,
+      "type": "Consumption",
+      "unitOfMeasure": "1 Hour",
+      "unitPrice": 0.0112
+    },
+    {
+      "armRegionName": "centralindia",
+      "armSkuName": "Standard_B1s",
+      "currencyCode": "USD",
+      "effectiveStartDate": "2025-10-01T00:00:00Z",
+      "isPrimaryMeterRegion": true,
+      "location": "IN Central",
+      "meterId": "83a67312-04c9-43d7-90a0-2396693a0752",
+      "meterName": "B1s",
+      "productId": "DZH318Z0BQNH",
+      "productName": "Virtual Machines BS Series Windows",
+      "retailPrice": 0.0152,
+      "serviceFamily": "Compute",
+      "serviceId": "DZH313Z7MMC8",
+      "serviceName": "Virtual Machines",
+      "skuId": "DZH318Z0BQNH/00BM",
+      "skuName": "B1s",
+      "tierMinimumUnits": 0.0,
+      "type": "Consumption",
+      "unitOfMeasure": "1 Hour",
+      "unitPrice": 0.0152
+    }
+  ],
+  "NextPageLink": null,
+  "filter": "serviceName eq 'Virtual Machines' and armRegionName eq 'centralindia' and armSkuName eq 'Standard_B1s' and priceType eq 'Consumption'"
+}

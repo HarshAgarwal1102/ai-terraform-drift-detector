@@ -79,9 +79,10 @@ def test_plan_and_analyze_settings_and_outputs(wf):
         assert outputs[key] == f"${{{{ steps.investigation.outputs.{key} }}}}"
     assert outputs["investigation_upload_outcome"] == "${{ steps.investigation_upload.outcome }}"
     names = [s["name"] for s in job["steps"]]
-    assert names[names.index("Analyze Drift"):] == ["Analyze Drift", "Upload Drift Report", "Drift Investigation",
-                                                    "Upload Drift Investigation", "Infracost Cost Estimate",
-                                                    "Upload Infracost Report"]
+    assert names[names.index("Analyze Drift"):] == ["Analyze Drift", "Upload Drift Report",
+                                                    "Unmanaged Resource Inventory", "Upload Unmanaged Inventory",
+                                                    "Drift Investigation", "Upload Drift Investigation",
+                                                    "Infracost Cost Estimate", "Upload Infracost Report"]
 
 
 def test_analyze_writes_internal_runner_only_and_public_in_place(wf):
@@ -134,10 +135,10 @@ def test_investigation_upload(wf):
                               "retention-days": 30, "if-no-files-found": "error", "overwrite": True}
 
 
-def test_exactly_two_always_exit_zero_steps(wf):
+def test_exactly_three_always_exit_zero_steps(wf):
     always = [s["name"] for job in wf["jobs"].values() for s in job.get("steps", [])
               if s.get("run", "").rstrip().endswith("exit 0")]
-    assert always == ["Drift Investigation", "Infracost Cost Estimate"]
+    assert always == ["Unmanaged Resource Inventory", "Drift Investigation", "Infracost Cost Estimate"]  # + Task 10.4
 
 
 def test_investigation_job(wf):
@@ -1001,8 +1002,8 @@ def test_g18_no_condition_treats_drift_differently_from_no_drift(wf):
             assert "drift_detected == 'true'" in cond and "drift_detected == 'false'" in cond, where
         for token in ("has_drift", "drift_status", "plan_exit_code"):
             assert token not in cond, where
-    assert gated == ["plan-and-analyze / Drift Investigation", "plan-and-analyze / Infracost Cost Estimate",
-                     "issues", "cost", "investigation"]
+    assert gated == ["plan-and-analyze / Unmanaged Resource Inventory", "plan-and-analyze / Drift Investigation",
+                     "plan-and-analyze / Infracost Cost Estimate", "issues", "cost", "investigation", "unmanaged"]
 
 
 def test_g18_only_known_steps_read_the_drift_result(wf):

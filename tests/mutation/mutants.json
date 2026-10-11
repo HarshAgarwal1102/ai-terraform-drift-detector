@@ -1205,8 +1205,8 @@
     {
       "id": "cost-limitations-dropped",
       "file": "src/ai_engine/nodes/report_generator.py",
-      "old": "    limitations = list(BASE_LIMITATIONS) + cost_limitations(impact[\"status\"], impact[\"reason\"])",
-      "new": "    limitations = list(BASE_LIMITATIONS)"
+      "old": "    limitations = (list(BASE_LIMITATIONS) + cost_limitations(impact[\"status\"], impact[\"reason\"])",
+      "new": "    limitations = (list(BASE_LIMITATIONS)"
     },
     {
       "id": "cli-cost-rejection-hidden",

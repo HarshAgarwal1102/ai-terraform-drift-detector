@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from ai_engine.nodes.cost_analysis import derive_cost_impact, route_cost_config
+from ai_engine.nodes.unmanaged_resources import derive_unmanaged
 from ai_engine.nodes.parse_drift import parse_drift
 from ai_engine.nodes.report_generator import (  # pydantic only: no 'ai' extra needed
     AiAnalysisReport,
@@ -351,8 +352,9 @@ def test_markdown_sections_and_boundaries(tmp_path):
     state = run_analysis(report("plan_evidence", "resource_removed"), config=load_config({}))
     md = write_report(state, tmp_path)["markdown"].read_text(encoding="utf-8")
     headings = ["## Summary", "## What changed", "## Recorded Azure operations", "## When", "## Who",
-                "## Correlation", "## Analysis", "## Cost impact (estimate)", "## Recommendation & options",
-                "## Limitations", "## Provenance"]
+                "## Correlation", "## Analysis", "## Cost impact (estimate)",
+                "## Unmanaged resources (outside Terraform)",  # Task 10.4 (report v4)
+                "## Recommendation & options", "## Limitations", "## Provenance"]
     assert [line for line in md.splitlines() if line.startswith("## ")] == headings  # locked order (Task 9B.4)
     for heading in ("### Security Impact", "### Cost Impact", "### Configuration", "### Root Cause (hypotheses)",
                     "### Risk", "### Investigation Interpretation", "### Approval Required"):
@@ -514,7 +516,8 @@ def test_remediation_plan_and_report_are_write_once(field, mode):
 
     graph = StateGraph(AiState)
     steps = [("parse_drift", parse_drift), ("classify_drift", classify_drift), ("route_cost_config",
-             route_cost_config), ("derive_cost_impact", derive_cost_impact), ("derive_origin_risk", derive_origin_risk),
+             route_cost_config), ("derive_cost_impact", derive_cost_impact), ("derive_unmanaged", derive_unmanaged),
+             ("derive_origin_risk", derive_origin_risk),
              ("derive_investigation", derive_investigation), ("plan_remediation", plan_remediation),
              ("analyze_drift", make_analyze_drift(None)), ("generate_report", generate_report), ("later", later)]
     for name, node in steps:

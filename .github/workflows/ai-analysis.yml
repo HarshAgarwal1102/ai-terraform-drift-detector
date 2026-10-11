@@ -27,6 +27,14 @@ name: "Phase 9A - AI Analysis (no LLM)"
 # present -> `ai-analysis --cost` binds it to the public drift report through
 # drift_engine.cost; an unusable one is cost status rejected (a fixed code) and the report
 # is still written. Cost never changes the drift result. The summary shows the status only.
+#
+# Unmanaged resources (Task 10.4): the source run's unmanaged-resources-<run id> artifact
+# (unmanaged_inventory.json + unmanaged_cost.json) is downloaded by pattern too. Missing
+# (e.g. the unmanaged job failed) -> report v4 unmanaged status not_available; present ->
+# `ai-analysis --unmanaged` validates both documents and binds them to the public drift
+# report; an unusable one is unmanaged status rejected (a fixed code) and the report is still
+# written. It is a separate report section: never drift, never added to the Infracost cost.
+# The summary shows the status and the unmanaged count only.
 # Exact binding: the report's run.run_id must be github-<source run id>-<source run
 # attempt>, the source run must be on main and triggered by schedule or
 # workflow_dispatch; anything else fails without an AI artifact.
@@ -112,6 +120,15 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/source
 
+      # Task 10.4: same pattern rule; a missing unmanaged report is not a failure (status not_available).
+      - name: Download source unmanaged resources report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unmanaged-resources-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/source
+
       - name: Check for a valid detection result
         id: present
         run: |
@@ -128,6 +145,12 @@ jobs:
             echo "cost=${cost}" >> "${GITHUB_OUTPUT}"
           else
             echo "cost=" >> "${GITHUB_OUTPUT}"
+          fi
+          unmanaged="${RUNNER_TEMP}/source/unmanaged-resources-${SOURCE_RUN_ID}"
+          if [ -d "${unmanaged}" ]; then
+            echo "unmanaged=${unmanaged}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "unmanaged=" >> "${GITHUB_OUTPUT}"
           fi
           if [ -f "${report}" ]; then
             echo "present=true" >> "${GITHUB_OUTPUT}"
@@ -226,6 +249,7 @@ jobs:
           REPORT: ${{ steps.present.outputs.report }}
           INVESTIGATION: ${{ steps.present.outputs.investigation }}
           COST: ${{ steps.present.outputs.cost }}
+          UNMANAGED: ${{ steps.present.outputs.unmanaged }}
         run: |
           set -euo pipefail
           args=(--report "${REPORT}" --output-dir "${RUNNER_TEMP}/ai-analysis")
@@ -234,6 +258,9 @@ jobs:
           fi
           if [ -n "${COST}" ]; then
             args+=(--cost "${COST}")
+          fi
+          if [ -n "${UNMANAGED}" ]; then
+            args+=(--unmanaged "${UNMANAGED}")
           fi
           ai-analysis "${args[@]}"
 
@@ -254,6 +281,7 @@ jobs:
                    "| AI sections analysed | \([.analysis[] | select(.status == "ok")] | length) of \(.analysis | length) |",
                    "| Investigation | `\(.investigation.status)` |",
                    "| Cost | `\(.cost.status)`\(if .cost.reason then " (`\(.cost.reason)`)" else "" end) |",
+                   "| Unmanaged resources | `\(.unmanaged.status)`\(if .unmanaged.reason then " (`\(.unmanaged.reason)`)" else "" end)\(if .unmanaged.inventory then ", \(.unmanaged.inventory.counts.unmanaged) unmanaged" else "" end) |",
                    "| LLM | `\(.llm.provider // "none")` / `\(.llm.status)` |"' "${report}"
             echo "| Artifact | \`ai-analysis-report-${SOURCE_RUN_ID}\` (30 days) |"
           } >> "${GITHUB_STEP_SUMMARY}"

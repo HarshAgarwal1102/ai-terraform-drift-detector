@@ -1,7 +1,7 @@
-"""Deterministic report generation (Tasks 6.6, 9B.4, 10.3: report v3). No LLM call.
+"""Deterministic report generation (Tasks 6.6, 9B.4, 10.3, 10.4: report v4). No LLM call.
 
 `generate_report` (a LangGraph node after `analyze_drift`) builds the strict
-`AiAnalysisReport` JSON (report version 3) from validated state only: the drift
+`AiAnalysisReport` JSON (report version 4) from validated state only: the drift
 report, the deterministic routing/origin/remediation fields, the deterministic
 investigation facts (`investigation_facts`: WHAT / WHEN / WHO / correlation with
 their fixed statements), the recommendation of policy v1, the deterministic cost
@@ -15,6 +15,14 @@ the top-level `cost` block (`status` complete / not_available / rejected, `reaso
 `cost_delta`, `monetary_impact`, `pricing_source`, `statements`), `resources[].cost`,
 `llm.evidence_sent[].estimate_direction`, the cost findings' `estimate_direction` /
 `estimate`, and the status-dependent cost limitations.
+
+Report v4 (Task 10.4) differs from v3 only by the separate unmanaged-resource section: `report_version` /
+`versions.report` "4", `versions.unmanaged_inventory` / `versions.unmanaged_cost`,
+`provenance.unmanaged_input_sha256`, the top-level `unmanaged` block (`status` complete / not_available /
+rejected, `reason`, the embedded `inventory` and `cost` documents, `pricing_source`, `statements`,
+per-resource `resources[].statements`) and the status-dependent unmanaged limitations. Unmanaged resources
+are not drift: nothing else in the report changes with them, and their Azure Retail Prices API estimate is
+never part of the Infracost `cost` block.
 The result is the write-once `AiState.report`.
 
 Evidence and inference stay apart: `what` is Terraform evidence, `operations`
@@ -72,13 +80,18 @@ from ai_engine.nodes.investigation_facts import (
 from ai_engine.nodes.remediation import CATALOGUE_VERSION, POLICY_VERSION, Recommendation, RemediationOption
 from ai_engine.nodes.root_cause import Channel, Hypothesis, RiskKind
 from ai_engine.nodes.security_analysis import Exposure, Impact
+from ai_engine.nodes.unmanaged_resources import NOT_PROVIDED as UNMANAGED_NOT_PROVIDED
+from ai_engine.nodes.unmanaged_resources import PRICING_SOURCE as UNMANAGED_PRICING_SOURCE
+from ai_engine.nodes.unmanaged_resources import REJECTION_CODES as UNMANAGED_REJECTION_CODES
 from drift_engine import cost as cost_engine
+from drift_engine import unmanaged_cost
+from drift_engine import unmanaged_public
 from drift_engine import investigation_public as pub
 from drift_engine.logs import log_event
 
 logger = logging.getLogger(__name__)
 
-REPORT_VERSION = "3"
+REPORT_VERSION = "4"
 JSON_FILE = "ai_analysis_report.json"
 MARKDOWN_FILE = "ai_analysis_report.md"
 SECTION_KEYS = {"security": "analyze_security", "cost": "analyze_cost", "configuration": "analyze_configuration",
@@ -113,6 +126,23 @@ def cost_limitations(status: str, reason: str | None) -> list[str]:
     return [line.format(code=reason) for line in COST_LIMITATIONS[status]]
 
 
+UNMANAGED_LIMITATIONS = {  # Task 10.4: exactly these lines per unmanaged status
+    "complete": ("Unmanaged resources come from a read-only Azure inventory of the Terraform-managed resource groups "
+                 "(exact, case-insensitive ARM ID match); they are not drift and never change the drift result.",
+                 "Unmanaged-resource estimates are Azure Retail Prices API list prices (USD, pay-as-you-go, no usage "
+                 "charges), not actual Azure billing, and are separate from the Infracost cost of the Terraform "
+                 "plan; an unavailable estimate is never counted as $0."),
+    "not_available": ("No unmanaged resource inventory was provided (unmanaged_input_not_provided): resources outside "
+                      "Terraform are not covered by this report.",),
+    "rejected": ("The unmanaged resource inventory was rejected ({code}): resources outside Terraform are not covered "
+                 "by this report.",),
+}
+
+
+def unmanaged_limitations(status: str, reason: str | None) -> list[str]:
+    return [line.format(code=reason) for line in UNMANAGED_LIMITATIONS[status]]
+
+
 STATUS_LIMITATIONS = {
     "not_available": "No drift investigation was provided: event time (WHEN), the recorded caller (WHO) and the "
                      "correlation are not confirmed by available evidence.",
@@ -136,8 +166,10 @@ class Statement(Strict):
 
 
 class Versions(Strict):
-    report: Literal["3"]
+    report: Literal["4"]
     cost_delta: Literal["1"] | None
+    unmanaged_inventory: Literal["1"] | None
+    unmanaged_cost: Literal["1"] | None
     investigation_public: Literal["1"] | None
     capable_operations_table: Literal["1"] | None
     deletion_rules: Literal["2"] | None
@@ -152,10 +184,17 @@ class CostInputSha256(Strict):
     cost_run: Sha256
 
 
+class UnmanagedInputSha256(Strict):
+    """Canonical SHA-256 of the parsed unmanaged input documents (Task 10.4)."""
+    inventory: Sha256
+    cost: Sha256
+
+
 class Provenance(Strict):
     drift_report_sha256: Sha256
     investigation_sha256: Sha256 | None
     cost_input_sha256: CostInputSha256 | None
+    unmanaged_input_sha256: UnmanagedInputSha256 | None
     classification_version: str
     run_id: str | None
     environment: str | None
@@ -601,8 +640,40 @@ class CostImpact(Strict):
         return self
 
 
+class UnmanagedResourceStatements(Strict):
+    ref: Annotated[str, Field(pattern=r"^res-[1-9][0-9]*$")]
+    statements: Annotated[list[Statement], Field(min_length=1, max_length=1)]
+
+
+class UnmanagedSection(Strict):
+    """Task 10.4: resources outside Terraform and their list-price estimate (a separate section; not drift, not
+    the Infracost cost). Documents exist only when `complete`; otherwise one status statement and nothing else."""
+    status: Literal["complete", "not_available", "rejected"]
+    reason: Literal[(UNMANAGED_NOT_PROVIDED, *UNMANAGED_REJECTION_CODES)] | None  # type: ignore[valid-type]
+    inventory: unmanaged_public.Inventory | None
+    cost: unmanaged_cost.UnmanagedCost | None
+    pricing_source: Literal["azure_retail_prices_api_list_prices_usd"] | None
+    statements: Annotated[list[Statement], Field(min_length=1)]
+    resources: list[UnmanagedResourceStatements]
+
+    @model_validator(mode="after")
+    def _consistent(self) -> UnmanagedSection:
+        complete = self.status == "complete"
+        if any((value is not None) != complete for value in (self.inventory, self.cost, self.pricing_source)):
+            raise ValueError("inventory, cost and pricing_source exist exactly when the unmanaged status is complete")
+        expected_reason = {"complete": self.reason is None, "not_available": self.reason == UNMANAGED_NOT_PROVIDED,
+                           "rejected": self.reason in UNMANAGED_REJECTION_CODES}
+        if not expected_reason[self.status]:
+            raise ValueError("unmanaged reason does not match its status")
+        if not complete and (len(self.statements) != 1 or self.resources):
+            raise ValueError("an unavailable or rejected unmanaged section has exactly one status statement")
+        if complete and [r.ref for r in self.resources] != [r.ref for r in self.cost.resources]:
+            raise ValueError("unmanaged resource statements must follow the priced resources")
+        return self
+
+
 class AiAnalysisReport(Strict):
-    report_version: Literal["3"]
+    report_version: Literal["4"]
     provenance: Provenance
     summary: Summary
     investigation: InvestigationRun
@@ -610,6 +681,7 @@ class AiAnalysisReport(Strict):
     analysis: Analysis
     remediation: ReportRemediation
     cost: CostImpact
+    unmanaged: UnmanagedSection
     llm: LlmInfo
     limitations: list[str]
 
@@ -667,6 +739,13 @@ def _cost_block(impact: Mapping[str, Any]) -> dict[str, Any]:
             "pricing_source": PRICING_SOURCE if complete else None, "statements": impact["statements"]}
 
 
+def _unmanaged_block(section: Mapping[str, Any]) -> dict[str, Any]:
+    complete = section["status"] == "complete"
+    return {"status": section["status"], "reason": section["reason"], "inventory": section["inventory"],
+            "cost": section["cost"], "pricing_source": UNMANAGED_PRICING_SOURCE if complete else None,
+            "statements": section["statements"], "resources": section["resources"]}
+
+
 def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
     drift_report = state["drift_report"]
     parsed = state["parsed_drift"]
@@ -675,6 +754,7 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
     plan_state = state["remediation_plan"]
     call = state["llm_call"]
     impact = _strip(state["cost_impact"])
+    unmanaged = _strip(state["unmanaged_section"])
     run = drift_report.get("run") or {}
     plan = drift_report.get("plan") or {}
     summary = drift_report.get("summary") or {}
@@ -715,7 +795,8 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
             "cost": impact["resources"].get(address) if impact["status"] == "complete" else None,
         })
 
-    limitations = list(BASE_LIMITATIONS) + cost_limitations(impact["status"], impact["reason"])
+    limitations = (list(BASE_LIMITATIONS) + cost_limitations(impact["status"], impact["reason"])
+                   + unmanaged_limitations(unmanaged["status"], unmanaged["reason"]))
     if investigation["status"] in STATUS_LIMITATIONS:
         limitations.append(STATUS_LIMITATIONS[investigation["status"]])
     if not call["attempted"]:
@@ -729,11 +810,16 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
         "provenance": {"drift_report_sha256": drift_report_sha256(drift_report),
                        "investigation_sha256": investigation["sha256"],
                        "cost_input_sha256": impact["input_sha256"],
+                       "unmanaged_input_sha256": unmanaged["input_sha256"],
                        "classification_version": drift_report["classification_version"],
                        "run_id": run.get("run_id"), "environment": run.get("environment"),
                        "plan_timestamp": plan.get("timestamp"),
                        "versions": {"report": REPORT_VERSION,
                                     "cost_delta": cost_engine.COST_DELTA_VERSION if impact["cost_delta"] else None,
+                                    "unmanaged_inventory": unmanaged_public.INVENTORY_VERSION
+                                    if unmanaged["inventory"] else None,
+                                    "unmanaged_cost": unmanaged_cost.UNMANAGED_COST_VERSION
+                                    if unmanaged["cost"] else None,
                                     "investigation_public": versions["investigation_public"],
                                     "capable_operations_table": versions["capable_operations_table"],
                                     "deletion_rules": versions["deletion_rules"], "statements": STATEMENTS_VERSION,
@@ -755,6 +841,7 @@ def build_report(state: Mapping[str, Any]) -> dict[str, Any]:
                                                            "options", "approval_required", "automatic_apply",
                                                            "reason")},
         "cost": _cost_block(impact),
+        "unmanaged": _unmanaged_block(unmanaged),
         "llm": {key: call.get(key) for key in ("attempted", "status", "reason", "provider", "model", "max_retries")}
         | {"evidence_sent": list(call.get("evidence_sent") or []),
            "investigation_sent": list(call.get("investigation_sent") or [])},
@@ -1026,9 +1113,27 @@ def _correlation_lines(resource: Mapping[str, Any]) -> list[str]:
     ] + _statements(corr["statements"]) + [""]
 
 
+def _unmanaged_lines(unmanaged: Mapping[str, Any]) -> list[str]:
+    lines = ["## Unmanaged resources (outside Terraform)", "",
+             "Basis: read-only Azure inventory of the Terraform-managed resource groups and Azure Retail Prices API "
+             "list prices (USD). Not drift; not actual Azure billing; separate from the Infracost cost impact above.",
+             ""] + _statements(unmanaged["statements"]) + [""]
+    if unmanaged["status"] != "complete" or not unmanaged["cost"]["resources"]:
+        return lines
+    rows = [[md_text(r["ref"]), md_code(r["type"]), md_code(r["name"]) if r["name"] else md_text("withheld"),
+             md_text(r["location"] or "unknown"), md_text(r["display"] or "unavailable"),
+             md_text(r["estimate_status"] + (f" ({r['reason']})" if r["reason"] else ""))]
+            for r in unmanaged["cost"]["resources"]]
+    lines += _table(["Ref", "Type", "Name", "Location", "Estimate (per month)", "Status"], rows) + [""]
+    for entry in unmanaged["resources"]:
+        lines += _statements(entry["statements"])
+    return lines + [""]
+
+
 def render_markdown(report_json: Mapping[str, Any]) -> str:
     """Markdown for a report, from its validated JSON form only. Order: Summary, What changed, Recorded Azure
-    operations, When, Who, Correlation, Analysis, Cost impact (estimate), Recommendation & options, Limitations,
+    operations, When, Who, Correlation, Analysis, Cost impact (estimate), Unmanaged resources, Recommendation & options,
+    Limitations,
     Provenance."""
     report = AiAnalysisReport.model_validate_json(json.dumps(report_json)).model_dump(mode="json")
     src, summary, llm, inv = report["provenance"], report["summary"], report["llm"], report["investigation"]
@@ -1055,6 +1160,12 @@ def render_markdown(report_json: Mapping[str, Any]) -> str:
     cost = report["cost"]
     lines.append(f"- Cost estimate: **{md_text(cost['status'])}**" + (f" ({md_text(cost['reason'])})"
                                                                     if cost["reason"] else ""))
+    unmanaged = report["unmanaged"]
+    lines.append(f"- Unmanaged resources (outside Terraform, not drift): **{md_text(unmanaged['status'])}**"
+                 + (f" ({md_text(unmanaged['reason'])})" if unmanaged["reason"] else "")
+                 + (f"; {unmanaged['inventory']['counts']['unmanaged']} unmanaged; estimate "
+                    f"{md_text(unmanaged_cost.total_text(unmanaged['cost']['totals']))}"
+                    if unmanaged["inventory"] else ""))
     if not resources:
         lines.append("- No changed resources: there are no investigation claims.")
     for resource in resources:
@@ -1098,6 +1209,7 @@ def render_markdown(report_json: Mapping[str, Any]) -> str:
     for resource in resources:
         if resource["cost"] is not None:
             lines += _heading(resource) + _statements(resource["cost"]["statements"]) + [""]
+    lines += _unmanaged_lines(unmanaged)
     remediation = report["remediation"]
     lines += ["## Recommendation & options", "",
               "Recommendations follow the deterministic recommendation policy v1; investigation verdicts and caller "
@@ -1128,6 +1240,10 @@ def render_markdown(report_json: Mapping[str, Any]) -> str:
               "- Cost input SHA-256: " + (f"infracost {md_code(src['cost_input_sha256']['infracost'])}, cost_run "
                                           f"{md_code(src['cost_input_sha256']['cost_run'])}"
                                           if src["cost_input_sha256"] else md_text("none")),
+              "- Unmanaged input SHA-256: " + (
+                  f"inventory {md_code(src['unmanaged_input_sha256']['inventory'])}, cost "
+                  f"{md_code(src['unmanaged_input_sha256']['cost'])}"
+                  if src["unmanaged_input_sha256"] else md_text("none")),
               f"- Classification version: {md_text(src['classification_version'])}; run: {md_text(src['run_id'])}; "
               f"environment: {md_text(src['environment'])}; plan timestamp: {md_text(src['plan_timestamp'])}",
               "- Versions: " + md_text(", ".join(f"{k} {v if v is not None else 'none'}" for k, v in versions.items())),

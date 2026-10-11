@@ -245,6 +245,7 @@ def test_ai_state_schema():
     assert set(AiState.__annotations__) == {"drift_report", "parsed_drift", "security_targets", "cost_targets",
                                             "config_targets", "origin_facts", "investigation", "investigation_facts",
                                             "cost", "cost_impact",  # Task 10.3
+                                            "unmanaged", "unmanaged_section",  # Task 10.4
                                             "remediation_plan", "report", "llm_call", "llm", "inferences", "warnings"}
     assert AiState.__total__ is False
 
