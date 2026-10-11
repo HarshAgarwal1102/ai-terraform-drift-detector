@@ -124,8 +124,8 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis (🟡 WORK IN PROGRESS: Task 10.1 🟢 completed 2026-10-04; Task 10.2 ⬜ NOT STARTED)
-- **Current Active Task**: Task 10.2 — Terraform Plan Cost Delta Calculation (⬜ NOT STARTED; it starts with its design review and is not started automatically, Execution Rule 8). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
+- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis (🟡 WORK IN PROGRESS: Task 10.1 🟢 completed 2026-10-04; Task 10.2 🟢 completed 2026-10-11; Task 10.3 ⬜ NOT STARTED)
+- **Current Active Task**: Task 10.3 — AI Cost Impact Explanation Engine (⬜ NOT STARTED; it starts with its design review and is not started automatically, Execution Rule 8). Task 10.2 completed on 2026-10-11: `drift_engine.cost` (library, `cost_delta_version` 1); see its completion notes. Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 9 of 14 (Phases 1–9). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -4798,7 +4798,7 @@ In addition:
 ---
 
 ### PHASE 10 — FinOps / Cost Analysis
-**Status**: 🟡 WORK IN PROGRESS — Task 10.1 🟢 completed 2026-10-04; Task 10.2 ⬜ NOT STARTED (the on-hold decision of 2026-10-04 ended when Phase 9B completed on 2026-10-11).
+**Status**: 🟡 WORK IN PROGRESS — Task 10.1 🟢 completed 2026-10-04; Task 10.2 🟢 completed 2026-10-11; Task 10.3 ⬜ NOT STARTED (the on-hold decision of 2026-10-04 ended when Phase 9B completed on 2026-10-11).
 
 Phase 10 integrates Infracost to provide deterministic cost estimates for configuration drift and infrastructure changes.
 
@@ -4836,6 +4836,7 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
     - Local runs use the darwin-arm64 tarball (SHA-256 `09fa73ecdc762c1b557df70234eb44cc446a9a9e412a4ab326185cac3f39e631`) in the **session scratchpad only** (Rule 16).
   - **D2 — Mode**: exactly `infracost breakdown --path <plan.json> --format json --out-file <raw> --no-color`, on the `plan.json` produced by `scripts/generate_plan_json.sh` in the same job and run that `drift-engine analyze` classified. No HCL/directory mode, no `--terraform-var-file`, no `diff` command, no `--compare-to`, no usage file, no second `terraform plan`, no Terraform plan, init or HCL evaluation by Infracost; the only Terraform invocation is the start-up `terraform -version` described in the D7 amendment (Checkpoint disabled). *(Wording fixed 2026-10-04, user decision, to match the D7 amendment.)*
   - **D3 — Cost-difference definition**: `diffTotalMonthlyCost` = `totalMonthlyCost` (desired, `planned_values`) − `pastTotalMonthlyCost` (actual, refreshed `prior_state`) = cost of *reverting* to the desired configuration. **Drift cost = −`diffTotalMonthlyCost`.** No committed cost baseline. Task 10.2 must use this sign convention.
+    - **Amendment (2026-10-11, Task 10.2, user decision)**: the sign convention is unchanged. The run-level −`diffTotalMonthlyCost` combines drift and pending configuration changes, so Task 10.2 publishes it as `infracost_plan_delta`, never as drift cost; drift cost is only the `confirmed_drift` subtotal (see Task 10.2). "Actual" in this decision means the list-price estimate of the refreshed current configuration of Terraform-managed resources, not actual Azure billing.
   - **D4 — Thresholds**: none. No cost increase, decrease or total fails anything; cost is informational. Only failures of the cost process itself (D5) fail.
   - **D5 — Placement and failure isolation (Option A)**:
     - **Amendment (2026-10-05, Phase 9B G10 / Task 9B.5 design review)**: the cost step stops being the *single* exit-0 exception.
@@ -4972,20 +4973,45 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
     - The existing Terraform steps' own Checkpoint behaviour, the Node.js 20 action deprecation and the `ubuntu-latest` migration notices remain Phase 12 items.
 
 #### Task 10.2 — Terraform Plan Cost Delta Calculation
-- **Status**: ⬜ NOT STARTED (the 2026-10-04 hold ended when Phase 9B completed on 2026-10-11)
+- **Status**: 🟢 COMPLETED
+- **Started**: 2026-10-11
+- **Completed**: 2026-10-11
 - **Objective**: Extract cost differences (`monthly_cost_delta`) between current state and drifted state.
 - **Dependencies**: Task 10.1; Phase 9B (🟢 2026-10-11, Task 9B.6)
-- **Files/Areas**: `src/drift_engine/cost.py`
+- **Files/Areas**: `src/drift_engine/cost.py`; plus (approved design) `tests/test_cost.py`, `README.md`, `docs/drift-detection-spec.md` §8.3 ("Cost delta").
+  - **Unchanged**: workflows, `scripts/sanitize_infracost.py`, `src/ai_engine/` and the AI report schema (Task 10.3), `schemas/`, `ci/*-constraints.txt`, `terraform/`, the Task 10.1 fixtures, dependencies.
+- **Design (locked 2026-10-11, user-approved after two design reviews)**:
+  - **Interface**: library only, `drift_engine.cost.cost_delta(public_report, infracost, cost_run)` returning the `cost_delta_version` 1 document (the Task 10.2 output contract, a strict Pydantic model). No CLI command, workflow step or new dependency; no I/O, clock, network or Azure. Inputs and the drift result are never changed. It loads only `investigation_public`, `models` and `report_public` from `drift_engine`, so `ai_engine` may import it (G14).
+  - **Binding (fail closed, `CostDeltaError` codes)**: `not_public_report`, `invalid_structure` (public report schema or a D8-required key), `binding_mismatch` (run id, environment, canonical hash), `unsupported_source` (Infracost version, mode, pricing, sign-convention text), `currency_not_usd`, `invalid_decimal`. Messages name a location, never a value.
+  - **Numbers**: decimal strings only, parsed with `Decimal` (at most 40 characters) and computed in an exact context that traps rounding. A float, int, bool, null, exponent or malformed amount fails; an absent optional amount stays `null`. A zero is never invented.
+  - **Sign (D3 unchanged)**: `monthly_cost_delta` = −(Infracost diff `monthlyCost`) = list-price estimate of the refreshed current configuration (`prior_state`) − list-price estimate of the declared configuration (`planned_values`).
+  - **Scope of the amounts (honesty fix, user-approved 2026-10-11)**: every amount is an Infracost list-price estimate for Terraform-managed resources only, never actual Azure billing. Resources outside Terraform are invisible (spec §6.3) and usage-based charges are not priced. `past_monthly_cost` is the list-price estimate of the refreshed current configuration, not actual Azure cost. Every document carries the fixed `limitations` codes `list_prices_usd_no_usage_file`, `exact_address_match`, `absent_from_diff_is_not_zero`, `subresources_not_attributed`, `mixed_not_split`, `terraform_managed_resources_only` and `estimate_not_billing` (the contract requires exactly these seven, each once: a missing, repeated or unknown code fails; the generated order is fixed, but the contract does not impose an order), and its `sign_convention` text states the same. No calculation or attribution changed.
+  - **Contract versioning (user-approved 2026-10-11)**: any change to the v1 output contract that breaks compatibility requires a `cost_delta_version` bump. That includes changing the `sign_convention` or `infracost_plan_delta` label text, the limitation codes, the attribution, attribution-reason, cost-status, group or reason values, the pinned `source` values, or adding, removing or renaming a field. A compatible internal refactoring that leaves every published document byte-identical does not by itself require a bump.
+  - **D3 label clarification (user decision 2026-10-11)**: the run-level −`diffTotalMonthlyCost` mixes drift and pending configuration changes, so it is published as `infracost_plan_delta`, labelled "drift and pending configuration changes combined; not a drift cost". Only `confirmed_drift` is drift cost.
+  - **Attribution** (from the public report's `classification`, `drift_actions` and `ambiguous` only): `drift` (external drift, external deletion or converged drift, with `drift_actions`, not ambiguous); `configuration` (config change, resource added or removed, without `drift_actions`); `mixed` (`drift_and_config_change`, never split); `ambiguous` (`undetermined_classification`, `classifier_ambiguous`, `inconsistent_drift_evidence`, `duplicate_cost_line`).
+  - **Cost status** (exact-address match): `cost_line`, `duplicate_cost_lines`, `no_cost_change_listed`, `no_price_resource_type`, `unsupported_resource_type`, `not_in_cost_output`. Only a diff line gives a delta.
+  - **Comparability**: `past_monthly_cost` (`pastBreakdown`, the list-price estimate of the refreshed `prior_state`) and `desired_monthly_cost` (`breakdown`, the list-price estimate of `planned_values`) come from the same Infracost run and pricing call (Task 10.1 pre-lock verification). They are shown only for the same name, once, in the same project, and are never subtracted.
+  - **Unmatched lines**: a diff line with no report address (`no_report_address`) or an in-sync address (`in_sync_in_report`) is listed with its amount in `unmatched`; duplicate-name lines are listed in `ambiguous`. Nothing is dropped or attributed to drift.
+  - **Subtotals**: `confirmed_drift`, `configuration`, `mixed`, `ambiguous`, `unmatched`, each with `with_cost`, `without_cost` and `complete`; `null` when no member has an amount.
+  - **Reconciliation (reported, not enforced)**: Infracost v0.10.46 computes `diff.totalMonthlyCost` as the sum of the non-skipped, non-nil line amounts and the root total as the sum of the projects (source read 2026-10-11: `internal/output/output.go` `calculateTotalCosts`, `internal/schema/diff.go` `CalculateDiff`, which lists only resources whose cost components or subresources changed). Neither the D8 contract nor a documented schema guarantees this, so per project and at the root (vs the projects and vs `totalMonthlyCost − pastTotalMonthlyCost`) the residual is reported and published as `unreconciled`. The groups plus `unreconciled` always equal `infracost_plan_delta`.
+  - **Display**: `+$106.58/month` / `-$13.14/month` / `$0.00/month`, half-up to cents for display only; the exact decimal is always kept.
 - **Acceptance Criteria**:
-  - [ ] Parses `infracost.json` and correlates cost changes with specific resource drifts.
-  - [ ] Formats currency delta outputs.
+  - [x] Parses `infracost.json` and correlates cost changes with specific resource drifts. *(`cost_delta`: binding, per-resource attribution and cost status, unmatched lines, subtotals and reconciliation; verified on both real samples, the in-memory variants and the real cycle-2 artifacts.)*
+  - [x] Formats currency delta outputs. *(`format_monthly_usd`, the `display` fields.)*
 - **Validation**:
-  - [ ] Test parsing against sample Infracost output.
+  - [x] Test parsing against sample Infracost output. *(`tests/test_cost.py`, 74 tests, on the real Infracost v0.10.46 samples sanitised by the real `scripts/sanitize_infracost.py` and checked with `--check`.)*
 - **Implementation Notes**:
-  - Accurate cost metrics provided to AI engine.
-  - Input is the sanitised `infracost.json` + `cost_run.json` from `infracost-report-<run_id>` (Task 10.1 D8), correlated to the drift report by `run_id` and `drift_report_sha256` (the **public** drift report's canonical hash; amended 2026-10-05, Task 9B.4A); drift cost = −`diffTotalMonthlyCost` (Task 10.1 D3).
+  - Accurate cost metrics provided to AI engine. *(Provided as a library for Task 10.3; 10.2 does not change `ai_engine`, by user decision.)*
+  - Input is the sanitised `infracost.json` + `cost_run.json` from `infracost-report-<run_id>` (Task 10.1 D8), correlated to the drift report by `run_id` and `drift_report_sha256` (the **public** drift report's canonical hash; amended 2026-10-05, Task 9B.4A); the D3 sign convention is used (label clarified above).
 - **Completion Notes**:
-  - None.
+  - **Completed 2026-10-11.** New `src/drift_engine/cost.py` and `tests/test_cost.py`; README ("Cost delta (Task 10.2)", module table, structure, status, roadmap, limitations) and spec §8.3 updated.
+  - **Tests**:
+    - `tests/test_cost.py`: 74 passed, 100% line and branch coverage of `cost.py`. Covers the priced sample (`azurerm_service_plan.this` `external_drift`, delta `106.58`, past `119.72`, desired `13.14`, `+$106.58/month`, reconciled); the in-sync sample (null, never zero); every attribution and cost-status rule; non-drift groups never reaching `confirmed_drift`; absent optional amounts; type-count reasons; negative zero; unmatched and in-sync lines; exact module/`for_each` address matching (no loose matching); duplicate names across and within projects; multiple projects; residuals; a project without `diff`; every binding and decimal failure; formatting; inputs unchanged and deterministic output; the import boundary; the limitation codes and the estimate-not-billing wording in every document, and the contract requiring exactly the seven codes (missing, repeated and unknown codes rejected; order not imposed).
+    - Full suite (`pytest --cov=src/drift_engine tests/`, Python 3.13.12, pinned venv): **2439 passed**, 3960 subtests, 0 failed, coverage 99.49% (gate 85%). `unittest` discovery 963 OK.
+    - Safeguard mutation check (scratchpad only, not committed; throwaway copies): 14 of 14 mutants caught (sign not negated, mixed counted as drift, drift without `drift_actions`, absent amount as zero, residual hidden, duplicates ignored, unmatched lines dropped, hash binding skipped, float accepted, completeness always true, past/desired swapped, half-even display rounding, all amounts counted as drift, the exact-limitations check disabled).
+    - A formatting test found and fixed a rounding defect during implementation: `abs()` on a large `Decimal` rounded to 28 digits; `copy_abs()` is used instead.
+  - **Real data (read-only, local cycle-2 artifacts)**: R2 and R3 bind to their public drift reports; the tag drift on `aitdd-dev-main-rg` is `drift`, `no_price_resource_type`, delta `null`; plan delta `0`, reconciled, no unmatched lines. R4 (in sync) has no resources.
+  - **Limitations**: library only, not called by a workflow; the priced path is verified only with the synthetic fixture (dev is all free); Infracost's `name` format for module and `for_each` addresses has not been seen in real output (a differing format is reported as `unmatched`, never as drift); subresources are not attributed separately; `mixed` amounts are never split.
 
 #### Task 10.3 — AI Cost Impact Explanation Engine
 - **Status**: ⬜ NOT STARTED

@@ -39,8 +39,9 @@ Remediation is planned, not built (Phase 11). See
   the no-LLM `ai-analysis.yml` workflow) was validated in a real CI run.
 - **Phase 10 — FinOps / Cost Analysis** is in progress: Task 10.1 (Infracost cost estimate in
   the drift workflow) is complete and was validated in a real CI run. See
-  [Cost Estimate](#-cost-estimate-task-101). Task 10.2 has not started.
-- **Current active task: Task 10.2 — Terraform Plan Cost Delta Calculation** (Phase 10), which
+  [Cost Estimate](#-cost-estimate-task-101). Task 10.2 (cost delta correlated with drift, a
+  library) is complete; see [Cost delta](#cost-delta-task-102).
+- **Current active task: Task 10.3 — AI Cost Impact Explanation Engine** (Phase 10), which
   starts with its design review.
 
 | Phase | Status |
@@ -57,7 +58,7 @@ Remediation is planned, not built (Phase 11). See
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
-| 10 — FinOps / cost analysis | 🟡 In progress (10.1 Infracost integration complete; 10.2 not started) |
+| 10 — FinOps / cost analysis | 🟡 In progress (10.1 Infracost integration and 10.2 cost delta complete; 10.3 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -121,13 +122,16 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   same run's plan (list prices, USD) and publishes a sanitised, run-bound
   `infracost-report-<run_id>` artifact. Cost is informational: a cost failure turns the run red
   but never changes the drift result. See [Cost Estimate](#-cost-estimate-task-101).
+- **Cost delta** (Task 10.2): `drift_engine.cost` correlates that artifact with the run's
+  public drift report and returns per-resource monthly cost deltas, keeping confirmed drift
+  separate from configuration, mixed, ambiguous and unmatched amounts. It's a library; no
+  workflow calls it yet. See [Cost delta](#cost-delta-task-102).
 
 ### 🔜 Planned (not yet implemented)
 
 These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
 
-- Per-resource cost deltas correlated with drift (Task 10.2) and AI cost explanations based on
-  Infracost numbers (Task 10.3).
+- AI cost explanations based on Infracost numbers (Task 10.3).
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
   and no apply triggered by a merge.
@@ -293,7 +297,8 @@ src/drift_engine/                 # Python drift engine (Phase 4)
 ├── cli.py                        # drift-engine command (4.6; error handling 4.7; activity-logs 7.1; attribute 7.2)
 ├── logs.py                       # Structured logging (4.7)
 ├── activity_logs.py              # Azure Activity Log collector, opt-in [azure] extra (7.1)
-└── attribution.py                # Drift ↔ Activity Log correlation and fallback (7.2, 7.3)
+├── attribution.py                # Drift ↔ Activity Log correlation and fallback (7.2, 7.3)
+└── cost.py                       # Cost delta from the Infracost artifact, correlated with drift (10.2)
 
 src/ai_engine/                    # LangGraph AI analysis engine (Phase 6; ai-analysis CLI in 9A.1)
 ├── cli.py                        # ai-analysis command (9A.1)
@@ -568,6 +573,11 @@ diffTotalMonthlyCost = totalMonthlyCost (desired) - pastTotalMonthlyCost (actual
 drift cost           = -diffTotalMonthlyCost
 ```
 
+Here "actual" means the refreshed current configuration of the Terraform-managed resources,
+priced at list prices. It's an estimate, not actual Azure billing. Task 10.2 publishes this
+run-level difference as `infracost_plan_delta`, because it combines drift and pending
+configuration changes (see [Cost delta](#cost-delta-task-102)).
+
 Example (the synthetic fixture, verified live): an App Service plan scaled up outside Terraform
 from `B1` to `P1v3` gives past `119.72`, desired `13.14`, diff `-106.58` USD/month, so the drift
 costs **+106.58 USD/month**.
@@ -598,6 +608,48 @@ found, 64 usage):
 python3 scripts/sanitize_infracost.py --check "$PWD/.artifacts/infracost-report" --run-id github-<run_id>-<attempt> --drift-report "$PWD/.artifacts/drift-report/drift_report.json"
 ```
 
+### Cost delta (Task 10.2)
+
+`drift_engine.cost.cost_delta(public_report, infracost, cost_run)` turns one run's
+`infracost-report` into a `cost_delta_version` 1 document. It's a library function: there's no
+CLI command or workflow step for it, and it reads no file, clock or network.
+
+```python
+import json
+from pathlib import Path
+from drift_engine.cost import cost_delta
+
+load = lambda name: json.loads(Path(name).read_text(encoding="utf-8"))
+doc = cost_delta(load("drift_report.json"), load("infracost.json"), load("cost_run.json"))
+```
+
+- **Fails closed** (`CostDeltaError` with a fixed code) unless the cost files belong to the same
+  run's **public** drift report (run id, environment, canonical hash) and come from the pinned
+  Infracost source. Amounts must be decimal strings and are computed exactly with `Decimal`.
+- **What the amounts are**: Infracost **list-price estimates** for **Terraform-managed resources
+  only**, never actual Azure billing. `past_monthly_cost` is the list-price estimate of the
+  refreshed current configuration (`prior_state`), and `desired_monthly_cost` the list-price
+  estimate of the declared configuration (`planned_values`). Resources created outside Terraform
+  aren't seen at all ([spec §6.3](docs/drift-detection-spec.md#63-limitations--stated-not-hidden)),
+  and usage-based charges aren't priced. Every document says so in its `limitations` codes
+  (`terraform_managed_resources_only`, `estimate_not_billing`, `list_prices_usd_no_usage_file`).
+- **Sign**: `monthly_cost_delta` = estimate of the current configuration − estimate of the
+  declared configuration. Positive means the current configuration is estimated to cost more
+  than what Terraform declares.
+- **Attribution**: Infracost lines are matched to report resources by exact address. Each line
+  counts in exactly one subtotal: `confirmed_drift`, `configuration`, `mixed`, `ambiguous` or
+  `unmatched`. Only `confirmed_drift` is drift cost. Infracost's run total is reported as
+  `infracost_plan_delta`, labelled as drift and pending configuration changes combined.
+- **No invented numbers**: a missing amount is `null`, and a resource without a cost line gets a
+  reason (for example `no_price_resource_type`), never `0`. Subtotals say whether they're
+  `complete`. Resource lines that don't add up to Infracost's totals are reported as a
+  reconciliation residual (`unreconciled`) rather than rejected.
+- **Display**: `+$106.58/month`, rounded to cents for display only; the exact value is kept.
+
+In dev every resource type is free, so a real run gives `null` deltas with
+`no_price_resource_type`. The priced path is tested with the synthetic SKU fixture
+(`azurerm_service_plan.this`: `+$106.58/month` as confirmed drift).
+
 ---
 
 ## 🐍 Python Drift Engine
@@ -616,6 +668,7 @@ The script's output is unchanged.
 | `logs.py` | 4.7 | Structured logging on the standard `logging` module. Silent by default; each event has a stable name and fields (identifiers, counts, stages, reasons), never attribute values. |
 | `activity_logs.py` | 7.1 | `drift-engine activity-logs --plan --manifest [--lookback-days N] [--output]`: collects Azure Activity Log evidence (`activity_log_evidence.json`) for the drifted resources. Needs the opt-in `[azure]` extra and an Azure login; detection itself never imports it. |
 | `attribution.py` | 7.2, 7.3 | `drift-engine attribute --report --evidence [--output]`: correlates drifted resources with exact-resource write/delete operations and records the logged caller only where the correlation rules establish it, otherwise "unknown" (`drift_attribution.json`). Not used by any workflow; Phase 8 never publishes caller identity. |
+| `cost.py` | 10.2 | `cost_delta(public_report, infracost, cost_run)`: the cost delta of one run's sanitised Infracost artifact, correlated with drift and bound to the public drift report. Library only. See [Cost delta](#cost-delta-task-102). |
 | `severity.py` | 4.5 | Deterministic, rules-based `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` per change and per resource. Examples: Key Vault access policies, NSG inbound rules open to any source and public storage access rate `CRITICAL`/`HIGH`; tags and descriptions rate `LOW`; proven noise rates `INFO`; changes no rule covers default to `MEDIUM`. |
 
 Install for development (a virtual environment is recommended):
@@ -738,7 +791,8 @@ Later phases added the test files below. Their per-task counts are in the
 - `test_ai_*.py`, `test_mutation_corpus.py`: Phase 6;
 - `test_activity_logs.py`, `test_attribution*.py`: Phase 7;
 - `test_github_*.py`: Phase 8;
-- `test_tflint_integration.py`, `test_trivy_config.py`: Phase 9.
+- `test_tflint_integration.py`, `test_trivy_config.py`: Phase 9;
+- `test_infracost.py`, `test_cost.py`: Phase 10.
 
 | Test file | Covers | Tests |
 |---|---|---|
@@ -1063,7 +1117,7 @@ registration holds zero credentials.
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
-| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration complete (10.2 cost deltas, not started; 10.3 AI cost explanation planned) |
+| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration and 10.2 cost delta complete (10.3 AI cost explanation planned) |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
 | 13 | Professional dashboard | ⬜ Planned |
@@ -1119,6 +1173,11 @@ registration holds zero credentials.
   `timeGenerated`). The dev environment costs $0, so non-zero CI pricing hasn't been observed;
   the sign rule was verified with a live run on a synthetic plan. A usage-based resource without
   usage data (null quantities) would fail sanitisation (`sanitize_failed`).
+- The cost delta (Task 10.2) is a library that no workflow calls yet. Its priced path is
+  verified only with the synthetic fixture, because every dev resource type is free. Infracost's
+  resource `name` format for module and `for_each` addresses hasn't been seen in real output;
+  if it differs from the Terraform address, those amounts are reported as `unmatched`, never
+  attributed to drift.
 - Infracost's usage telemetry can't be disabled in v0.10.46. The `plan-and-analyze` job keeps
   `id-token: write` (needed for the Azure login), so the runner still holds the OIDC request
   credential for that job; the cost step only removes it from its own process environment.

@@ -567,7 +567,10 @@ exactly two files:
   `drift_report_sha256` the canonical hash of `drift_report.json` (sorted keys, compact separators,
   UTF-8, as for the AI report). It also records the Infracost version, mode, pricing and the
   sign rule: `diffTotalMonthlyCost` = desired cost (`planned_values`) − actual cost (refreshed
-  `prior_state`), so drift cost = −`diffTotalMonthlyCost`.
+  `prior_state`), so drift cost = −`diffTotalMonthlyCost`. Both are list-price estimates of
+  Terraform-managed resources: "actual" means the refreshed current configuration, not actual
+  Azure billing. Task 10.2 publishes this run-level value as `infracost_plan_delta`, not as drift
+  cost.
 
 A final re-check rejects any email-like string, URL, GUID or absolute path in the output. Before
 publishing, the separate `cost` job (`contents: read`; no `id-token`, Azure or secrets)
@@ -575,6 +578,41 @@ re-verifies both files with `sanitize_infracost.py --check` against this run's d
 writes a totals-only summary. A cost failure fails the `cost` job and the run, but never changes
 `drift_detected`, the drift report or artifact, issues or the `report` verdict. Infracost's
 pricing queries and its usage telemetry are the only accepted egress.
+
+**Cost delta (Task 10.2):** `drift_engine.cost.cost_delta(public_report, infracost, cost_run)`
+(library only; no I/O, clock, network or Azure; no CLI or workflow step) turns one run's
+`infracost-report` into the `cost_delta_version` 1 document. It never changes its inputs or the
+drift result.
+- **Binding** (fails closed with a fixed `CostDeltaError` code): only the public drift report of
+  the same run (run id, environment, canonical hash) and the pinned Infracost source are accepted.
+  Amounts must be decimal strings and are computed exactly with `Decimal`.
+- **Scope of the amounts**: Infracost list-price estimates for Terraform-managed resources only,
+  never actual Azure billing. `past_monthly_cost` is the list-price estimate of the refreshed
+  current configuration (`prior_state`); `desired_monthly_cost` that of the declared configuration
+  (`planned_values`). Resources outside Terraform are invisible (§6.3) and usage-based charges are
+  not priced. Every document carries the `limitations` codes `terraform_managed_resources_only`
+  and `estimate_not_billing`, and its `sign_convention` text says the same.
+- **Sign**: `monthly_cost_delta` = −(Infracost diff `monthlyCost`) = estimate of the refreshed
+  current configuration (`prior_state`) − estimate of the declared configuration
+  (`planned_values`). Positive means the current configuration is estimated to cost more than the
+  declared one.
+- **Attribution**: diff lines are matched to report resources by exact address only. Every line
+  lands in exactly one group: `confirmed_drift` (external drift, deletion or converged drift, with
+  `drift_actions`), `configuration`, `mixed` (`drift_and_config_change`, never split), `ambiguous`
+  (undetermined, classifier-ambiguous, contradictory evidence or duplicate names) or `unmatched`
+  (no report address, or an in-sync address). Only `confirmed_drift` is drift cost. Infracost's run
+  total is published as `infracost_plan_delta`, labelled as drift and pending configuration changes
+  combined, never as drift cost.
+- **No invented numbers**: an absent amount stays `null`, and a resource with no diff line gets a
+  reason (`no_cost_change_listed`, `no_price_resource_type`, `unsupported_resource_type`,
+  `not_in_cost_output`), never a zero. Past and desired monthly costs are shown only when
+  comparable (same name, once, in the same project) and are never subtracted. Subtotals report
+  `with_cost`, `without_cost` and `complete`.
+- **Reconciliation**: resource lines are not required to sum to Infracost's totals (the input
+  contract does not guarantee it). Per project and at the root, the residual is reported and
+  published as `unreconciled`; the groups plus `unreconciled` always equal the plan delta.
+- **Display**: `+$106.58/month` style, rounded half-up to cents for display only; the exact
+  decimal is always kept.
 
 **Drift investigation (Task 9B.5; PROJECT_PLAN.md Phase 9B G8-G13, G10):**
 - **Where and when**: after `Upload Drift Report` and before the cost step (which runs `az logout`),
