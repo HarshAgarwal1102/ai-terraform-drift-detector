@@ -124,9 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure (🟡 WORK IN PROGRESS since 2026-10-10: primary scenario executed as run #32 `38023838144`, its evidence partly recorded; cycle 1 Control A executed as run #36, Control B not executed; on 2026-10-11 D-6 decided a fresh cycle 2 (R1–R4) on the test-fix commit; see the Task 9B.6 progress record). Its plan was revised on 2026-10-10 with the user's decisions D-1 to D-3 (a fresh primary run; job-log check scoped to the investigation and AI logs; G9 anchor and phase-count reconciliation). The user reviewed and locked the revised plan on 2026-10-10, including the code-verified Local WHO and Determinism corrections. Its in-sync anchor is the latest in-sync drift report before its primary run (G9): run #31 `38023441753`, which superseded run #30 `37963733177` and which the primary investigation accepted. Task 9B.5 completed 2026-10-09: G18 CI result policy (`4ba7668`), CI Activity Log authentication fix (`62bdf65`), no-drift real CI proof run #28 and drifted real CI proof run #29 with all artifact-content checks passed. Phase 10 stays on hold until Phase 9B is completed (Task 9B.6).
-- **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
+- **Current Active Phase**: Phase 10 — FinOps / Cost Analysis (🟡 WORK IN PROGRESS: Task 10.1 🟢 completed 2026-10-04; Task 10.2 ⬜ NOT STARTED)
+- **Current Active Task**: Task 10.2 — Terraform Plan Cost Delta Calculation (⬜ NOT STARTED; it starts with its design review and is not started automatically, Execution Rule 8). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
+- **Phases Completed**: 9 of 14 (Phases 1–9). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
 
@@ -1539,7 +1539,7 @@ The dedicated infrastructure expansion anticipated by the Phase 1 scope note: ad
   - **Lesson for later phases**: creating a subnet and its NSG association in one apply leaves computed attributes stale in state until a refresh is persisted; the engine reports that as `converged_drift`. After applies that add associated network resources, run a reviewed `apply -refresh-only` (or expect one converged-drift scan).
 
 ### PHASE 6 — LangGraph AI Analysis Engine
-**Status**: 🟡 WORK IN PROGRESS — reopened 2026-10-04 (requirement gap; the remaining work is owned by Phase 9B)
+**Status**: 🟢 COMPLETED — returned to 🟢 on 2026-10-11 when Task 9B.6 passed (reopened 2026-10-04 for a requirement gap, closed by Phase 9B; see the Task 9B.6 completion notes)
 
 Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI-compatible models to analyze detected drift, evaluate security and cost implications, and recommend remediation steps based on strict empirical evidence.
 
@@ -1802,7 +1802,7 @@ Phase 6 constructs the AI analysis engine using LangGraph, LangChain, and OpenAI
 ---
 
 ### PHASE 7 — Azure Activity Log Investigation
-**Status**: 🟡 WORK IN PROGRESS — reopened 2026-10-04 (requirement gap; the remaining work is owned by Phase 9B)
+**Status**: 🟢 COMPLETED — returned to 🟢 on 2026-10-11 when Task 9B.6 passed (reopened 2026-10-04 for a requirement gap, closed by Phase 9B; see the Task 9B.6 completion notes)
 
 Phase 7 queries Azure Activity Logs to correlate detected drift with actual Azure control plane events (caller identity, timestamp, operation name).
 
@@ -2901,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.5 and 9B.4A complete; Task 9B.5 completed 2026-10-09 with the no-drift real CI proof run #28 and the drifted real CI proof run #29, all artifact checks passed; Task 9B.6 🟡 work in progress since 2026-10-10 (cycle 1: primary run #32, Control A run #36, Control B not executed; fresh cycle 2 per D-6, 2026-10-11); its plan was revised, reviewed and locked by the user on 2026-10-10)
+**Status**: 🟢 COMPLETED — 2026-10-11 (Tasks 9B.1–9B.6 and 9B.4A complete; Task 9B.6 passed on real Azure cycle 2, runs #37–#40 on commit `4d89c94`, under the plan locked on 2026-10-10 with D-4 to D-6)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -4394,8 +4394,9 @@ In addition:
         - **Evidence byte-equivalence** against HEAD (temporary `git worktree`, removed): 14 of 14 identical.
 
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
-- **Status**: 🟡 WORK IN PROGRESS (cycle 1: primary and Control A executed, Control B not executed; fresh cycle 2 per D-6 pending)
+- **Status**: 🟢 COMPLETED — every acceptance criterion and validation item met on cycle 2 (D-6); cycle 1 stays as history
 - **Started**: 2026-10-10
+- **Completed**: 2026-10-11
 - **Plan revision (2026-10-10, user-approved decisions; reviewed and locked by the user on 2026-10-10)**:
   - **D-1 (fresh primary run)**: the primary scenario is repeated with a fresh real Azure drift run. Task 9B.5's run #29 is **not** primary evidence; it is cited only as prior evidence that the pipeline works.
   - **D-2 (job-log scope)**: the public job-log privacy check covers only the investigation and AI logs (see "Leak scan"). The Phase 5 diagnostic-log exposure, which includes the `Verify Azure OIDC Authentication` step, stays a documented Phase 12 known limitation.
@@ -4467,7 +4468,7 @@ In addition:
   4. **Record and close**: record everything (Validation), then apply the Closure criterion. Task 10.2 is not started (Execution Rule 8).
   - A scheduled run that fires during steps 1–3 is recorded as incidental evidence: a drifted run while test tags are present, in-sync after Control B. It does not replace a scenario run, and it can only become an anchor when it is in-sync.
 - **Acceptance Criteria**:
-  - [ ] **Primary scenario (fresh run; D-1)**:
+  - [x] **Primary scenario (fresh run; D-1)**:
     - **Anchor**: the public investigation's and the AI report's last-in-sync reference is the latest in-sync run before the primary dispatch (G9), identified in pre-check 0 and re-confirmed immediately before the dispatch. The drift report shows `external_drift` on `tags.<key>`, unaffected by the investigation.
     - **CI result (G18)**: the run concludes **success**, specifically:
       - `Generate Plan Evidence` records plan exit code `2`;
@@ -4494,7 +4495,7 @@ In addition:
       - The decisive operation's start (first row) and end (last Succeeded row) equal the Azure event timestamps when truncated to whole seconds.
       - The last row's status is `Succeeded`.
       - Only timestamps, operation names and statuses are compared or printed, never a caller, claim or ID.
-  - [ ] **Control A**: a second tag write on the same resource group after the primary tag, with no in-sync run in between, then dispatch. Required:
+  - [x] **Control A**: a second tag write on the same resource group after the primary tag, with no in-sync run in between, then dispatch. Required:
     - the run concludes **success** with `drift_detected=true` and plan exit `2` (G18);
     - the investigation `succeeded` / `complete` with no query-failure, limit or `auth_*` code;
     - the AI report shows verdict **`ambiguous`** (two capable operations since the same anchor);
@@ -4503,14 +4504,14 @@ In addition:
     - the issues job updates the open drift issue (or leaves it unchanged) and creates no second issue for the resource;
     - the cost job and the AI run succeed;
     - the run uses a `main` commit that includes the D-4 B fix, and its job-log check passes under the D-4 policy with **B = 0** in both the `investigation` and `ai-analysis` jobs.
-  - [ ] **Control B**: the user removes all test tags, then dispatch. Required:
+  - [x] **Control B**: the user removes all test tags, then dispatch. Required:
     - the run concludes **success** with `drift_detected=false`, plan exit `0` and classification `{"in_sync":5}`;
     - the investigation `succeeded` / `complete` with 0 resources and no anchor fetch;
     - the AI report v2 has 0 resources and no investigation claims;
     - the issues job closes the open drift issue (`state_reason: completed`, Task 8.3);
     - the resource group then has exactly its configured tags (read-only check);
     - its job-log check passes under the D-4 policy with **B = 0** in both the `investigation` and `ai-analysis` jobs.
-  - [ ] **Leak scan (amended 2026-10-05, P2; job-log scope amended 2026-10-10, D-2; job-log GUID policy amended 2026-10-10, D-4)**:
+  - [x] **Leak scan (amended 2026-10-05, P2; job-log scope amended 2026-10-10, D-2; job-log GUID policy amended 2026-10-10, D-4)**:
     - **Required downloads (revision 2026-10-10, point 3; necessity per criterion)**:
       - **Every scenario (primary, Control A, Control B)**: `drift-report`, `drift-investigation` and `ai-analysis-report`. Each is consumed by a criterion in every scenario: the WHAT/WHEN/WHO/verdict/0-resource checks, determinism (the drift report and investigation are its inputs, the AI report its expected output), the leak scan, and for the primary scenario local WHO (`--public`, `--report`). None of them can be dropped.
       - **`infracost-report`**: downloaded for the **primary** scenario and checked locally like the others, including the end-to-end three-way `drift_report_sha256` match across cost, investigation and AI, as in Task 9B.5.
@@ -4542,7 +4543,7 @@ In addition:
       - **Recorded per run**: the A, B, C and unclassified GUID counts per job and step, the other categories, the `***` mask count and the scan coverage (lines scanned out of total).
     - **Excluded from the job-log check (known limitation, Phase 12)**: the Phase 5 diagnostic output of `Verify Azure OIDC Authentication` (`az account show`, with subscription and tenant IDs masked by GitHub as `***`) and the failure-only `plan.log` tail of `Generate Plan Evidence`. The exclusion is recorded with the results, and the limitation stays open for Phase 12.
     - **Deletion scenario**: its public projection is leak-free as fixture-verified in Task 9B.4A (the deletion path has no safe real producer). That evidence is cited, not re-run.
-  - [ ] **Local WHO** (G12; the user runs every step that prints an identity; revision 2026-10-10, point 2; corrected 2026-10-10 after code verification):
+  - [x] **Local WHO** (G12; the user runs every step that prints an identity; revision 2026-10-10, point 2; corrected 2026-10-10 after code verification):
     - **Evidence roles** (verified against `src/drift_engine/who.py`; G12 unchanged):
       - **Caller source: Azure Activity Log only.** `who` re-queries each public operation's start and end ± 1 s and accepts exactly one operation group equal in operation name, start and end (to the microsecond), outcome, relations, caller type and client application. Only that group's recorded caller is reported. `no_match` and `multiple_matches` never yield a caller.
       - **Terraform state: address → ARM ID only.** It is the current stored state, but it is the same state the CI plan read as the drift entry's `before` (plan runs never write state), and ARM IDs are name-derived.
@@ -4592,7 +4593,7 @@ In addition:
       - `who` exits 0;
       - all Step 2 checks and the Step 4 `failure`, status, count, binding and WHO evidence acceptance checks are true.
     - **Recorded in the plan**: only the exit code, the status counts, the binding-hash match, the booleans and the date. No caller (or any part of it) and no ID or state content is recorded. The local files stay 0600 under `.artifacts/` (G12).
-  - [ ] **Determinism** (corrected 2026-10-10 after code verification): for each scenario, the AI report regenerated locally is byte-identical to the downloaded `ai_analysis_report.json` and `ai_analysis_report.md` (equal SHA-256).
+  - [x] **Determinism** (corrected 2026-10-10 after code verification): for each scenario, the AI report regenerated locally is byte-identical to the downloaded `ai_analysis_report.json` and `ai_analysis_report.md` (equal SHA-256).
     - **Inputs only**: the scenario's extracted, digest-verified `drift_report.json` and `drift_investigation.json`, used unchanged (not reformatted, re-serialized or edited).
       - `ai-analysis` reads no other file. It makes no Azure, Activity Log or network call and reads no clock (verified in `src/ai_engine/cli.py` and `src/ai_engine/nodes/report_generator.py`).
       - `infracost-report` is not an input; the AI report's cost section is fixed.
@@ -4614,25 +4615,25 @@ In addition:
       - The command must exit 0.
     - **Compare**: the SHA-256 of both regenerated files equals that of the downloaded files. A difference is a blocker, reported with the differing JSON key paths only.
     - **Recorded**: per scenario, the AI run id and `headSha`, the Python version, the pin-check result and the four SHA-256 values.
-  - [ ] **Closure** (only after every criterion above passes):
+  - [x] **Closure** (only after every criterion above passes):
     - Phase 9B 🟢; Phase 6 and Phase 7 headers back to 🟢, with closure notes referencing this task;
     - Overview "Phases Completed" updated to **9 of 14 (Phases 1–9)** with the Phase 6/7 note;
     - `README.md` phase status reconciled with the plan (it currently states "Phases 1–9 are complete" / "9 of 14" while the plan states 7 of 14), plus README limitations as needed;
     - Phase 10 → 🟡 WORK IN PROGRESS and Task 10.2 → ⬜ NOT STARTED;
     - Current Active Task → Task 10.2 (not started automatically, Execution Rule 8).
 - **Validation**:
-  - [ ] All of the above recorded with run ids, commit, each AI run's `headSha`, runner image, artifact digests and timings, plus any incidental scheduled runs during the window.
-  - [ ] For every scenario's drift run and AI run, the D-4 job-log scan is recorded:
+  - [x] All of the above recorded with run ids, commit, each AI run's `headSha`, runner image, artifact digests and timings, plus any incidental scheduled runs during the window.
+  - [x] For every scenario's drift run and AI run, the D-4 job-log scan is recorded:
     - the archive-to-run mapping;
     - the coverage (every API step has log lines; lines scanned out of total);
     - per job: the A, B, C and unclassified GUID counts, the other categories and the `***` mask count.
     - The 4 B GUIDs of runs `38023838144` and `38024516418` are recorded as the one-time pre-fix finding, not a failure; B must be 0 in both in-scope jobs of Control A, Control B and any re-run or new attempt of the primary scenario.
-  - [ ] `latest_capable_operation` and the deletion-confirmed paths remain fixture-verified (no safe real producer) and are recorded as such, citing their task records (Tasks 9B.2–9B.4A).
+  - [x] `latest_capable_operation` and the deletion-confirmed paths remain fixture-verified (no safe real producer) and are recorded as such, citing their task records (Tasks 9B.2–9B.4A).
 - **Implementation Notes**:
   - Every Azure change is made by the user. Claude only reads (Activity Log, artifacts, public job data).
   - Test tag values appear in the public drift and AI reports as Terraform evidence, so they must be neutral (no email, name or ID). An identity-like value would fail the leak scan.
   - Run #29 (Task 9B.5) already showed the expected primary-scenario shape (`sole_capable_operation`, R4 `restore_declared`, WHO withheld). It is cited as prior evidence only (D-1).
-- **Progress record (2026-10-10, evidence-backed; every acceptance checkbox above stays unchecked until all its items are recorded)**:
+- **Progress record (2026-10-10, cycle 1; history, not used for closure (D-6); the closure evidence is in the Completion Notes)**:
   - **Runs** (public GitHub API; all attempt 1):
 
     | Drift run | Commit | Event, created (UTC) | Conclusion | Role | AI run (commit, conclusion) |
@@ -4703,14 +4704,101 @@ In addition:
       - **NOT VERIFIED**: the drift run #36 job log.
     - **Primary anchor re-confirmation (#32)**: identification found in a session record; the re-confirmation immediately before dispatch is NOT RECORDED.
     - **Local WHO for #32, re-run 2026-10-11**: the user reported `who` exit 0 in a fresh environment at `717a2f0`. Step 2 and Step 4 PASS. The original evidence was kept in `who-local/original-2026-10-10/`.
-  - Phase 9B is not closed, and Phase 10 is not started.
+  - At the D-6 decision, Phase 9B was not closed and Phase 10 was on hold.
 - **Completion Notes**:
-  - None.
+  - **Completed 2026-10-11 on cycle 2 (D-6).** All four runs are `workflow_dispatch` on `main` / `dev`, commit `4d89c940de59df53c43ea80cbde3a0dc9e2ab1b9` (it contains the D-4 B fix `c3cf8a0` and the D-6 test fix), attempt 1, conclusion **success**, every job **success**. Each triggered AI run has `headSha` `4d89c94` and succeeded. No other drift run (scheduled or dispatched) ran between #36 and #40.
+
+    | Role | Drift run | Created → finished (UTC) | AI run (`headSha`, conclusion, window) |
+    | --- | --- | --- | --- |
+    | R1 in-sync anchor (G9) | #37 `38104177960` | 02:08:31 → 02:10:11 | #20 `38104270957` (`4d89c94`, success, created 02:10:13) |
+    | R2 primary | #38 `38105671846` | 02:35:55 → 02:47:25 | #21 `38106282914` (`4d89c94`, success, 02:47:30–02:47:51) |
+    | R3 Control A | #39 `38109121618` | 03:40:06 → 03:51:25 | #22 `38109723662` (`4d89c94`, success, 03:51:29–03:51:57) |
+    | R4 Control B | #40 `38111406531` | 04:23:02 → 04:24:25 | #23 `38111478809` (`4d89c94`, success, 04:24:29–04:24:53) |
+
+    - **Azure changes** (all made by the user in the Azure Portal; each one `Microsoft.Resources/tags/write`, successful, caller type `user`, client `azure_portal`, one recorded caller, identity never printed or recorded):
+      - before R1, removal of the cycle-1 test tags: 01:58:26–01:58:28Z;
+      - before R2, `drift_test` = `primary-r2`: 02:27:00.310062–02:27:03.028847Z, available 02:29:00Z;
+      - before R3, `drift_test-2` = `control-a-r3` (key accepted as-is by user decision): 03:34:30.341314–03:34:32.794486Z, available 03:36:07Z;
+      - before R4, removal of both test tags in one write: 04:18:02.344–04:18:05.078Z, ingested 04:19:47Z.
+      - Each pre-dispatch Activity Log query was complete with 0 dropped events. After R4, `aitdd-dev-main-rg` has exactly the three declared tags (`environment`, `managed_by`, `project`; read-only checks 04:25:37Z and 04:46:23Z).
+    - **R1 (anchor)**: no drift annotation; investigation `complete` with 0 resources; issue #8 closed `completed` at 02:10:08Z, inside R1's `Drift Issues` job (02:09:55–02:10:11Z), Task 8.3. R2's and R3's investigations accepted it as anchor `github-38104177960-1`; G9 accepts only a report in which the address is `in_sync`. Artifact digests (not downloaded): `drift-report` `778d030a69345b27495fa81da5f84562ec5dbc0cf5015dec1b5cf8f5176df12b`, `drift-investigation` `39ab3a393087ba80e6e8e3ec29eaf0c1a53a0c07571ce495045d3b7886a47654`, `infracost-report` `07b589c2c2431400f083bcb7b95600743330a4f6f2b9af00e8df25b346f54449`.
+    - **Anchor timing (D-6)**: R1 finished 02:10:11Z; anchor identified 02:16:50Z; re-confirmed 02:34:30Z and, immediately before the dispatch, 02:35:41Z; R2 created 02:35:55Z.
+  - **Primary scenario (R2)**: PASS.
+    - **CI result (G18)**: `detection_run.json` `plan_exit_code: 2`. Job log literals: `DRIFT_DETECTED: true`, `DRIFT_STATUS: detected`, `INVESTIGATION_STATUS: succeeded`, `INVESTIGATION_DETAIL: none`. The `report` job logged "result VALID; drift_detected=true". `drift-report` has `has_drift: true` and `external_drift` on `tags.drift_test` (desired `absent`, real value present). The issues job created issue #9 at 02:47:22Z (inside 02:47:09–02:47:24Z).
+    - **Durations**: `plan-and-analyze` 660 s (`Drift Investigation` step 601 s, the G8 settling wait), `investigation` 12 s, `issues` 15 s, `cost` 7 s, `report` 3 s; AI run #21 21 s.
+    - **Runner**: image `ubuntu-24.04` `20261004.327.1`, runner `2.337.0` (from the job log). Azure CLI `2.90.0`, from that image's published readme (tag `ubuntu24/20261004.327`), because the job log does not print it.
+    - **Investigation**: `outcome: complete`, `failure: null`, `binding.evidence_outcome: complete`, `settled: true` (1 poll at `not_before` 02:46:54Z, max ingestion delay 119.689 s); anchors examined 37, accepted 14, rejected `report_invalid` 23.
+    - **AI report v2** (every item of "Phase 9B end-to-end acceptance"):
+      - WHAT `external_drift` on `tags.drift_test`, desired `absent`;
+      - operation `op-1` `Microsoft.Resources/tags/write`, `successful`, relations `exact` + `extension` in one group;
+      - WHEN event start and end, `available_at` 02:29:00Z, last in-sync observation (R1, 02:09:11–02:09:32Z), observation 02:36:35–02:36:54Z and plan timestamp 02:36:45Z, labelled separately; timing `before_observation`;
+      - WHO `recorded_caller` `recorded`, `user`, `azure_portal`, `pipeline_identity: false`, identity `withheld`; actor attribution `not_confirmed_by_available_evidence`;
+      - correlation `sole_capable_operation`, `property_link: inferred_not_provable` (`no_property_values_in_activity_log`), completeness `settled: true`;
+      - LLM `provider: none`, `not_attempted`, nothing sent;
+      - recommendation `restore_declared` (policy v1, R4) with the accept-remote note, `approval_required: true`, `automatic_apply: false`, `execution_allowed: false`.
+    - **WHEN to the second**: the operation's first-row start and last `Succeeded` row end equal the Azure record (to the microsecond); only timestamps, operation names and statuses were printed.
+    - **Hash binding**: the canonical public drift report SHA-256 `db9db841af415434ecd3c1cc3c11ad8365ee54adf6136b6662ac10e7cb9d0b5b` is the same in the cost, investigation and AI artifacts.
+  - **Control A (R3)**: PASS.
+    - plan exit `2`; log literals `DRIFT_DETECTED: true`, `DRIFT_STATUS: detected`, `INVESTIGATION_STATUS: succeeded`, `INVESTIGATION_DETAIL: none`; "result VALID; drift_detected=true"; `external_drift` on `tags.drift_test` and `tags.drift_test-2`.
+    - investigation `complete`, `failure: null`, `settled: true` (queried 03:50:55Z); anchor still `github-38104177960-1` (no in-sync run in between).
+    - verdict **`ambiguous`** (`multiple_capable_operations`), no decisive operation; `op-1` is the R2 write (identical public fields) and `op-2` the R3 write, both `capable`, `before_observation`, `user` / `azure_portal`, caller `recorded`, `pipeline_identity: false`.
+    - `who.recorded_caller.status: multiple_operations`, `candidate_operations: 2`; actor attribution `not_confirmed_by_available_evidence`.
+    - recommendation unchanged at `restore_declared` (R4).
+    - issue #9 updated at 03:51:20Z inside R3's issues job (03:51:07–03:51:24Z), 0 comments, no second issue.
+    - cost job and AI run #22 succeeded; hash binding `64ba26717406d8633d8d62d4bc94530b27127d9939f4f39acd0e285df9240f72` across the three artifacts.
+    - `plan-and-analyze` 647 s (`Drift Investigation` 601 s).
+  - **Control B (R4)**: PASS.
+    - plan exit `0`, `has_drift: false`, `{"in_sync":5}` (0 of 5 drifted); log literals `DRIFT_DETECTED: false`, `DRIFT_STATUS: none`, `INVESTIGATION_STATUS: succeeded`, `INVESTIGATION_DETAIL: none`; "result VALID; drift_detected=false".
+    - investigation `complete` with 0 resources and 0 anchors examined (no anchor fetch; `Drift Investigation` step 8 s); AI report v2 with 0 resources and no investigation claims.
+    - issue #9 closed `completed` at 04:24:20Z, inside R4's issues job (04:24:09–04:24:24Z), Task 8.3.
+    - resource group back to exactly its three declared tags; hash binding `e85719d37998315ea964e424e4eab4eda59be65086bd05f06dd21faf9d190ea0`.
+  - **Artifacts** (each downloaded ZIP's SHA-256 equals its GitHub digest; flat regular files only, valid CRCs, extracted files equal the members; all expire 2026-11-10). `infracost-report` was downloaded for all three scenarios, beyond the primary-only requirement:
+
+    | Scenario | `drift-report` | `drift-investigation` | `ai-analysis-report` | `infracost-report` |
+    | --- | --- | --- | --- | --- |
+    | R2 | `b8be685c37dc1b3729ebe1f507055d7e54b2e5a2cc0baebaa7282e696e8ff531` | `4c86dab2a840b5cc5d2e6774d0affd860cc2d15f544fc343c7e7aeb7c0855575` | `ae79e115dff3215cd5e07d3e291ffe4d880c0902cd1946ee99f653ce72e852e0` | `82911f392849cc07808e749f312b032d318e37bf0f692f0278036944f11ee402` |
+    | R3 | `e39bab51ae3b4268f9125df9eead765e7d12785346f2d508c6abae8567a5d643` | `88bc08eab59907dc57187fb11d17c42b45a43c9f26fb0179af5f6db88c55f736` | `ca454550632d6295aee26df2ab6f038c83caccf7d476d46aeb00617005b6459c` | `1af035b785cc9c54a2a272df8babd141d7017a237d26e89dc79e68976ad3e266` |
+    | R4 | `7442edd13c756586d1f491597117f6348101f14f9508f8367fd8bc0457399a45` | `0cdf214af2f5e5c0a043cb15a61ecfb1dc13dc919660c61d16ea0ada858212c8` | `23f36360cddfbe504be44712aa7ce4093c4eb81a5139d5b86b8eece58fe27c05` | `36a2bcd5bdf32f7554ba857ace3d3233fe88c77fbea92878c9dc3afc92034862` |
+
+  - **Leak scan (artifacts)**: PASS for all 12 artifacts (21 files). Every public investigation passes `load_public` (contract and full G11 scan); `leak_findings` returns 0 in every JSON file; 0 GUIDs, emails/UPNs, ARM paths, IPs or JWTs; the live subscription ID, tenant ID and signed-in user (compared in memory) appear in no file. The only token-like strings are hex hashes and commit SHAs, Terraform type names, three snake_case fixed codes and the `-chdir=terraform/environments/dev` flag. The test tag values are neutral.
+  - **Job logs (D-4)**: PASS. The user downloaded the six run log archives into a 0700 folder outside the repository (files 0600). They were read in memory, and only counts were printed.
+    - Archive-to-run mapping: each archive is named after its run's `check_suite_id`. Its job and step names match the public API, its timestamps fall inside the API job windows, and the drift run id appears 20 times in each drift archive and the source run id 31 times in each AI archive. Archives: `logs_103243558526.zip` (R2), `logs_103245153873.zip` (AI #21), `logs_103252610018.zip` (R3), `logs_103254175046.zip` (AI #22), `logs_103258625360.zip` (R4), `logs_103258815442.zip` (AI #23).
+
+      | Run | In-scope log | Coverage (lines scanned / total) | A | B | C | Unclassified | `***` masks |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | R2 #38 | `Drift Investigation` step | 39 / 39 | 0 | 0 | 0 | 0 | 2 |
+      | R2 #38 | `investigation` job (12/12 steps) | 374 / 374 | 1 | **0** | 4 | 0 | 3 |
+      | AI #21 | `ai-analysis` job (15/15 steps) | 596 / 596 | 1 | **0** | 4 | 0 | 5 |
+      | R3 #39 | `Drift Investigation` step | 39 / 39 | 0 | 0 | 0 | 0 | 2 |
+      | R3 #39 | `investigation` job (12/12 steps) | 374 / 374 | 1 | **0** | 4 | 0 | 3 |
+      | AI #22 | `ai-analysis` job (15/15 steps) | 596 / 596 | 1 | **0** | 4 | 0 | 5 |
+      | R4 #40 | `Drift Investigation` step | 38 / 38 | 0 | 0 | 0 | 0 | 2 |
+      | R4 #40 | `investigation` job (12/12 steps) | 374 / 374 | 1 | **0** | 4 | 0 | 3 |
+      | AI #23 | `ai-analysis` job (15/15 steps) | 596 / 596 | 1 | **0** | 4 | 0 | 5 |
+
+    - Other categories in every in-scope log: 0 emails/UPNs, ARM paths, IPs, JWTs or live subscription, tenant or user values; 0 `##[error]` lines emitted.
+    - B = 0 in both in-scope jobs of R2, R3 and R4 (D-4 B fix effective). The 4 pre-fix B GUIDs of runs `38023838144` and `38024516418` (cycle 1) stay the one-time recorded finding.
+    - The Phase 5 diagnostic outputs (`Verify Azure OIDC Authentication`, the failure-only `plan.log` tail) stay excluded (D-2) and remain a Phase 12 known limitation.
+  - **Local WHO (R2)**: PASS.
+    - Step 1 (user, own terminal): `terraform init` exit 0, `terraform show -json` exit 0, into `cycle2/who-local/terraform-state.json`.
+    - Step 2 (Claude, booleans only): folder 0700, file 0600 and git-ignored; `terraform_version` `1.14.7`; all 5 drift report addresses in the state; the drifted address's ARM ID parses with resource group `aitdd-dev-main-rg` and the live subscription; `.terraform.lock.hcl` unchanged.
+    - Step 3 (user, own terminal): `drift-engine who` exit 0, from a fresh detached worktree at `4d89c94` with a fresh Python 3.13 virtual environment installed with the `[azure]` extra and `ci/azure-constraints.txt`.
+    - Step 4 (Claude, booleans and counts only): `failure: null`; 1 result `matched` for 1 public operation (`op-1`, operation name, start and end equal the public operation); exactly 1 distinct non-empty caller; public `caller_status: recorded`; `public_binding` run `github-38105671846-1` and drift report hash `db9db841…` match. Evidence file `who_evidence.local.json` SHA-256 `ab8e95602f8526a286ead44a9fc4c048c2ef894581dfd0a59c897a7390df7860`. No caller, ID or state content was printed or recorded. As G3 requires, this does not claim the recorded principal caused the drift.
+    - **Supplementary (not an acceptance criterion)**: `who` for R3 (user, exit 0, output `cycle2/who-local/control-a/`) returned 2 results, both `matched`, each with exactly 1 distinct non-empty caller; `op-1`'s caller equals R2's, and `op-2`'s caller is different (compared in memory). This shows the local path separates the two recorded callers per operation. The public attribution stays `not_confirmed_by_available_evidence`. Evidence SHA-256 `82c45d407eeabe0b5d09b4fbddc457bf78fe43312d66efcae1d8a3ba3ee03f95`. The file is unchanged since `who` wrote it (created and last modified 04:16:42Z). A different value quoted in the cycle-2 session's prose summary is not backed by its tool output and is not used.
+  - **Determinism**: PASS. For each scenario: AI run `headSha` `4d89c94`, a temporary scratchpad worktree of that commit, a fresh Python 3.13.12 venv (3.12 is not available locally) installed with `pip install -c ci/ai-constraints.txt ".[ai]"`, the workflow pin check (43/43), the exact `env -i … AI_LLM_PROVIDER=none ai-analysis --report … --investigation …` command exiting 0, and inputs used unchanged. Regenerated = downloaded:
+    - R2 (AI #21): JSON `4ec740e08bc506bb4acb44315acda27589d4793fe72a34a97b28cbfa0e658008`, Markdown `b48457934d6d4363327268c80ccbced96a0902957fbd3144b2bd3f5bb376f775`;
+    - R3 (AI #22): JSON `d6be26a7938aedb61301b23be56219c8846474fab131c70f4b29ad29badf93b2`, Markdown `c22436517ee3ce2f799b73a47d33f6658c9b0d88390a690ac2044233df760a84`;
+    - R4 (AI #23): JSON `59455b5b19c07daa9544de7914a607d04b2033cd813ef2e5d9c02cfc848a628e`, Markdown `b65f97a80c1013824d5da8619189bda55fccb8be5c2f3264d748cb83577148cd`.
+    - Verified in the cycle-2 session and re-verified independently at closure (new worktree and venv, removed afterwards).
+  - **Fixture-verified paths (no safe real producer)**: `latest_capable_operation` and the confirmed-deletion path remain fixture-verified, as recorded in Tasks 9B.2–9B.4A. Their tests are part of the green suite, e.g. `tests/test_investigation.py` (`test_anchor_a_confirmation_under_latest`, `test_overlapping_latest_is_ambiguous`) and `tests/test_ai_investigation.py` (`ScenarioTests.test_without_an_anchor_the_latest_operation_is_decisive`, `test_confirmed_deletion`, `test_deletion_not_confirmed_by_the_rule`, `test_rule_confirmed_deletion_under_an_ambiguous_verdict_stays_inferred`). The deletion scenario's leak-free public projection is the Task 9B.4A fixture evidence.
+  - **Tests**: full suite on commit `4d89c94` (clean detached worktree, Python 3.13.12, venv installed with `-c ci/ai-constraints.txt -c ci/azure-constraints.txt -e ".[dev,ai,azure]"`, re-run at closure on 2026-10-11): `pytest --cov=src/drift_engine tests/` **2365 passed**, 3960 subtests, 0 failed, coverage **99.45%** (gate 85%). The same result was recorded before the commit on a working tree byte-identical to `4d89c94`. The two pin-closure tests (`test_constraints_equal_the_complete_ai_closure`, `test_azure_constraints_equal_the_complete_azure_closure`) require the constrained install by design.
+  - **Scope of the proof**: it covers a tag addition (sole capable operation), a second tag write (ambiguous) and a return to in-sync on one resource group. It does not show that every Azure drift type is investigated correctly. The Activity Log carries no property values (`property_link: inferred_not_provable`), and a recorded caller is never treated as proof of who caused the drift (G3).
+  - **Closure applied**: Phase 9B 🟢; Phase 6 and Phase 7 back to 🟢; Phases Completed 9 of 14 (Phases 1–9); `README.md` phase status and limitations reconciled; Phase 10 🟡 with Task 10.2 ⬜ NOT STARTED as the Current Active Task (not started automatically, Execution Rule 8).
 
 ---
 
 ### PHASE 10 — FinOps / Cost Analysis
-**Status**: 🔴 BLOCKED — on hold until Phase 9B is completed and verified (user decision 2026-10-04). Task 10.1 is complete; Task 10.2 resumes after Task 9B.6.
+**Status**: 🟡 WORK IN PROGRESS — Task 10.1 🟢 completed 2026-10-04; Task 10.2 ⬜ NOT STARTED (the on-hold decision of 2026-10-04 ended when Phase 9B completed on 2026-10-11).
 
 Phase 10 integrates Infracost to provide deterministic cost estimates for configuration drift and infrastructure changes.
 
@@ -4884,9 +4972,9 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
     - The existing Terraform steps' own Checkpoint behaviour, the Node.js 20 action deprecation and the `ubuntu-latest` migration notices remain Phase 12 items.
 
 #### Task 10.2 — Terraform Plan Cost Delta Calculation
-- **Status**: 🔴 BLOCKED — on hold until Phase 9B is completed and verified (user decision 2026-10-04); not started
+- **Status**: ⬜ NOT STARTED (the 2026-10-04 hold ended when Phase 9B completed on 2026-10-11)
 - **Objective**: Extract cost differences (`monthly_cost_delta`) between current state and drifted state.
-- **Dependencies**: Task 10.1; Phase 9B (hold; resumes after Task 9B.6)
+- **Dependencies**: Task 10.1; Phase 9B (🟢 2026-10-11, Task 9B.6)
 - **Files/Areas**: `src/drift_engine/cost.py`
 - **Acceptance Criteria**:
   - [ ] Parses `infracost.json` and correlates cost changes with specific resource drifts.

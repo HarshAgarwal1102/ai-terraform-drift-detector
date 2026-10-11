@@ -18,12 +18,16 @@ Remediation is planned, not built (Phase 11). See
 
 ## 📌 Current Status
 
-**Phases 1–9 are complete**, and so are the lettered phases 5A and 9A.
+**Phases 1–9 are complete**, and so are the lettered phases 5A, 9A and 9B.
 
 `PROJECT_PLAN.md` reports **"Phases Completed: 9 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
   (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "9 of 14".
 - **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **complete**: Task 9A.1 was validated locally and in a real CI run.
+- **Phase 9B** (Drift Investigation: WHO / WHEN / WHAT) is **complete** (2026-10-11). Task 9B.6
+  proved it end to end on real Azure: a portal tag change investigated as the sole capable
+  operation, a second tag write reported as ambiguous, and a return to in-sync. Phases 6 and 7,
+  reopened on 2026-10-04 for the requirement gap that Phase 9B closed, are complete again.
 
 - **Phase 8:** Task 8.2 (automated remediation PRs) is blocked: it was superseded by
   Phase 11 in the 2026-10-03 design review.
@@ -35,7 +39,7 @@ Remediation is planned, not built (Phase 11). See
   the no-LLM `ai-analysis.yml` workflow) was validated in a real CI run.
 - **Phase 10 — FinOps / Cost Analysis** is in progress: Task 10.1 (Infracost cost estimate in
   the drift workflow) is complete and was validated in a real CI run. See
-  [Cost Estimate](#-cost-estimate-task-101).
+  [Cost Estimate](#-cost-estimate-task-101). Task 10.2 has not started.
 - **Current active task: Task 10.2 — Terraform Plan Cost Delta Calculation** (Phase 10), which
   starts with its design review.
 
@@ -52,7 +56,8 @@ Remediation is planned, not built (Phase 11). See
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
 | 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
-| 10 — FinOps / cost analysis | 🟡 In progress (10.1 Infracost integration complete) |
+| 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
+| 10 — FinOps / cost analysis | 🟡 In progress (10.1 Infracost integration complete; 10.2 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -104,8 +109,9 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 - **Activity Log attribution** (Phase 7): `drift-engine activity-logs` collects Azure Activity
   Log evidence (opt-in `[azure]` extra), and `drift-engine attribute` correlates it with
   drifted resources, falling back to "unknown" when logs are missing.
-  - Tested with fake log sources; the collector hasn't been run against real Azure.
-  - Not used by any workflow.
+  - The `activity-logs` and `attribute` commands are tested with fake log sources and aren't
+    called by any workflow. The same collector (`drift_engine.activity_logs`) runs against the
+    real Azure Activity Log in CI through `drift-engine investigate` (Phase 9B).
 - **Static security scanning** (Tasks 9.1–9.3): TFLint and Trivy config check `terraform/`,
   and TruffleHog scans the full Git history for secrets, on every push and pull request in
   `security-scan.yml`, without Azure access. See
@@ -1056,7 +1062,8 @@ registration holds zero credentials.
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
 | 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
-| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration complete (10.2 cost deltas, 10.3 AI cost explanation planned) |
+| 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
+| 10 | FinOps / Infracost | 🟡 In progress: 10.1 Infracost integration complete (10.2 cost deltas, not started; 10.3 AI cost explanation planned) |
 | 11 | Human-approved remediation | ⬜ Planned |
 | 12 | Testing and hardening | ⬜ Planned |
 | 13 | Professional dashboard | ⬜ Planned |
@@ -1094,10 +1101,14 @@ registration holds zero credentials.
 - The AI workflow (Task 9A.1) runs without an LLM, so its report holds only deterministic
   content (validated in a real CI run on a no-drift result). A real model's analysis quality
   hasn't been verified; tests use fake chat models.
-- Activity Log collection and attribution have been tested with fake log sources. The
-  collector itself hasn't been run against real Azure. A read-only Azure check during the
-  Task 7.2 design showed that Activity Log events carry no property diffs, so attributes
-  can't be attributed; only exact-resource writes and deletions are correlated.
+- The drift investigation (Phase 9B) has run against the real Azure Activity Log in CI and was
+  accepted end to end in Task 9B.6. That proof covers tag changes on one resource group (a
+  sole capable operation, an ambiguous second write and a return to in-sync), not every kind
+  of Azure drift. Activity Log events carry no property values, so the link between an
+  operation and a changed attribute is always `inferred_not_provable`, and a recorded caller
+  is never reported as the confirmed actor. The `latest_capable_operation` and
+  confirmed-deletion paths are verified with fixtures only, because no safe real producer
+  exists.
 - Trivy reports four non-blocking MEDIUM/LOW findings on the state storage account, and
   AZU-0012 (no network rules) is an accepted risk until 2027-03-31. Fixing them needs Azure
   architecture or apply decisions outside Phase 9.
