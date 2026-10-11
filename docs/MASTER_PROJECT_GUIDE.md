@@ -7,11 +7,14 @@
 > **Snapshot history:**
 > - **Originally written** against the historical commit `3e2a696` (2026-10-01, during
 >   Phase 3). That commit is *not* the current project HEAD.
-> - **Last updated** against commit `39bbdbc` plus the 2026-10-04 Task 9.4 deferral
->   (Phase 9 complete with Tasks 9.1–9.3; Task 9.4 deferred to Phase 12; Task 9A.1 next). Statuses, roadmap, security, testing and open
->   questions reflect that state.
+> - **Updated** against commit `39bbdbc` plus the 2026-10-04 Task 9.4 deferral (Phase 9
+>   complete with Tasks 9.1–9.3; Task 9.4 deferred to Phase 12; Task 9A.1 next).
+> - **Last updated** against commit `8ef89b6` (2026-10-11): Phases 9A, 9B and 10 complete
+>   (Task 10.4 verified on real Azure in drift-detection run #44); Phase 11 next, not started.
+>   Statuses, roadmap, the architecture overview, security, testing and the status summary
+>   reflect that state. Section 18 keeps its earlier status column.
 > - Sections 5–11 still explain Phases 1–3 the way they were designed, with their final
->   status. Phases 4–9 are summarized in [Section 4](#what-phases-49-delivered).
+>   status. Phases 4–10 are summarized in [Section 4](#what-phases-410-delivered).
 > - For anything newer, `PROJECT_PLAN.md` wins.
 >
 > **Authoritative sources** (this guide summarizes them and never overrides them):
@@ -120,12 +123,12 @@ According to `PROJECT_PLAN.md` (Phases 1–14), the finished platform should:
 1. **Detect** drift deterministically with Terraform. *(Phase 3, done)*
 2. **Package** the results as a typed Python engine with a JSON report. *(Phase 4, done)*
 3. **Run on a schedule** in GitHub Actions. *(Phase 5, done)*
-4. **Explain** drift with AI (LangGraph), without letting AI decide whether drift exists. *(Phase 6, done as a library; CLI/CI integration is Phase 9A)*
-5. **Find who/what made the change** from Azure Activity Logs. *(Phase 7, done; opt-in, not in any workflow)*
+4. **Explain** drift with AI (LangGraph), without letting AI decide whether drift exists. *(Phase 6 library, done; CLI and no-LLM CI workflow in Phase 9A, done)*
+5. **Find who/what made the change** from Azure Activity Logs. *(Phase 7 tooling, done; run in CI by the Phase 9B drift investigation, done)*
 6. **Open GitHub Issues** automatically and close them on evidence. *(Phase 8, done. Remediation PRs moved to Phase 11)*
-7. Add **security scanning** *(Phase 9, done: TFLint, Trivy config, TruffleHog; Super-Linter deferred to Phase 12)* and **cost analysis** *(Phase 10, future)*.
-8. **Fix drift only with human approval.** *(Phase 11, future)*
-9. Show everything on a **dashboard** with real data. *(Phase 13, future)*
+7. Add **security scanning** *(Phase 9, done: TFLint, Trivy config, TruffleHog; Super-Linter deferred to Phase 12)* and **cost analysis** *(Phase 10, done: Infracost estimate of the Terraform plan, cost delta, AI cost impact, and a separate list-price estimate of Azure resources Terraform doesn't manage)*.
+8. **Fix drift only with human approval.** *(Phase 11, next; not started)*
+9. Show everything on a **dashboard** with real data. *(Phase 13, future; not being designed yet)*
 
 ### Big-picture diagram
 
@@ -138,7 +141,9 @@ flowchart TD
     EV --> CL["Drift Classifier<br/>deterministic, no AI"]
     CL --> RES["Structured Drift Report<br/>drift_report.schema.json"]
     RES --> GH["GitHub Issues<br/>Phase 8"]
-    RES --> AI["AI explanation library<br/>Phase 6 (CI: 9A - future)"]
+    RES --> AI["AI analysis<br/>Phase 6 + CI in 9A"]
+    RES --> COST["Cost estimate<br/>Phase 10"]
+    AZ --> UNM["Unmanaged-resource inventory<br/>Task 10.4 - not drift"]
     RES -.-> FIX["Human-approved remediation<br/>Phase 11 - future"]
     RES -.-> DASH["Dashboard<br/>Phase 13 - future"]
 ```
@@ -306,12 +311,15 @@ flowchart TD
 
     subgraph USE["Consumers"]
         ISS["Drift issues - Phase 8 - DONE"]
-        AI["AI analysis library - Phase 6 - DONE<br/>CI integration - Phase 9A - FUTURE"]
-        LOG["Activity Log attribution - Phase 7 - DONE<br/>opt-in, not in a workflow"]
-        FIX["Human-approved remediation - Phase 11 - FUTURE"]
+        AI["AI analysis - Phase 6 library + Phase 9A CLI/CI - DONE<br/>report v4"]
+        LOG["Drift investigation - Phases 7 + 9B - DONE<br/>read-only Activity Log in CI"]
+        COST["Infracost plan estimate + cost delta - Phase 10 - DONE"]
+        FIX["Human-approved remediation - Phase 11 - NEXT"]
     end
 
-    SCAN["security-scan.yml - Phase 9<br/>TFLint + Trivy config, no Azure"]
+    UNM["Unmanaged-resource inventory - Task 10.4 - DONE<br/>read-only ARM listing + Azure Retail Prices estimate<br/>separate finding, never drift"]
+
+    SCAN["security-scan.yml - Phase 9<br/>TFLint + Trivy config + TruffleHog, no Azure"]
 
     CODE --> GEN
     STATE --> GEN
@@ -321,6 +329,12 @@ flowchart TD
     REP --> ISS
     REP --> AI
     REP --> LOG
+    REP --> COST
+    AZ --> UNM
+    BUNDLE -->|"managed IDs"| UNM
+    LOG --> AI
+    COST --> AI
+    UNM --> AI
     REP -.-> FIX
     SCAN -.->|"static checks only"| CODE
 ```
@@ -341,11 +355,15 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 | Python drift engine + severity | 🟢 CURRENT (Phase 4) | `src/drift_engine/` |
 | Scheduled drift-detection workflow | 🟢 CURRENT (Phase 5) | `.github/workflows/drift-detection.yml` |
 | AI analysis engine (library) | 🟢 CURRENT (Phase 6) | `src/ai_engine/` |
-| Activity Log collector + attribution | 🟢 CURRENT (Phase 7, opt-in) | `src/drift_engine/activity_logs.py`, `attribution.py` |
+| `ai-analysis` CLI + no-LLM CI workflow (report v4) | 🟢 CURRENT (Phase 9A; v3 cost in 10.3, v4 unmanaged section in 10.4) | `src/ai_engine/cli.py`, `.github/workflows/ai-analysis.yml` |
+| Activity Log collector + attribution | 🟢 CURRENT (Phase 7) | `src/drift_engine/activity_logs.py`, `attribution.py` |
+| Drift investigation (WHO / WHEN / WHAT) in CI | 🟢 CURRENT (Phase 9B) | `src/drift_engine/investigation.py`, `drift-detection.yml` |
 | Drift issues (create/update/close) | 🟢 CURRENT (Tasks 8.1, 8.3) | `scripts/github_automation.py` |
 | TFLint + Trivy config + TruffleHog scanning | 🟢 CURRENT (Tasks 9.1–9.3) | `.github/workflows/security-scan.yml` |
+| Infracost plan estimate + cost delta + AI cost impact | 🟢 CURRENT (Tasks 10.1–10.3) | `scripts/infracost_analysis.sh`, `src/drift_engine/cost.py`, `src/ai_engine/nodes/cost_analysis.py` |
+| Unmanaged-resource inventory + Azure Retail Prices estimate | 🟢 CURRENT (Task 10.4; verified on real Azure, run #44) | `src/drift_engine/inventory.py`, `unmanaged_cost.py`, `scripts/inventory_analysis.sh` |
 | Super-Linter code-quality enforcement | ⬜ FUTURE (Task 9.4, deferred to Phase 12) | — |
-| AI CLI + CI, cost, remediation, hardening, dashboard | ⬜ FUTURE (Phases 9A–14) | — |
+| Remediation, hardening, dashboard, final docs | ⬜ FUTURE (Phases 11–14; Phase 11 next) | — |
 | Remediation PRs (old Task 8.2) | ⬜ FUTURE (moved to Phase 11) | — |
 | Application Storage Account, Key Vault | ⏸️ DEFERRED | Not in the codebase |
 
@@ -354,12 +372,13 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 ## 4. Phase-by-Phase Roadmap
 
 All names and statuses below are taken from `PROJECT_PLAN.md`.
-**Phases completed: 9 of 14**, as reported by `PROJECT_PLAN.md`.
+**Phases completed: 10 of 14**, as reported by `PROJECT_PLAN.md`.
 
 That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
-  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "9 of 14".
-- **Phase 9A** (AI Analysis Integration) is planned and not started, placed before Phase 10.
+  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "10 of 14".
+- **Phase 9A** (AI Analysis Integration) and **Phase 9B** (Drift Investigation), placed before
+  Phase 10, are both complete.
 
 | Phase | Name (from `PROJECT_PLAN.md`) | Main goal in simple words | Status |
 |---|---|---|---|
@@ -373,14 +392,15 @@ That figure counts the numbered phases 1–14. The lettered phases are planned s
 | 7 | Azure Activity Log Investigation | Find which Azure operation/caller made the change | 🟢 COMPLETED |
 | 8 | GitHub Issue / PR Automation | Open/close drift issues automatically (remediation PRs moved to Phase 11) | 🟢 COMPLETED |
 | 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog in CI (Super-Linter deferred to Phase 12) | 🟢 COMPLETED (9.1–9.3; 9.4 deferred) |
-| 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | ⬜ NOT STARTED (next: Task 9A.1 design review) |
-| 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation | ⬜ NOT STARTED |
-| 11 | Human-Approved Remediation | Apply fixes only after human approval | ⬜ NOT STARTED |
+| 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | 🟢 COMPLETED |
+| 9B | Drift Investigation (WHO / WHEN / WHAT) | Read-only Activity Log investigation in CI, proven on real Azure | 🟢 COMPLETED |
+| 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation; separate list-price estimate of resources Terraform doesn't manage (10.4) | 🟢 COMPLETED (2026-10-11) |
+| 11 | Human-Approved Remediation | Apply fixes only after human approval | ⬜ NOT STARTED (next: Task 11.1 design review) |
 | 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | ⬜ NOT STARTED |
 | 13 | Professional Dashboard | API + UI showing real drift data | ⬜ NOT STARTED |
 | 14 | Final Documentation, Demo & Portfolio Assets | Final docs, demo script, portfolio summary | ⬜ NOT STARTED |
 
-> **About Phases 9A–14 and Tasks 9.3–9.4:** each has a drafted task list in
+> **About Phases 11–14 and Task 9.4:** each has a drafted task list in
 > `PROJECT_PLAN.md`. They are **future scope, not yet finalized**: every task gets its own
 > design review before implementation, and reviews have changed tasks before. For example,
 > tfsec was replaced by Trivy in 9.2, and the remediation PRs of 8.2 moved to Phase 11.
@@ -397,12 +417,15 @@ flowchart LR
     P5A --> P6["P6 AI Analysis<br/>DONE"]
     P6 --> P7["P7 Activity Log<br/>DONE"]
     P5 --> P8["P8 Issues<br/>DONE"]
-    P5A --> P9["P9 DevSecOps<br/>IN PROGRESS"]
-    P6 --> P9A["P9A AI CLI + CI"]
+    P5A --> P9["P9 DevSecOps<br/>DONE"]
+    P6 --> P9A["P9A AI CLI + CI<br/>DONE"]
     P5 --> P9A
-    P5 --> P10["P10 FinOps"]
+    P7 --> P9B["P9B Drift Investigation<br/>DONE"]
+    P9A --> P9B
+    P5 --> P10["P10 FinOps<br/>DONE"]
     P9A --> P10
-    P8 --> P11["P11 Human-Approved Remediation"]
+    P9B --> P10
+    P8 --> P11["P11 Human-Approved Remediation<br/>NEXT"]
     P4 --> P12["P12 Testing + Hardening"]
     P6 --> P12
     P8 --> P12
@@ -413,7 +436,7 @@ flowchart LR
     P13 --> P14
 ```
 
-### What Phases 4–9 delivered
+### What Phases 4–10 delivered
 
 | Phase | What was built (details and evidence: `PROJECT_PLAN.md`) |
 |---|---|
@@ -424,6 +447,9 @@ flowchart LR
 | **7 — Activity Log** | `drift-engine activity-logs` (opt-in `[azure]` extra) and `drift-engine attribute`: a caller is recorded only where exact-resource write/delete events establish it, otherwise "unknown". Tested with fake log sources; not in any workflow. |
 | **8 — Issues** | One public, structure-only issue per drifted resource (8.1), closed only when a newer valid run shows the resource no longer drifted (8.3). Both validated in real runs. Remediation PRs (8.2) were found unsafe for a public repo and moved to Phase 11. |
 | **9 — DevSecOps** | `security-scan.yml`, no Azure access. **TFLint** (9.1) checks lint and value validity; **Trivy config** (9.2) checks security policy, with HIGH/CRITICAL blocking except one expiring, script-enforced risk acceptance (AZU-0012 on the state storage account, until 2027-03-31). **TruffleHog** (9.3) scans the full Git history for secrets, and every result blocks (pinned, SHA-256-verified binary, `--no-verification`, raw values never printed). Super-Linter (9.4) was deferred to Phase 12 before implementation; TFLint keeps Terraform linting. |
+| **9A — AI Integration** | The `ai-analysis` CLI and the no-LLM `ai-analysis.yml` workflow, which runs after every completed detection run with no Azure access and analyses only a valid detection result. |
+| **9B — Drift Investigation** | A read-only Activity Log investigation (WHO / WHEN / WHAT) inside the drift workflow, public projections of the drift report and investigation (identifiers and caller identity withheld), and AI report v2. Proven end to end on real Azure in Task 9B.6. |
+| **10 — FinOps** | **10.1** Infracost v0.10.46 prices each run's Terraform plan (sanitised, run-bound artifact; a cost failure never changes drift). **10.2** `drift_engine.cost` correlates cost lines with drift (only confirmed drift is drift cost). **10.3** AI report v3 states the cost impact with fixed, deterministic statements; the LLM never sees an amount. **10.4** A read-only inventory of the Terraform-managed resource groups lists resources Terraform doesn't manage and prices them with the Azure Retail Prices API. This is a separate finding, never drift and never added to Infracost (AI report v4). 10.3 and 10.4 were verified on real Azure in run #44 (5 unmanaged resources from a portal-created test VM, $44.85/month list price; the VM was deleted afterwards). |
 
 ---
 
@@ -1196,7 +1222,7 @@ strict.
 ## 12. Testing Strategy
 
 ```text
-Unit Tests (pytest; latest recorded full run: 1137 passed, 679 skipped without the ai/azure extras)
+Unit Tests (pytest; latest full run, 2026-10-11 at commit 8ef89b6: 2763 passed, coverage 98.85%)
     +
 Real Terraform Evidence Fixtures (11 scenarios)
     +
@@ -1213,14 +1239,14 @@ Real end-to-end runs (Azure tag drift, workflow runs, CI proofs)
 
 | Layer | What it is | What it protects against |
 |---|---|---|
-| **Unit tests** | `tests/test_*.py`, run with `pytest`. Started with 43 classifier tests at commit `3e2a696`; at Task 9.2 the full run was 1137 passed, 679 skipped (optional `ai`/`azure` extras absent), with 96.05% `drift_engine` coverage (gate 85%) | Logic bugs in classification, validation, the AI engine, attribution, issues and scanners |
+| **Unit tests** | `tests/test_*.py`, run with `pytest`. Started with 43 classifier tests at commit `3e2a696`; at Task 9.2 the full run was 1137 passed, 679 skipped (optional `ai`/`azure` extras absent), with 96.05% `drift_engine` coverage (gate 85%). At Task 10.4 the recorded run was 2735 passed (98.82%); a re-run on 2026-10-11 at commit `8ef89b6` (pinned constraints, all extras) gave 2763 passed, 0 failed, 98.85% coverage | Logic bugs in classification, validation, the AI engine, attribution, investigation, cost, the unmanaged inventory, issues and scanners |
 | **Real evidence fixtures** | 11 bundles in `tests/fixtures/plan_evidence/`, produced by real Terraform 1.14.7 (sanitized) | Testing against an imagined plan format instead of the real one |
 | **Synthetic edge cases** | Hand-made inputs: malformed JSON, errored plans, exit-code mismatches, move/import, `undetermined`; synthetic plans for the AI engine | Rare paths that are hard or unsafe to create for real |
 | **Invalid-evidence tests** | Cases where the evidence is wrong | A broken run ever being reported as "no drift" |
 | **Mutation checks** | Deliberately broken copies of safeguards (Task 6.7 harness, Phase 8 mutants, Phase 9 scanner mutation matrices on scratch copies) | Tests that pass even when a safeguard is removed |
 | **Fresh-clone validation** | Running tests on a copy containing only files git would commit | Tests that pass only because of an ignored local file |
 | **Terraform checks** | `./scripts/validate.sh` (fmt + validate, offline), `./scripts/run_tflint.sh`, `./scripts/run_trivy_config.sh` | Broken, lint-failing or insecure Terraform code |
-| **Real end-to-end** | Approved real Azure tag drift (Tasks 3.6–3.7); real workflow runs (Phases 5, 8); CI proofs with a green push and a deliberately failing PR (Tasks 9.1–9.3; 9.3's PR only tampered with the pinned hash, so no secret was published) | Pieces that work alone but not together |
+| **Real end-to-end** | Approved real Azure tag drift (Tasks 3.6–3.7); real workflow runs (Phases 5, 8); CI proofs with a green push and a deliberately failing PR (Tasks 9.1–9.3; 9.3's PR only tampered with the pinned hash, so no secret was published); real CI proofs for 9A.1 and 10.1; the Phase 9B real Azure acceptance (Task 9B.6); a portal-created VM detected as unmanaged in run #44 (Tasks 10.3–10.4) | Pieces that work alone but not together |
 
 How to run:
 
@@ -1266,6 +1292,9 @@ pytest --cov=src/drift_engine tests/
 | **Static security scanning** | TFLint + Trivy config on every push/PR, no Azure access; Trivy is a SHA-256-verified pinned binary with embedded checks; HIGH/CRITICAL block (Tasks 9.1, 9.2) |
 | **Secret scanning** | TruffleHog scans the full Git history on every push/PR; every result blocks; candidates are never sent to provider APIs; secret values are never printed or uploaded; inline ignore annotations are rejected (Task 9.3) |
 | **Accepted risk, enforced** | AZU-0012 (no network rules on the state account) is accepted only by an exact, expiring (2027-03-31) record checked by a script; no `.trivyignore` or Trivy suppression |
+| **Public projections only** | The drift report, investigation and AI report artifacts are public projections: ARM/resource IDs, GUIDs and caller identity are withheld (Phase 9B) |
+| **Cost step isolation** | Infracost is a SHA-256-verified pinned binary that runs without OIDC request variables or an Azure session, and fails closed otherwise; a cost failure never changes drift (Task 10.1) |
+| **Read-only unmanaged inventory** | GET-only requests to `management.azure.com` resource-group paths with the existing Reader session; no ARM IDs, subscription IDs, tags or IPs are published; the pricing job has no Azure access or secrets (Task 10.4) |
 
 ### Planned ⬜ (not implemented yet)
 
@@ -1324,7 +1353,9 @@ flowchart TD
 *(Historical context only: the first commits. Every later task records its commits in its
 `PROJECT_PLAN.md` completion notes; `git log` has the full history. Recent milestones:
 `b34803f` TFLint gate (9.1), `49eea22` Trivy config scan (9.2), `fae5782` Task 9.2 complete,
-`3e86419` TruffleHog secret scan (9.3), `661ae1e` Task 9.3 complete.)*
+`3e86419` TruffleHog secret scan (9.3), `661ae1e` Task 9.3 complete, `c548889` Phase 9B
+closed (9B.6), `8da4345` cost delta (10.2), `10654b6` AI cost impact (10.3), `8ef89b6`
+unmanaged resources (10.4).)*
 
 ---
 
@@ -1338,16 +1369,20 @@ flowchart TD
 | **Phase 4** | 🟢 | `src/drift_engine`, severity, `drift-engine analyze` | — |
 | **Phase 5** | 🟢 | `drift-detection.yml` (daily + manual), report artifact, `drift_detected` | — |
 | **Phase 5A** | 🟢 | VNet, subnet, NSG, association | — |
-| **Phase 6** | 🟢 | AI analysis engine (library, LLM opt-in) | CLI + no-LLM CI (Phase 9A) |
-| **Phase 7** | 🟢 | Activity Log collector + attribution (opt-in) | — |
+| **Phase 6** | 🟢 | AI analysis engine (library, LLM opt-in) | — (CLI + CI done in 9A) |
+| **Phase 7** | 🟢 | Activity Log collector + attribution | — (runs in CI through 9B) |
 | **Phase 8** | 🟢 | Drift issues create/update/close (8.1, 8.3) | Remediation PRs moved to Phase 11 |
 | **Phase 9** | 🟢 | TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3), validated in CI | Super-Linter (9.4) deferred to Phase 12 |
-| Phases 9A–14 | ⬜ | Task lists drafted in `PROJECT_PLAN.md` | **Task 9A.1 (design review)** next; each task after its design review |
-| Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7) | — |
+| **Phase 9A** | 🟢 | `ai-analysis` CLI + no-LLM `ai-analysis.yml` | — |
+| **Phase 9B** | 🟢 | Drift investigation (WHO / WHEN / WHAT), proven on real Azure (9B.6) | — |
+| **Phase 10** | 🟢 | Infracost estimate (10.1), cost delta (10.2), AI cost impact (10.3), unmanaged resources + Azure Retail Prices estimate (10.4; real Azure run #44) | — |
+| Phases 11–14 | ⬜ | Task lists drafted in `PROJECT_PLAN.md` | **Task 11.1 (design review)** next; each task after its design review; dashboard (Phase 13) not yet |
+| Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7, 9B.6) | — |
 | Detection running in CI? | ✅ Yes | Daily scheduled + manual runs | — |
+| Resources outside Terraform detected? | ✅ Yes | A portal-created VM in `aitdd-dev-main-rg`: 5 unmanaged resources, $44.85/month list price (run #44); VM deleted afterwards | Next scheduled inventory shows whether anything remains |
 
-**Current phase:** Phase 9A — AI Analysis Integration (pre-Phase 10)
-**Current active task:** Task 9A.1 — AI Analysis CLI & No-LLM CI Integration (dedicated design review required before implementation)
+**Current phase:** Phase 11 — Human-Approved Remediation (⬜ not started)
+**Current active task:** Task 11.1 — Safe Remediation Architecture & Controls (⬜ not started; dedicated design review required before implementation)
 
 ---
 
@@ -1412,6 +1447,9 @@ flowchart TD
 | **TFLint** | Static linter for Terraform code | `scripts/run_tflint.sh`, pinned 0.64.0 + AzureRM ruleset 0.32.0 (Task 9.1) |
 | **Trivy config** | Static security scanner for Terraform | `scripts/run_trivy_config.sh`, pinned 0.75.0; HIGH/CRITICAL block (Task 9.2) |
 | **Risk acceptance** | A documented, time-limited decision to accept one known finding | `security/trivy-risk-acceptance.json`: AZU-0012 on the state account until 2027-03-31, enforced by script |
+| **Infracost** | A tool that prices a Terraform plan with public list prices | v0.10.46 prices each run's `plan.json` (Task 10.1); its numbers cover Terraform-managed resources only and are not billing |
+| **Unmanaged resource** | An Azure resource that exists but isn't in Terraform's state or configuration | Found by the read-only inventory of Terraform-managed resource groups (Task 10.4). It is **not drift**: Terraform can't see it at all |
+| **Azure Retail Prices API** | Microsoft's public, unauthenticated price list | Prices unmanaged resources (Task 10.4), USD list prices; never added to the Infracost estimate |
 
 ---
 

@@ -13,6 +13,11 @@
 > - Phase 8: drift issues (§8.3);
 > - the AI boundary (§10), held by the Phase 6 engine.
 >
+> **Later additions (§8.3, §10; status in `PROJECT_PLAN.md`):** the AI analysis workflow
+> (Phase 9A), the drift investigation (Phase 9B), and Phase 10's cost publication, cost delta,
+> AI cost impact and unmanaged-resource inventory (Tasks 10.1–10.4, complete 2026-10-11). The
+> unmanaged inventory is a separate finding outside this drift contract (§6.3).
+>
 > Static scanners (Phase 9) are outside this contract (§10, rule 9).
 >
 > Every behavioral claim marked **[verified]** was observed on Terraform **1.14.7** with
@@ -648,6 +653,10 @@ drift result.
   inventory, a Retail Prices API failure or a failed verification or upload fails the `unmanaged` job.
   `drift_detected`, the drift report and artifact, issues, cost, the investigation and the `report` job
   are unaffected.
+- **Verified on real Azure (2026-10-11)**: drift-detection run #44 against a VM created in the Azure
+  Portal inside `aitdd-dev-main-rg` succeeded. The `unmanaged` job warned about 5 unmanaged resources
+  and the list-price estimate was $44.85/month. AI analysis run #27 produced report v4 with the
+  unmanaged section. Evidence is in `PROJECT_PLAN.md`, Task 10.4.
 
 **Drift investigation (Task 9B.5; PROJECT_PLAN.md Phase 9B G8-G13, G10):**
 - **Where and when**: after `Upload Drift Report` and before the cost step (which runs `az logout`),
@@ -768,6 +777,12 @@ The contract stays valid as resources are added:
     `complete`. Without a usable cost input (`not_available` / `rejected`) no amount is published.
     Amounts are list-price estimates, never actual Azure billing, and cost never changes the
     drift result, the investigation or the recommendation.
+11. **Unmanaged resources are not drift and never reach the LLM (Task 10.4).** The AI report's
+    unmanaged section (report v4) is built only from the validated `unmanaged_inventory` and
+    `unmanaged_cost` documents (§8.3, "Unmanaged resources") with fixed `unmanaged.*.v1`
+    statements. Nothing in it is sent to the LLM. Drift, cost, investigation and recommendation
+    fields are identical with and without it. Its Azure Retail Prices API total is never added
+    to, compared with or subtracted from the Infracost amounts of rule 10.
 
 ## 11. Verification Evidence
 

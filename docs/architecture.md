@@ -4,7 +4,9 @@
 
 This platform detects, analyzes, and remediates **infrastructure drift** — the gap between what Terraform expects and what actually exists in Azure. The final product will combine Terraform, Python, LangGraph/LLM analysis, GitHub automation, and a professional dashboard.
 
-**Current Status (2026-10-04):** Phases 1–9 are complete, and so is the lettered expansion Phase 5A (placed after Phase 5 and before Phase 6). `PROJECT_PLAN.md`'s "Phases Completed: 9 of 14" counts only the numbered phases. Phase 9 (DevSecOps) completed with Task 9.1 TFLint, Task 9.2 Trivy config and Task 9.3 TruffleHog; Task 9.4 Super-Linter was deferred to Phase 12. Phase 9A (AI analysis integration, before Phase 10) is next, starting with the Task 9A.1 design review. [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
+**Current Status (2026-10-11):** Phases 1–10 are complete, and so are the lettered phases 5A, 9A and 9B. `PROJECT_PLAN.md`'s "Phases Completed: 10 of 14" counts only the numbered phases. Phase 9 (DevSecOps) completed with Task 9.1 TFLint, Task 9.2 Trivy config and Task 9.3 TruffleHog; Task 9.4 Super-Linter was deferred to Phase 12. Phase 10 (FinOps) completed on 2026-10-11 when Tasks 10.3 (AI cost impact) and 10.4 (unmanaged resource detection and list-price estimate) passed real Azure/CI verification (drift-detection run #44, AI analysis run #27). Phase 11 (human-approved remediation) is next and not started; it begins with the Task 11.1 design review. No write access is granted for it today (see "Future / conditional only" below). [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
+
+*(Status history: on 2026-10-04 this section recorded Phases 1–9 complete and Phase 9A next.)*
 
 ---
 
@@ -18,11 +20,14 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 | **4** | **Python Drift Engine** | `src/drift_engine`: parser, models, comparator, severity, `drift-engine analyze` | ✅ Complete |
 | **5** | **Automated Drift Detection Workflow** | `drift-detection.yml`: daily + manual, OIDC, report artifact, `drift_detected` output | ✅ Complete |
 | **5A** | **Dev Infrastructure Expansion** | VNet, Subnet, NSG and Subnet–NSG association in `dev` | ✅ Complete |
-| **6** | **LangGraph AI Analysis** | `src/ai_engine` library; LLM opt-in; no CLI/CI integration yet (Phase 9A) | ✅ Complete |
-| **7** | **Azure Activity Log Investigation** | Activity Log collector and deterministic attribution (opt-in, not in any workflow) | ✅ Complete |
+| **6** | **LangGraph AI Analysis** | `src/ai_engine` library; LLM opt-in; CLI/CI integration added in Phase 9A | ✅ Complete |
+| **7** | **Azure Activity Log Investigation** | Activity Log collector and deterministic attribution (the collector runs in CI through the Phase 9B investigation) | ✅ Complete |
 | **8** | **GitHub Issue / PR Automation** | Drift issues create/update/close (8.1, 8.3); remediation PRs (8.2) superseded by Phase 11 | ✅ Complete |
 | **9** | **DevSecOps Integration** | `security-scan.yml`: TFLint (9.1), Trivy config (9.2), TruffleHog secret scan (9.3); Super-Linter (9.4) deferred to Phase 12 | ✅ Complete |
-| 9A–14 | AI CI integration, FinOps, human-approved remediation, hardening, dashboard, final docs | See `PROJECT_PLAN.md` | ⬜ Planned |
+| **9A** | **AI Analysis Integration** | `ai-analysis` CLI and the no-LLM `ai-analysis.yml` workflow (no Azure access) | ✅ Complete |
+| **9B** | **Drift Investigation (WHO / WHEN / WHAT)** | Read-only Activity Log investigation in `drift-detection.yml`; public projections of the drift report and the investigation | ✅ Complete |
+| **10** | **FinOps / Cost Analysis** | Infracost plan estimate (10.1), cost delta (10.2), AI cost impact (10.3); read-only unmanaged-resource inventory with an Azure Retail Prices API list-price estimate (10.4), separate from drift and from Infracost | ✅ Complete |
+| 11–14 | Human-approved remediation (next), hardening, dashboard, final docs | See `PROJECT_PLAN.md` | ⬜ Planned |
 
 ---
 
@@ -152,7 +157,7 @@ pipeline.
 |---|---|---|---|
 | `terraform-auth-test.yml` (Phase 2) | push / PR to `main` (or `master`), manual | OIDC; `terraform fmt`, `validate`, read-only `plan` | `id-token: write`, `contents: read` |
 | `drift-detection.yml` (Phases 5, 8, 9B, 10) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only (Terraform plan, read-only Activity Log queries for the drift investigation and read-only ARM resource listing of the Terraform-managed resource groups for the unmanaged inventory, Task 10.4); never `apply`, import or any write | `plan-and-analyze`: `id-token: write`, `contents: read`, `actions: read` (anchor fetch); `issues`: `contents: read`, `issues: write`; `cost`, `investigation` and `unmanaged`: `contents: read`; none of these four has Azure access (`unmanaged` calls only the public Azure Retail Prices API, without credentials) |
-| `ai-analysis.yml` (Phases 9A, 9B) | after each completed drift-detection run on `main` (`workflow_run`) | **None** | `contents: read`, `actions: read`; only `github.token`, to download the source run's public drift report and investigation |
+| `ai-analysis.yml` (Phases 9A, 9B, 10) | after each completed drift-detection run on `main` (`workflow_run`) | **None** | `contents: read`, `actions: read`; only `github.token`, to download the source run's public drift report, investigation, Infracost report (Task 10.3) and unmanaged-resources report (Task 10.4) |
 | `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC; TruffleHog uses `--no-verification`, so no candidate secret is sent anywhere) | `contents: read` only; no token |
 
 Only the `main` branch has a federated credential, so `terraform-auth-test.yml` runs on pull
