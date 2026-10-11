@@ -125,7 +125,7 @@ Every task in this plan must have exactly one status from the following lifecycl
 ## 📊 Master Project Overview
 
 - **Current Active Phase**: Phase 9B — Drift Investigation (WHO / WHEN / WHAT)
-- **Current Active Task**: Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure (🟡 WORK IN PROGRESS since 2026-10-10: primary scenario executed as run #32 `38023838144`, its evidence partly recorded; Control A and Control B not yet executed; see the Task 9B.6 progress record). Its plan was revised on 2026-10-10 with the user's decisions D-1 to D-3 (a fresh primary run; job-log check scoped to the investigation and AI logs; G9 anchor and phase-count reconciliation). The user reviewed and locked the revised plan on 2026-10-10, including the code-verified Local WHO and Determinism corrections. Its in-sync anchor is the latest in-sync drift report before its primary run (G9): run #31 `38023441753`, which superseded run #30 `37963733177` and which the primary investigation accepted. Task 9B.5 completed 2026-10-09: G18 CI result policy (`4ba7668`), CI Activity Log authentication fix (`62bdf65`), no-drift real CI proof run #28 and drifted real CI proof run #29 with all artifact-content checks passed. Phase 10 stays on hold until Phase 9B is completed (Task 9B.6).
+- **Current Active Task**: Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure (🟡 WORK IN PROGRESS since 2026-10-10: primary scenario executed as run #32 `38023838144`, its evidence partly recorded; cycle 1 Control A executed as run #36, Control B not executed; on 2026-10-11 D-6 decided a fresh cycle 2 (R1–R4) on the test-fix commit; see the Task 9B.6 progress record). Its plan was revised on 2026-10-10 with the user's decisions D-1 to D-3 (a fresh primary run; job-log check scoped to the investigation and AI logs; G9 anchor and phase-count reconciliation). The user reviewed and locked the revised plan on 2026-10-10, including the code-verified Local WHO and Determinism corrections. Its in-sync anchor is the latest in-sync drift report before its primary run (G9): run #31 `38023441753`, which superseded run #30 `37963733177` and which the primary investigation accepted. Task 9B.5 completed 2026-10-09: G18 CI result policy (`4ba7668`), CI Activity Log authentication fix (`62bdf65`), no-drift real CI proof run #28 and drifted real CI proof run #29 with all artifact-content checks passed. Phase 10 stays on hold until Phase 9B is completed (Task 9B.6).
 - **Phases Completed**: 7 of 14 (Phases 1–5, 8, 9). Phases 6 and 7 were reopened on 2026-10-04 after a requirement gap found in a real Azure test (see Phase 9B); Phase 10 is on hold until Phase 9B is completed and verified. Lettered phases (5A, 9A, 9B) are not counted.
 
 ---
@@ -2901,7 +2901,7 @@ Phase 9A is a lettered pre-phase (like Phase 5A) placed before its first consume
 ---
 
 ### PHASE 9B — Drift Investigation (WHO / WHEN / WHAT)
-**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.5 and 9B.4A complete; Task 9B.5 completed 2026-10-09 with the no-drift real CI proof run #28 and the drifted real CI proof run #29, all artifact checks passed; Task 9B.6 🟡 work in progress since 2026-10-10 (primary scenario run #32; Controls A and B not yet executed); its plan was revised, reviewed and locked by the user on 2026-10-10)
+**Status**: 🟡 WORK IN PROGRESS (Tasks 9B.1–9B.5 and 9B.4A complete; Task 9B.5 completed 2026-10-09 with the no-drift real CI proof run #28 and the drifted real CI proof run #29, all artifact checks passed; Task 9B.6 🟡 work in progress since 2026-10-10 (cycle 1: primary run #32, Control A run #36, Control B not executed; fresh cycle 2 per D-6, 2026-10-11); its plan was revised, reviewed and locked by the user on 2026-10-10)
 
 Phase 9B owns the end-to-end drift investigation requirement. When Terraform detects drift on an Azure resource, the platform produces an investigation report. It answers, as far as the evidence allows: WHAT changed, WHEN, WHO (which identity Azure recorded), WHY / what it means, and WHAT TO DO. Created 2026-10-04 by user decision, after the requirement gap recorded in the Phase 6 and Phase 7 headers. Phase 6 and Phase 7 return to 🟢 when Task 9B.6 passes. Phase 10 is on hold until then.
 
@@ -4394,7 +4394,7 @@ In addition:
         - **Evidence byte-equivalence** against HEAD (temporary `git worktree`, removed): 14 of 14 identical.
 
 #### Task 9B.6 — Real Azure End-to-End Acceptance & Phase Closure
-- **Status**: 🟡 WORK IN PROGRESS (primary scenario executed; Controls A and B not yet executed)
+- **Status**: 🟡 WORK IN PROGRESS (cycle 1: primary and Control A executed, Control B not executed; fresh cycle 2 per D-6 pending)
 - **Started**: 2026-10-10
 - **Plan revision (2026-10-10, user-approved decisions; reviewed and locked by the user on 2026-10-10)**:
   - **D-1 (fresh primary run)**: the primary scenario is repeated with a fresh real Azure drift run. Task 9B.5's run #29 is **not** primary evidence; it is cited only as prior evidence that the pipeline works.
@@ -4422,6 +4422,16 @@ In addition:
     - The account currently signed in to Azure CLI identifies the local session, not who made a past Portal change. So the caller comparison with `az account show` and the user's "same account" confirmation, both added in the 2026-10-10 revision, are removed from Step 4 and Pass.
     - `az account show` stays only as the Step 2 subscription-scope check. G3, G12 and the Phase 9B end-to-end acceptance list are unchanged.
     - Step 4 gains a WHO evidence acceptance criterion: exactly one distinct, non-empty recorded caller in the matched `who` result, and `caller_status: recorded` on the public operation. An empty or multi-caller result fails even if `who` exits 0. The limitation for partially missing or rejected caller rows is documented; no code change.
+  - **D-6 (fresh cycle 2 and test fix; user-approved 2026-10-11)**:
+    - **Why**: cycle 1 (runs #31–#36) left gaps that its own evidence cannot close. The pre-dispatch anchor re-confirmation for #32 was not recorded. The D-4 B fix (`c3cf8a0`) changed the workflows but not `tests/test_ai_cli.py`, so the full suite has failed since then (found 2026-10-10).
+    - **Cycle 2** repeats the scenarios on the commit that contains the test fix:
+      1. **R1**: the user removes the test tags; one dispatch gives an in-sync run, which closes issue #8 (Task 8.3) and becomes the fresh anchor (G9);
+      2. **R2**: the primary scenario;
+      3. **R3**: Control A;
+      4. **R4**: Control B.
+      Pre-check 0 applies before R2, after R1 has restored the configured tags. Every criterion below is evaluated on cycle 2. Cycle 1 stays recorded as history and is not used for closure.
+    - **Anchor timing**: the UTC times of the anchor identification after R1 and of the re-confirmation immediately before R2 are recorded when they happen. Anything not captured is recorded as NOT RECORDED.
+    - **Evidence paths**: `.artifacts/task-9B.6-ci-proof/cycle2/{primary,control-a,control-b,who-local}/` (new folders, nothing overwritten). Job-log archives go to a 0700 folder outside the repository, with files at 0600. Local WHO for R2 uses `cycle2/who-local/`, so Step 1's "must not exist beforehand" rule holds.
   - Locked G-decisions (G1–G18), the Phase 9B end-to-end acceptance list and every completed task record are unchanged. Run #29's and run #30's records under Task 9B.5 stay as history.
 - **Objective**: Prove the product requirement with real Azure evidence through CI (a fresh primary scenario plus two controls). Then close Phase 9B and return Phases 6 and 7 to 🟢; Phase 10 resumes.
 - **Dependencies**:
@@ -4432,6 +4442,7 @@ In addition:
   - `PROJECT_PLAN.md`;
   - `README.md` (limitations and phase status at closure).
   - `.github/workflows/drift-detection.yml` and `.github/workflows/ai-analysis.yml`: the D-4 B fix only, one added line each (`set-safe-directory: false` on the `Checkout Code` step of the `investigation` job and of the `ai-analysis` job; user-approved 2026-10-10).
+  - `tests/test_ai_cli.py`: the D-4 B fix follow-up only, one assertion (`Checkout Code` expects `set-safe-directory: false` as well; D-6, user-approved 2026-10-11).
   - No other implementation file changes are planned. A failing criterion is reported as a blocker, and any fix needs a separate user decision.
 - **Execution sequence** (one scenario at a time; Claude only reads Azure; every Azure change is the user's):
   0. **Pre-checks (Claude, read-only)**:
@@ -4684,8 +4695,14 @@ In addition:
       - **Values printed only in job logs or step summaries**: `investigation_status` / `investigation_detail`, `drift_detected` / `drift_status` (inferred above), the `report` job's "Result VALID", and the runner image and Azure CLI version.
       - **Local WHO, user steps**: the exit codes of Step 1 (`init`, `show -json`) and Step 3 (`who`; Pass requires exit 0), and whether Step 3 ran in a fresh environment installed from the primary run's commit `717a2f0`. These are not recorded; the existence of `who_evidence.local.json` with `failure: null` does not establish them.
       - **Anchor process**: no record that the anchor was identified in pre-check 0 and re-confirmed immediately before the dispatch.
-  - **Control A: not executed** (no second tag write; see above). Run #35 does not count. The scenario is still possible: as of 15:41Z the primary tag is present and no in-sync run has happened since anchor #31.
+  - **Control A (as of 15:41Z): not executed** (no second tag write; see above; executed later as run #36, see below). Run #35 does not count. The scenario is still possible: as of 15:41Z the primary tag is present and no in-sync run has happened since anchor #31.
   - **Control B: not executed.** Issue #8 is still open (public API, as of 2026-10-10 16:08Z).
+  - **Cycle 1 status when D-6 was decided (2026-10-11; history, not used for closure)**:
+    - **Control A** = drift run #36 `38067518562` / AI run #19 `38068293818`, on `be10e62`, after a second tag write (`tags/write` 16:21:54–16:21:56Z, ingested 16:22:58Z).
+      - **PASS**: artifact digests and structure, `ambiguous` (`multiple_capable_operations`), `multiple_operations` with `candidate_operations: 2`, R4 `restore_declared`, hash binding, leak scans, determinism, issue #8 updated with no duplicate, and the AI run #19 job log (D-4: A = 1, B = 0, C = 4, 0 unclassified).
+      - **NOT VERIFIED**: the drift run #36 job log.
+    - **Primary anchor re-confirmation (#32)**: identification found in a session record; the re-confirmation immediately before dispatch is NOT RECORDED.
+    - **Local WHO for #32, re-run 2026-10-11**: the user reported `who` exit 0 in a fresh environment at `717a2f0`. Step 2 and Step 4 PASS. The original evidence was kept in `who-local/original-2026-10-10/`.
   - Phase 9B is not closed, and Phase 10 is not started.
 - **Completion Notes**:
   - None.

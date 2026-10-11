@@ -368,7 +368,8 @@ def test_steps_download_install_and_upload(workflow):
     assert investigation["with"] == {"pattern": "drift-investigation-${{ github.event.workflow_run.id }}",
                                      "run-id": "${{ github.event.workflow_run.id }}",
                                      "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
-    assert steps["Checkout Code"]["with"] == {"persist-credentials": False}
+    # Task 9B.6 (D-4 B fix): no temporary-HOME GUID in the checkout log
+    assert steps["Checkout Code"]["with"] == {"persist-credentials": False, "set-safe-directory": False}
     assert steps["Setup Python"]["with"] == {"python-version": "3.12"}
     assert '-c ci/ai-constraints.txt ".[ai]"' in steps["Install AI analysis (pinned)"]["run"]
     upload = steps["Upload AI analysis report"]
