@@ -258,13 +258,34 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       # Fail at the auth boundary rather than as a confusing backend error later.
+      # Task 12.1A (P3): the context is compared with the configured values and
+      # never printed (no reliance on secret masking); only a fixed line or a fixed
+      # failure code reaches the public log.
       - name: Verify Azure OIDC Authentication
         id: auth
+        env:
+          EXPECTED_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          EXPECTED_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
-          set -euo pipefail
-          echo "==> Confirming Azure authentication context (OIDC, no client secret)..."
-          az account show --output json \
-            --query '{subscriptionId:id, tenantId:tenantId, principalType:user.type}'
+          set +x
+          set -uo pipefail
+          norm() { printf '%s' "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'; }
+          if [ -z "${EXPECTED_SUBSCRIPTION_ID:-}" ] || [ -z "${EXPECTED_TENANT_ID:-}" ]; then
+            echo "::error::Azure auth check failed: failure_code=auth_configuration_missing"
+            exit 1
+          fi
+          if ! actual_subscription="$(az account show --only-show-errors --query id --output tsv 2>/dev/null)" \
+            || ! actual_tenant="$(az account show --only-show-errors --query tenantId --output tsv 2>/dev/null)" \
+            || [ -z "$(norm "${actual_subscription}")" ] || [ -z "$(norm "${actual_tenant}")" ]; then
+            echo "::error::Azure auth check failed: failure_code=auth_context_unavailable"
+            exit 1
+          fi
+          if [ "$(norm "${actual_subscription}")" != "$(norm "${EXPECTED_SUBSCRIPTION_ID}")" ] \
+            || [ "$(norm "${actual_tenant}")" != "$(norm "${EXPECTED_TENANT_ID}")" ]; then
+            echo "::error::Azure auth check failed: failure_code=auth_context_mismatch"
+            exit 1
+          fi
+          echo "Azure OIDC context verified (subscription and tenant match the configured values; not printed)."
 
       # Wrapper disabled so later steps see Terraform's real exit codes and
       # unmodified stdout (needed for `plan -detailed-exitcode` and JSON output).
@@ -385,11 +406,9 @@ jobs:
             exit 0
           fi
 
-          if [ -f "${ARTIFACT_DIR}/plan.log" ]; then
-            echo "::group::plan.log (last 50 lines)"
-            tail -n 50 "${ARTIFACT_DIR}/plan.log"
-            echo "::endgroup::"
-          fi
+          # Task 12.1A (P4): the runner-local plan evidence is never printed; its tail
+          # could hold planned attribute values. This line carries the stage and the
+          # script's fixed failure reason only.
           echo "::error::Drift detection FAILED (script exit ${script_rc}, outcome ${outcome}, plan exit ${plan_rc}): ${failure}. Drift status: UNKNOWN."
           exit 1
 

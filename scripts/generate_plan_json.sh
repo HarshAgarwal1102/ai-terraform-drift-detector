@@ -246,16 +246,20 @@ if ! jq -s -e 'length == 1 and (.[0] | type == "object")' "${PLAN_JSON}" > /dev/
 fi
 
 # Prints one line per violation; empty output means the gate passed.
+# Task 12.1A (P5/P5b): violation lines are fixed text, never plan values, because
+# the failure reason reaches the public job log (this script's stderr, the
+# workflow's ::error:: line and the Analyze Drift failure line). jq's own stderr
+# can quote plan values, so it goes to the runner-local plan.log only.
 violations="$(jq -r --argjson rc "${PLAN_RC}" --arg tfv "${TERRAFORM_VERSION}" '
   def actions_ok: (.change.actions | type) == "array";
   def structural:
     [
       (if (.format_version | type) != "string" then "format_version missing or not a string"
-       elif (.format_version | split(".")[0]) != "1" then "unsupported format_version \(.format_version) (major must be 1)"
+       elif (.format_version | split(".")[0]) != "1" then "unsupported format_version (major must be 1)"
        else empty end),
-      (if .terraform_version != $tfv then "terraform_version \(.terraform_version) != pinned \($tfv)" else empty end),
-      (if .errored != false then "errored is \(.errored | tojson) (must be false)" else empty end),
-      (if .complete != true then "complete is \(.complete | tojson) (must be true)" else empty end),
+      (if .terraform_version != $tfv then "terraform_version does not match the pinned version" else empty end),
+      (if .errored != false then "errored is not false" else empty end),
+      (if .complete != true then "complete is not true" else empty end),
       (if has("resource_changes") and (.resource_changes | type) != "array" then "resource_changes is not an array"
        elif any(.resource_changes[]?; (type != "object") or ((.address | type) != "string") or (actions_ok | not))
        then "resource_changes contains an entry without address/change.actions" else empty end),
@@ -276,15 +280,17 @@ violations="$(jq -r --argjson rc "${PLAN_RC}" --arg tfv "${TERRAFORM_VERSION}" '
     elif $rc == 0 and pending > 0 then "plan exit 0 but plan.json contains \(pending) pending change(s)"
     elif $rc == 2 and pending == 0 then "plan exit 2 but plan.json contains no pending change"
     else empty end
-' "${PLAN_JSON}" 2>&1)"
+' "${PLAN_JSON}" 2>> "${PLAN_LOG}")"
 gate_rc=$?
 
 if [[ "${gate_rc}" -ne 0 ]]; then
-  fail integrity "integrity gate could not evaluate plan.json: ${violations}"
+  fail integrity "integrity gate could not evaluate plan.json"
 fi
 if [[ -n "${violations}" ]]; then
   log_section "integrity gate violations"
   printf '%s\n' "${violations}" >> "${PLAN_LOG}"
+  # The header values behind the violations, for local diagnosis (runner-local only).
+  jq -c '{format_version, terraform_version, errored, complete}' "${PLAN_JSON}" >> "${PLAN_LOG}" 2>&1
   fail integrity "$(printf '%s' "${violations}" | paste -sd ';' -)"
 fi
 

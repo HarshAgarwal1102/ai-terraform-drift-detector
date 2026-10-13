@@ -900,6 +900,7 @@ FAKE_PLAN_SCRIPT = """#!/bin/sh
 # Stands in for scripts/generate_plan_json.sh: writes the given evidence, then exits SCRIPT_RC.
 [ -z "${FIXTURE_PLAN:-}" ] || cp "${FIXTURE_PLAN}" "${ARTIFACT_DIR}/plan.json"
 [ -z "${FIXTURE_MANIFEST:-}" ] || cp "${FIXTURE_MANIFEST}" "${ARTIFACT_DIR}/detection_run.json"
+[ -z "${FIXTURE_PLAN_LOG:-}" ] || cp "${FIXTURE_PLAN_LOG}" "${ARTIFACT_DIR}/plan.log"
 [ -z "${TOUCH_LOCK:-}" ] || echo "# changed" >> "${TF_DIR}/.terraform.lock.hcl"
 exit "${SCRIPT_RC}"
 """
@@ -918,7 +919,7 @@ def _git_repo(path: Path) -> Path:
 
 
 def _evidence(wf, tmp_path, *, rc=0, plan=None, manifest=None, touch_lock=False, var_file="dev.tfvars",
-              stale_manifest=None):
+              stale_manifest=None, plan_log=None):
     repo = _git_repo(tmp_path / "repo")
     art = tmp_path / "evidence" / "drift"
     art.mkdir(parents=True)
@@ -931,7 +932,7 @@ def _evidence(wf, tmp_path, *, rc=0, plan=None, manifest=None, touch_lock=False,
            "WORK_DIR": "terraform/environments/dev", "VAR_FILE": var_file, "ARTIFACT_DIR": str(art),
            "GITHUB_WORKSPACE": str(repo), "GITHUB_OUTPUT": str(gh), "SCRIPT_RC": str(rc),
            "FIXTURE_PLAN": str(plan or ""), "FIXTURE_MANIFEST": str(manifest or ""),
-           "TOUCH_LOCK": "1" if touch_lock else ""}
+           "FIXTURE_PLAN_LOG": str(plan_log or ""), "TOUCH_LOCK": "1" if touch_lock else ""}
     script = tmp_path / "evidence" / "step.sh"
     script.write_text(steps_by_name(wf["jobs"]["plan-and-analyze"])["Generate Plan Evidence"]["run"])
     proc = subprocess.run([BASH, "-e", str(script)], cwd=repo, env=env, capture_output=True, text=True, timeout=60)
@@ -983,6 +984,31 @@ def test_evidence_failures_fail_the_step_and_drift_is_unknown(wf, tmp_path, engi
         proc, outputs, _ = _analyze(wf, tmp_path, engine_shim, art / "plan.json" if (art / "plan.json").exists()
                                     else plan, art / "detection_run.json", evidence="failure")
         assert proc.returncode != 0 and outputs["drift_detected"] == "unknown"
+
+
+# Task 12.1A (P4): the runner-local plan.log can hold planned attribute values; no failure
+# path of Generate Plan Evidence may print any of it (previously its last 50 lines were shown).
+@pytest.mark.parametrize("case", ["plan_failed", "unusable_artifact_dir", "unexpected_plan_exit_code",
+                                  "lock_modified"])
+def test_evidence_failures_never_print_plan_log(wf, tmp_path, case):
+    plan, manifest = _fixture("external_drift")
+    failed_manifest = TESTS / "fixtures" / "plan_evidence" / "failed_run" / "detection_run.json"
+    odd = tmp_path / "odd_manifest.json"
+    odd.write_text(json.dumps({**json.loads(manifest.read_text()), "plan_exit_code": 3}))
+    sentinel = "E6-SENTINEL-plan-log-value"
+    plan_log = tmp_path / "plan.log"
+    plan_log.write_text(f'  ~ tags = {{ "probe" = "{sentinel}" }}\nError: {sentinel}\n' * 60)
+    kwargs = {
+        "plan_failed": {"rc": 1, "manifest": failed_manifest},
+        "unusable_artifact_dir": {"rc": 64, "stale_manifest": manifest},
+        "unexpected_plan_exit_code": {"rc": 0, "plan": plan, "manifest": odd},
+        "lock_modified": {"rc": 0, "plan": plan, "manifest": manifest, "touch_lock": True},
+    }[case]
+    proc, outputs, art = _evidence(wf, tmp_path, plan_log=plan_log, **kwargs)
+    assert proc.returncode != 0 and "Drift status: UNKNOWN." in proc.stdout
+    assert (art / "plan.log").exists()  # the evidence existed on the runner ...
+    assert sentinel not in proc.stdout + proc.stderr + json.dumps(outputs)  # ... and was not printed
+    assert "::group::" not in proc.stdout
 
 
 def _conditions(wf):

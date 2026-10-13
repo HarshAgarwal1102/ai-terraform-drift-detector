@@ -33,17 +33,41 @@ jobs:
       # Fails the job loudly if OIDC login did not produce a usable context,
       # rather than letting a broken credential surface later as a confusing
       # Terraform backend error.
+      # Task 12.1A (E6, P2): the context is compared with the configured values
+      # and never printed (no reliance on secret masking). Only a fixed line or a
+      # fixed failure code reaches the public log.
       - name: Verify Azure OIDC Authentication
+        env:
+          EXPECTED_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          EXPECTED_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
-          set -euo pipefail
-          echo "==> Confirming Azure authentication context (OIDC, no client secret)..."
-          az account show --output json \
-            --query '{subscriptionId:id, tenantId:tenantId, principalType:user.type}'
+          set +x
+          set -uo pipefail
+          norm() { printf '%s' "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'; }
+          if [ -z "${EXPECTED_SUBSCRIPTION_ID:-}" ] || [ -z "${EXPECTED_TENANT_ID:-}" ]; then
+            echo "::error::Azure auth check failed: failure_code=auth_configuration_missing"
+            exit 1
+          fi
+          if ! actual_subscription="$(az account show --only-show-errors --query id --output tsv 2>/dev/null)" \
+            || ! actual_tenant="$(az account show --only-show-errors --query tenantId --output tsv 2>/dev/null)" \
+            || [ -z "$(norm "${actual_subscription}")" ] || [ -z "$(norm "${actual_tenant}")" ]; then
+            echo "::error::Azure auth check failed: failure_code=auth_context_unavailable"
+            exit 1
+          fi
+          if [ "$(norm "${actual_subscription}")" != "$(norm "${EXPECTED_SUBSCRIPTION_ID}")" ] \
+            || [ "$(norm "${actual_tenant}")" != "$(norm "${EXPECTED_TENANT_ID}")" ]; then
+            echo "::error::Azure auth check failed: failure_code=auth_context_mismatch"
+            exit 1
+          fi
+          echo "Azure OIDC context verified (subscription and tenant match the configured values; not printed)."
 
+      # Wrapper disabled (Task 12.1A, E6): the real terraform binary gives the real
+      # `plan -detailed-exitcode` exit codes and never echoes output to the log.
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
       - name: Check Terraform Formatting
         run: terraform fmt -check -recursive
@@ -66,6 +90,11 @@ jobs:
       #                     identity needs only Storage Blob Data Contributor
       #                     on the state container (least privilege).
       # No client secret or storage account key is used anywhere.
+      # Task 12.1A (E6, P1): init, validate, plan and show run in
+      # scripts/auth_test_plan.sh with every output in runner-local files under
+      # $RUNNER_TEMP/auth-test (never printed, never uploaded). The log shows only
+      # the Terraform version, the stage results, the plan exit code and
+      # validated action counts, or one fixed failure code.
       - name: Validate Dev Environment Configuration
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -73,9 +102,4 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: "true"
           ARM_USE_AZUREAD: "true"
-        run: |
-          set -euo pipefail
-          terraform -chdir=terraform/environments/dev init -input=false
-          terraform -chdir=terraform/environments/dev validate
-          terraform -chdir=terraform/environments/dev plan \
-            -var-file="dev.tfvars" -input=false -no-color
+        run: ./scripts/auth_test_plan.sh
