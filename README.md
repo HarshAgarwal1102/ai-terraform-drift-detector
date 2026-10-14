@@ -52,9 +52,15 @@ Remediation is planned, not built (Phase 11). See
     and its AI analysis run #27. That run found 5 resources in `aitdd-dev-main-rg` created
     outside Terraform (a VM made in the Azure Portal for the test), with a list-price estimate
     of $44.85/month. The test VM has since been deleted.
-- **Next: Phase 11 — Human-Approved Remediation**, starting with Task 11.1 (Safe Remediation
-  Architecture & Controls). It has not started and begins with a design review. The dashboard
-  (Phase 13) is not being designed or built yet.
+- **In progress: Phase 12 — Testing & Security Hardening.** Task 12.1A (Terraform plan and
+  diagnostic log exposure hardening) is complete: commit `6d1aa86` on `main`, verified by a real
+  sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
+  Tasks 12.1–12.3 have not started.
+- **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
+  Remediation Architecture & Controls) is a specification only, paused under review:
+  the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
+  remediation workflow, approval environment or write permission exists. The dashboard (Phase 13)
+  is not being designed or built yet.
 
 | Phase | Status |
 |---|---|
@@ -71,7 +77,8 @@ Remediation is planned, not built (Phase 11). See
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
-| 11 — Human-approved remediation | ⬜ Next (not started) |
+| 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
+| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1–12.3 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -300,6 +307,7 @@ terraform/
 
 scripts/
 ├── generate_plan_json.sh         # Read-only plan evidence bundle (Task 3.2)
+├── auth_test_plan.sh             # terraform-auth-test.yml dev check; fixed output lines only (Task 12.1A)
 ├── detect_drift.py               # Drift classification script; thin wrapper over drift_engine
 ├── github_automation.py          # Drift issue create/update/close (Tasks 8.1, 8.3)
 ├── infracost_analysis.sh         # Pinned Infracost breakdown of the run's plan.json, fail-closed checks (Task 10.1)
@@ -1299,6 +1307,7 @@ registration holds zero credentials.
 | State Destroy Protection | `prevent_destroy` on the remote-state storage account and container (Task 9.1). |
 | Public Issue Profile | Drift issues carry structure only: no values, HCL, AI output, Activity Log data or caller identity (Task 8.1). |
 | Cost Estimate Isolation | Infracost v0.10.46 is SHA-256 verified before use, runs without OIDC request variables or an Azure CLI session, with an allowlisted environment, and fails closed on any of them (or on Checkpoint egress). Its artifact is an allowlisted, run-bound projection; a cost failure never changes the drift result (Task 10.1). |
+| Log Exposure Hardening | The hardened steps (the auth-test plan step via `scripts/auth_test_plan.sh`, both `Verify Azure OIDC Authentication` steps, and `drift-detection.yml`'s Generate Plan Evidence) print no Terraform plan output, no `plan.log` content, no raw Terraform/jq/`az` error text and no Azure account values: only fixed lines, exit codes, validated action counts and fixed failure codes. Plan and diagnostic files stay on the runner. Not all Terraform output is sanitized: the `drift-detection.yml` init/validate steps and the auth-test bootstrap and formatting steps still print Terraform's own output (see [Known limitations](#known-limitations-current-state)) (Task 12.1A; verified live on push-triggered auth-test run #68; `drift-detection.yml` is covered by local tests only, no live run inspected). |
 | Read-Only Unmanaged Inventory | The inventory uses the existing Reader session for GET requests only, limited to `management.azure.com` resource-group paths (anything else is blocked before a token is requested). Its public output never contains ARM resource IDs, subscription IDs, tags or IP addresses. The pricing job has no Azure access or secrets (Task 10.4). |
 
 ---
@@ -1320,8 +1329,8 @@ registration holds zero credentials.
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
-| 11 | Human-approved remediation | ⬜ Next (not started; Task 11.1 design review first) |
-| 12 | Testing and hardening | ⬜ Planned |
+| 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
+| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1–12.3 not started |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
 
@@ -1343,9 +1352,38 @@ registration holds zero credentials.
   the subscription ID) when an `id` attribute changes, so it stays on the runner. Only its public
   projection (Task 9B.4A, `drift-engine analyze --public-output`; identifiers withheld) is uploaded
   (Task 9B.5).
-- Phase 5 diagnostic output (`plan.log` tail on a failed detection, `az account show`) can reach the
-  public log; GitHub masks the subscription and tenant IDs, but paths and resource names can
-  remain. This is a recorded Phase 12 known limitation.
+- Log exposure (Task 12.1A, fixed in commit `6d1aa86`, 2026-10-13). Runs before that commit
+  printed the full `terraform plan` of `terraform-auth-test.yml`, the `plan.log` tail of a failed
+  detection and `az account show` (masked IDs) to the public log. Since the change:
+  - `terraform-auth-test.yml` runs [`scripts/auth_test_plan.sh`](scripts/auth_test_plan.sh)
+    (wrapper off) and prints only `auth-test: terraform_version=…`, `auth-test: init=succeeded
+    validate=succeeded` and `auth-test: plan_exit_code=<0|2> add=N change=N destroy=N replace=N
+    import=N moved=N forget=N output_changes=N`, or one `::error::auth-test failed:
+    failure_code=<code>` line (`preflight_failed`, `version_mismatch`, `init_failed`,
+    `validate_failed`, `plan_failed`, `plan_unexpected_exit`, `show_failed`, `plan_json_invalid`,
+    `counts_inconsistent`, `internal_error`). A plan whose JSON fails validation (unknown action
+    shape, `errored`, incomplete, wrong version) or disagrees with the exit code fails closed and
+    never shows counts;
+  - both `Verify Azure OIDC Authentication` steps compare the context with the configured values
+    and print only a fixed line or `auth_configuration_missing` / `auth_context_unavailable` /
+    `auth_context_mismatch`;
+  - `Generate Plan Evidence` no longer prints the `plan.log` tail, and `generate_plan_json.sh`
+    failure reasons are fixed text (no jq error text, no plan values).
+  - Verified: the real sentinel check (E6 item d) passed on push-triggered auth-test run #68 with a
+    temporary probe tag (since removed): the log shows only the fixed lines
+    (`plan_exit_code=2 … change=1`, all other counts 0) and none of the probe tag, `Refreshing
+    state`, `/subscriptions/` or account data. Not verified live: a `drift-detection.yml` run (its
+    auth check and the removed `plan.log` tail are covered by local tests; the same auth-check block
+    passed live in the auth-test).
+  - Still open: older auth-test logs stay public until they are handled under the historical-log
+    procedure in the Task 11.1 specification (§12.1; draft, not yet in the repository). Residual: the
+    drift-detection `terraform init`/`validate` steps still print Terraform's own output (failure
+    text can include backend and resource names, which are public in `backend.tf`/`dev.tfvars`).
+    The auth-test `Validate Bootstrap Configuration` (offline, `-backend=false`) and `Check
+    Terraform Formatting` steps also still print Terraform's own output for the committed
+    configuration.
+  - The fix is a recorded prerequisite before any remediation apply can be enabled (Phase 11,
+    gate E6).
 - Drift issues (Task 8.1) are public: a reduced body still shows the resource type, address and
   severity. Values, paths of security-relevant drift and callers are never published.
 - Issues for resources removed from the configuration or moved to a new address are not closed

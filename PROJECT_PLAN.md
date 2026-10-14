@@ -124,8 +124,9 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 11 — Human-Approved Remediation (⬜ NOT STARTED; the next phase in plan order after Phase 10, which completed on 2026-10-11). Not started automatically (Execution Rule 8).
-- **Current Active Task**: Task 11.1 — Safe Remediation Architecture & Controls (⬜ NOT STARTED; dependency Task 8.3 🟢). It starts only on user instruction, with a design review first; its implementation is a specification (`docs/remediation-safeguards.md`), and no apply, Azure write, GitHub environment or RBAC change is part of it (Tasks 11.2–11.3 need separate user approval, Execution Rules 10 and 13). Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11).
+- **Current Active Phase**: Phase 12 — Testing & Security Hardening (🟡 WORK IN PROGRESS since 2026-10-13; Task 12.1A 🟢 COMPLETED 2026-10-14; Tasks 12.1–12.3 ⬜ NOT STARTED). Phase 11 is on hold (user decision 2026-10-13; see below).
+- **Current Active Task**: Task 12.1 — Comprehensive Unit & Integration Test Suite (⬜ NOT STARTED; dependencies Tasks 4.7, 6.7 and 8.3 🟢). It starts only on user approval, with a Phase 12 design review first (which also decides how the deferred items recorded under Phase 12 are scheduled). Baseline measured and design decisions 1–5 recorded on 2026-10-13 (Task 12.1 Design Review); implementation awaits user approval. Task 12.1A (log-exposure hardening), added as an early, separate security task, is 🟢 COMPLETED (2026-10-14; commit `6d1aa86`, auth-test run #68; see its completion notes). Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11).
+- **On hold**: Phase 11 — Human-Approved Remediation (🔴 BLOCKED — on hold, user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on it. It resumes at Task 11.1 on user instruction. Task 11.1 — Safe Remediation Architecture & Controls stays 🟡 WORK IN PROGRESS (since 2026-10-11; dependency Task 8.3 🟢), paused. Documentation only: its specification is a draft under user review and not yet in the repository; not complete until the user approves it. No apply, Azure write, GitHub environment or RBAC change is part of it (Tasks 11.2–11.3 need separate user approval, Execution Rules 10 and 13).
 - **Last completed**: Phase 10 — FinOps / Cost Analysis (🟢 2026-10-11). Tasks 10.3 and 10.4 were verified together by the user-approved drift-detection dispatch #44 `38140497702` on commit `8ef89b6` and its AI analysis run #27 `38140599354` (see the Task 10.3 and 10.4 completion notes). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 10 of 14 (Phases 1–10). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
 
@@ -2583,6 +2584,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
   - Nothing was implemented: no `super-linter.yml`, no `scripts/run_super_linter.sh`, no `.github/linters/` configs, no tests, no image pulled, no baseline measured.
   - The design below (D1–D10) stays recorded for Phase 12. Before reuse it must be re-validated in a Phase 12 design review: the image digest and version, the variable names, and the repository baselines (Python, shell, YAML and Markdown counts, and the 19-comment `# noqa` inventory) may have changed.
   - TFLint remains owned by Task 9.1 and is not duplicated.
+  - **Scope of D5 (user decision 2026-10-13, Task 12.1 design review, WF-1)**: D5's workflow rule (`.github/workflows/**` neither modified nor linted, protected workflows unchanged) applies in full to the Super-Linter work of this task. It is not a blanket prohibition on later workflow changes; those follow WF-1 (see the Task 12.1 design review).
 - **Objective**: Run Super-Linter, from a digest-pinned image, as a code-quality gate in its own workflow. The scope is Python (Ruff, lint only), shell (ShellCheck), non-workflow YAML (yamllint) and Markdown (markdownlint, including `PROJECT_PLAN.md`). A finding is a code-quality failure: never a security result, never a drift result. *(Reworded 2026-10-04 per the Task 9.4 design review.)*
 - **Dependencies**: Task 9.3
 - **Locked version and execution (D1)**:
@@ -5112,12 +5114,13 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
 ---
 
 ### PHASE 11 — Human-Approved Remediation
-**Status**: ⬜ NOT STARTED
+**Status**: 🔴 BLOCKED — on hold (user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on Phase 11. Task 11.1 stays 🟡 (specification draft under user review; not yet in the repository); Tasks 11.2 and 11.3 ⬜ NOT STARTED. Resumes at Task 11.1 on user instruction.
 
 Phase 11 enforces strict human approval controls before applying any automated infrastructure remediation.
 
 #### Task 11.1 — Safe Remediation Architecture & Controls
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟡 WORK IN PROGRESS (specification drafted; awaiting user review and approval; not yet in the repository) — paused while Phase 11 is on hold (2026-10-13).
+- **Started**: 2026-10-11
 - **Objective**: Architect human-in-the-loop controls prohibiting autonomous destructive apply actions.
 - **Dependencies**: Task 8.3
 - **Dependency note**: changed 2026-10-03 from the superseded remediation-PR task (Phase 8 design review, option R1); its remediation PR scope moved into this task.
@@ -5139,7 +5142,7 @@ Phase 11 enforces strict human approval controls before applying any automated i
 - **Implementation Notes**:
   - Core safety principle: Zero autonomous destructive changes.
 - **Completion Notes**:
-  - None.
+  - **In progress (2026-10-11)**: specification drafted locally (documentation only; no workflow, GitHub setting, Azure identity, role or Terraform change; not committed). Its review record stays with the draft until the user approves publication. The acceptance criteria above stay open until the user approves the specification (Validation).
 
 #### Task 11.2 — Multi-stage Approval Workflow
 - **Status**: ⬜ NOT STARTED
@@ -5175,7 +5178,7 @@ Phase 11 enforces strict human approval controls before applying any automated i
 ---
 
 ### PHASE 12 — Testing & Security Hardening
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS — Task 12.1A 🟢 COMPLETED (2026-10-14); Tasks 12.1, 12.2 and 12.3 ⬜ NOT STARTED.
 
 Phase 12 builds a comprehensive end-to-end test suite and performs security hardening across all platform components.
 
@@ -5188,23 +5191,117 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
 >   - GitHub masks the secret values (subscription and tenant ID), so they show as `***`, but `/subscriptions/***/…` paths, resource names and other Terraform error text can still reach the public workflow log;
 >   - this predates Phase 9B and is outside Task 9B.5's scope (G11's log rule is enforced there only for the steps 9B.5 adds or changes). Phase 12 decides the fix (e.g. a redacted or summarised diagnostic).
 >   - **Task 9B.6 (plan revised 2026-10-10, D-2)** limits its job-log privacy check to the `Drift Investigation` step, the `investigation` job and the `ai-analysis` job, and excludes these two diagnostic outputs explicitly. The limitation stays open here.
+>   - **Status (2026-10-14)**: fixed for new runs by Task 12.1A (commit `6d1aa86`): the `plan.log` tail is no longer printed and `az account show` is replaced by a silent comparison. Verified by local executed-step tests; the identical auth-check block passed live in auth-test run #68, but no live `drift-detection.yml` run has been inspected (unverified). Logs of earlier runs are unchanged.
+>
+> - **Known limitation: `terraform-auth-test.yml` prints the full plan to the public log (confirmed 2026-10-11 from the workflow file, Task 11.1 review)**:
+>   - its `Validate Dev Environment Configuration` step runs `terraform plan -var-file="dev.tfvars" -input=false -no-color` against `dev.tfstate` on every push to `main`/`master` and on manual dispatch, and prints Terraform's human-readable plan, including the non-sensitive attribute values of every planned change (sensitive values show as `(sensitive value)`), to the public job log; it also sets no `-lock-timeout`;
+>   - **prerequisite for Phase 11 apply enablement** (gate E6 of the Task 11.1 specification; draft, not in the repository): the fix is a separate, user-approved change (here or in a dedicated task), verified by a structural test (plan output written to a runner-local file; only the exit code and change counts printed) and a real sentinel check (a temporary probe-tag value absent from the downloaded log of a push-triggered run);
+>   - **existing logs** (measured 2026-10-12 from the public API): 67 runs, 63 successful pushes with a printed plan, no artifacts, readable by any signed-in GitHub user, all within the 90-day retention, 9 cited as evidence in this plan; their handling is recorded in the Task 11.1 specification (§12.1; draft, under review); copies already made by others cannot be removed.
+>   - **Status (2026-10-14)**: fixed for new runs by Task 12.1A (commit `6d1aa86`), verified by the real sentinel check on push-triggered auth-test run #68. The existing logs are **not yet handled** (Task 11.1 specification §12.1; open).
 >
 > How these are scheduled within Phase 12 (for example as their own task) is decided in a Phase 12 design review. No task is added here.
+>
+> **Scheduling decided (user decisions 2026-10-13, Task 12.1 design review)**: the two log-exposure limitations above become Task 12.1A, an early, separate security-hardening task. Per WF-1, actionlint, zizmor and verified full commit-SHA pinning are required parts of the later approved CI implementation plan. Super-Linter (Task 9.4) stays deferred, still subject to its own re-validation.
 
 #### Task 12.1 — Comprehensive Unit & Integration Test Suite
-- **Status**: ⬜ NOT STARTED
+- **Status**: ⬜ NOT STARTED (baseline measured and design decisions recorded 2026-10-13; implementation awaits user approval)
 - **Objective**: Implement comprehensive `pytest` suite covering Python parser, drift models, severity rules, GitHub automation, and AI graph nodes.
 - **Dependencies**: Tasks 4.7, 6.7, 8.3
 - **Files/Areas**: `tests/`
+  - Planned for the approved implementation (design review 2026-10-13): `pyproject.toml` (marker registration), `requirements.txt` and a new `ci/dev-constraints.txt` (Decision 3), marker decorators in the mixed test files, a new `.github/workflows/tests.yml` (Decision 5), `README.md`.
 - **Acceptance Criteria**:
   - [ ] Test suite covers clean, drifted, invalid, and corrupted inputs.
-  - [ ] Test execution completes in < 60 seconds.
+  - [ ] Test execution completes in < 60 seconds. *(Amended 2026-10-13, Decision 4: the target applies to the fast CI tier, not to the full suite. The full-suite runtime is a monitored budget, never a reason to skip, drop or weaken tests.)*
+  - [ ] **Tiers (Decision 4)**: existing tests classified with explicit `integration` and `mutation` markers. The fast tier is the tests with neither marker, and its runtime is measured before pytest-xdist is considered. The full suite still runs every existing test: 0 failed, 0 errors, no test skipped or weakened, and no fewer than the 2,763-test baseline without a recorded plan decision.
+  - [ ] **Coverage (Decision 2)**: the `fail_under = 85` gate is unchanged. `src/ai_engine` coverage is measured, and per-package thresholds are proposed for review after its baseline.
+  - [ ] **Reproducibility (Decision 3)**: a fresh virtual environment installs the documented dependencies with all constraint files applied, with no duplicate pins. This is verified on the supported local and CI Python/platform combinations.
 - **Validation**:
-  - [ ] `pytest tests/` passes cleanly with high coverage.
+  - [ ] `pytest tests/` passes cleanly with high coverage. *(Amended 2026-10-13, Decision 2: "high coverage" means the unchanged 85% gate plus the measured per-package figures; no additional gate is enforced until thresholds are reviewed.)*
 - **Implementation Notes**:
   - Automated quality gate.
+- **Design Review (2026-10-13, user decisions 1–5; no implementation yet)**:
+  - **Baseline (measured 2026-10-13 on commit `488f42d`; macOS arm64, Python 3.13.12, isolated scratchpad venv; `pytest --cov=src/drift_engine tests/`)**:
+    - with the documented setup (`pip install -r requirements.txt`, no constraints): 2,761 passed and 2 failed in 233.8 s. The failures were the two constraint-closure tests (`tests/test_ai_cli.py::test_constraints_equal_the_complete_ai_closure` and `tests/test_investigation_workflow.py::test_azure_constraints_equal_the_complete_azure_closure`); newer resolved packages fell outside the CI pins;
+    - with both constraint files also applied (`-c ci/ai-constraints.txt -c ci/azure-constraints.txt`): **2,763 passed**, 0 failed, 0 skipped, 0 errors in 237.8 s (228.7 s on a `--durations=25` run); the two constraint files share 11 packages, all with identical pins;
+    - coverage **98.85%** (gate 85%) for `src/drift_engine` only. `src/ai_engine` has never been measured, so this figure does not cover the whole project;
+    - the 25 slowest tests take 86.7 s (mutation, fuzz and leak-scan loops; bash workflow harnesses; about 14 s of real retry backoff in subprocess anchor-fetch tests). Wall time is about twice CPU time (about 113 s);
+    - no CI workflow runs pytest.
+  - **Decision 1 — WF-1 (workflow changes)**:
+    - Task 9.4's workflow rule (D5) applies to the Super-Linter work covered by that task; it is not a blanket prohibition on later workflow changes.
+    - Phase 12 may propose a new `.github/workflows/tests.yml`.
+    - Any modification of an existing workflow requires a separately approved task with a reviewed diff and appropriate validation.
+    - actionlint, zizmor and verified full commit-SHA pinning must be part of the later approved CI implementation plan.
+    - No other security restriction is relaxed by WF-1.
+  - **Decision 2 — Coverage**: `fail_under = 85` unchanged; no separate enforced 95% gate yet; `src/ai_engine` coverage measured in the approved implementation stage, then per-package thresholds proposed for review.
+  - **Decision 3 — Dependency reproducibility**:
+    - A dedicated `ci/dev-constraints.txt` (test tooling: pytest, pytest-cov, coverage, jsonschema and their closures) is approved in principle, alongside the existing AI and Azure constraints, subject to compatibility validation.
+    - Duplicate pins are avoided.
+    - The existing constraint files and pins are preserved unless a separately reviewed conflict is found.
+    - Not created yet.
+  - **Decision 4 — Test tiers**:
+    - Staged design: first classify existing tests with explicit markers (`integration` for subprocess, bash-harness, git and loopback-API tests; `mutation` for mutation, fuzz and leak-scan tests), then measure the fast tier.
+    - No autouse subprocess-blocking fixture in the first step. Marker enforcement is first assessed through collection checks and targeted tests; a guard is proposed only if necessary, with its scope and potential false positives explained.
+    - pytest-xdist only by a separate measured decision with an isolation review.
+    - The opt-in `scripts/run_mutation_checks.py` stays outside the default suite.
+  - **Decision 5 — CI design (proposal; not created)**:
+    - A new `.github/workflows/tests.yml` with `contents: read` only.
+    - No Azure login, secrets or OIDC token permission.
+    - Actions pinned by verified full commit SHA.
+    - Fast and full test jobs, with explicit failure handling and runtime reporting.
+    - No caching initially unless later measurements justify it.
+    - GitHub settings (e.g. required checks) are unchanged; any change there is a user action.
 - **Completion Notes**:
   - None.
+
+#### Task 12.1A — Terraform Plan & Diagnostic Log Exposure Hardening
+- **Status**: 🟢 COMPLETED (2026-10-14) — commit `6d1aa86` pushed to `main`; real sentinel check passed on auth-test run #68 (recorded 2026-10-13 as an early, separate security-hardening task; user decision, Task 12.1 design review)
+- **Completed**: 2026-10-14
+- **Started**: 2026-10-13
+- **Objective**: Stop Terraform plan content and diagnostic output from reaching public workflow logs.
+- **Dependencies**: none on Task 12.1. It needs its own design review, a separately approved implementation plan and a separately approved remediation plan for existing logs (Execution Rules 10 and 13; WF-1).
+- **Scope**: the two known limitations recorded under Phase 12 above:
+  - `terraform-auth-test.yml` printing the full plan (also gate E6 of the on-hold Phase 11 specification);
+  - the Phase 5 diagnostic output (`plan.log` tail, `az account show`).
+- **Files/Areas** (implementation approved as I1, 2026-10-13): `.github/workflows/terraform-auth-test.yml`, `.github/workflows/drift-detection.yml`, new `scripts/auth_test_plan.sh`, `scripts/generate_plan_json.sh`, new `tests/test_auth_test_workflow.py`, new `tests/test_generate_plan_json.py`, `tests/test_investigation_workflow.py`; notes in `README.md` and this plan.
+- **Design Review (2026-10-13, user decisions)**:
+  - In scope: P1 (auth-test plan output), P2 (auth-test `az account show`), P3 (drift-detection `az account show`), P4 (`plan.log` tail in Generate Plan Evidence), P5 (raw jq text in a `generate_plan_json.sh` failure reason) and P5b (value-free integrity messages, because the reason is printed again by Analyze Drift).
+  - `terraform plan` stays in the auth-test; no `-lock-timeout` in this task; P6 (drift-detection `terraform init`/`validate` output) is a recorded residual and unchanged.
+  - Fixed failure codes only; never raw Terraform, jq or `az` text. Audit evidence kept: step result, exit code, validated action counts. Plan JSON that cannot be validated or counted fails closed and never reports counts. Plan and diagnostic files stay runner-local; nothing is uploaded.
+  - Counts (overlapping by design) and the action allowlist are documented in `scripts/auth_test_plan.sh`. Real Terraform output (the committed `tests/fixtures/plan_evidence` plans) backs `no-op`, `create`, `update`, `delete`, `["delete","create"]`, output `update`/`delete`, refresh-only drift and the exit-code rule; `importing` and `previous_address` are backed by synthetic fixtures only; `["create","delete"]`, `["forget"]`, data `["read"]` and output `create` are assumptions (hand-written plans). Forget-, import- or move-only plans fail closed if real Terraform exits 0 for them (residual).
+- **Acceptance Criteria** (revised proposal, 2026-10-13):
+  - [x] P1–P5 and P5b implemented as designed; P6 recorded as residual; no `-lock-timeout`, trigger, permission or GitHub setting change.
+  - [x] Counts match the 10 committed real plans exactly; unknown action shapes, `errored` ≠ false, `complete` ≠ true, structural violations and exit-code/pending mismatches fail closed with no counts line.
+  - [x] Plan exit 0 and 2 succeed with a validated counts line; exit 1 → `plan_failed`; other exits → `plan_unexpected_exit`; show failure → `show_failed`.
+  - [x] A random sentinel planted in Terraform output, drift section and errors, `az` errors, jq stderr, malformed plan JSON and an inherited `SHELLOPTS=xtrace` never appears in stdout, stderr, the step summary, `GITHUB_OUTPUT` or the manifest's `failure_reason`.
+  - [x] Every mutation check is caught; tests pass on local bash 3.2; the full constrained suite stays green with no existing test removed, skipped or weakened.
+  - [x] Only the seven code/test paths are in the code commit (separately approved); the five pre-existing changed files are preserved.
+  - [x] The real sentinel check passes (separately approved Azure probe tag, push and log download).
+- **Validation** *(checked 2026-10-14 after the commit and the real sentinel check; evidence in the Completion Notes)*:
+  - [x] E6 structural test: `terraform-auth-test.yml` writes the plan output to a runner-local file and prints only the exit code and change counts.
+  - [x] Real sentinel check: a temporary probe-tag value is absent from the downloaded log of a push-triggered run. This requires a separately approved implementation and an approved, controlled workflow run.
+  - [x] Phase 5 diagnostic outputs (`plan.log` tail, `az account show`) verified to no longer expose sensitive or unnecessary account or plan details. *(Verified by local executed-step tests of the committed workflow steps and scripts; the identical auth-check block passed live in auth-test run #68. A live `drift-detection.yml` run has not been inspected; that remains unverified.)*
+- **Constraints**:
+  - Recording this task changed nothing. The approved local implementation (I1) changes only the seven code/test paths above; no Azure or GitHub permission or setting, and no historical log, is changed. Staging, commit, push, the Azure probe tag and the real sentinel check each need separate approval.
+  - Existing logs are handled only through the procedure recorded in the Task 11.1 specification (§12.1; draft, under review).
+- **Completion Notes**:
+  - **Local implementation (2026-10-13; later committed as `6d1aa86`)**:
+    - `scripts/auth_test_plan.sh` (new, 100755, bash 3.2 compatible): `set +x`, `umask 077`, `TF_LOG*` unset, `TF_CLI_ARGS*` refused, a new `$RUNNER_TEMP/auth-test` directory; init, validate, `plan -detailed-exitcode -out` and `show -json` with all output in runner-local files; one jq pass validates and counts (each count parenthesized); prints only the three fixed lines (also to the step summary) or exactly one `::error::auth-test failed: failure_code=<code>` line; an EXIT trap turns any other termination into `internal_error`.
+    - `terraform-auth-test.yml`: `terraform_wrapper: false`; the dev step runs the script; `Verify Azure OIDC Authentication` compares `az account show --query id|tenantId` (captured, stderr discarded) with `EXPECTED_SUBSCRIPTION_ID`/`EXPECTED_TENANT_ID` from the existing secrets and prints a fixed line or `auth_configuration_missing`/`auth_context_unavailable`/`auth_context_mismatch`. Triggers and permissions unchanged.
+    - `drift-detection.yml`: the same check in `Verify Azure OIDC Authentication` (name and `id: auth` unchanged); the `plan.log` tail removed from Generate Plan Evidence.
+    - `generate_plan_json.sh`: jq gate stderr goes to `plan.log`; the evaluation failure reason is fixed; integrity messages carry no plan values (header values written to `plan.log` only).
+    - Tests: `tests/test_auth_test_workflow.py` 92, `tests/test_generate_plan_json.py` 8, `tests/test_investigation_workflow.py` +4 (P4; `FAKE_PLAN_SCRIPT` gained an optional `FIXTURE_PLAN_LOG`, existing assertions unchanged). Against the HEAD versions of the changed workflows and script, 26 of the new tests fail; with the change all pass. The HEAD run also showed the pre-fix leak: the Analyze Drift failure line printed a planted `format_version` value.
+    - Mutation check (throwaway scratchpad copies, not committed): 17 of 17 caught (HEAD versions, `plan.log` tail restored, plan redirect removed, `az` output printed, show failure failing open, consistency check removed, raw jq text in the reason, wrapper back on, `set +x` removed in the script and in the auth step, jq precedence bug, allowlist removed, value in an integrity message, `az` stderr not discarded, jq stderr to stdout, counts line on failure, `-lock-timeout` added).
+    - Full constrained suite (Python 3.13.12, venv with `-c ci/ai-constraints.txt -c ci/azure-constraints.txt`): **2,867 passed** (2,763 + 104 new), 0 failed, 0 skipped; coverage 98.85% (`src/drift_engine` only, gate 85%); 234.0 s.
+    - `bash -n` (local bash 3.2) clean on both scripts and on all 41 workflow `run:` blocks; `git diff --check` clean. actionlint, ShellCheck and zizmor were not run (not installed; no download without approval).
+    - Residuals: R1 P6 (drift-detection init/validate output); R2 forget/import/move-only exit codes unverified (fail closed); R3 zizmor findings not assessed; R4 historical logs (spec §12.1, separate); R5 `crash.log` on a Terraform panic stays in the runner checkout; R6 actionlint/zizmor not run; R7 Python parser messages still interpolate header fields, reachable only if the script accepts a plan the engine rejects (an engine run on a failed manifest reports the manifest's fixed reason, verified locally); R8 `azure/login` output not reviewed.
+  - **Commit, push and live verification (2026-10-13/14, each step separately approved)**:
+    - C1: commit `6d1aa86869348fa61819b51e7071fb1fd175e43a` (`fix: harden Terraform diagnostic log exposure`) with exactly the seven code/test paths (3 added, 4 modified; `scripts/auth_test_plan.sh` mode 100755); the five documentation files stayed uncommitted.
+    - R1: probe tag `aitdd_drift_probe=task-3.6` added to `aitdd-dev-main-rg` (`rg_tag_drift_inject.sh --apply`, 2026-10-13 17:30:34Z) after a read-only check that the Azure CLI context was the project subscription.
+    - R2: normal push to `origin/main` (fast-forward `488f42d..6d1aa86`, 17:32:48Z). It triggered auth-test run #68 (`38439530159`) and security-scan run #32 (`38439529852`); both succeeded, every auth-test step and all three security-scan jobs (TFLint, TruffleHog, Trivy config).
+    - R3: the job log was obtained by a signed-in download outside this session (the anonymous API download was refused, HTTP 403) and inspected locally without printing raw content. All 10 criteria passed: the fixed `Azure OIDC context verified` line; `auth-test: terraform_version=1.14.7`, `auth-test: init=succeeded validate=succeeded` and `auth-test: plan_exit_code=2 add=0 change=1 destroy=0 replace=0 import=0 moved=0 forget=0 output_changes=0`; 0 occurrences of `aitdd_drift_probe`, `task-3.6`, `Refreshing state`, `Terraform will perform`, `/subscriptions/`, account-JSON keys, plan-change markers and Terraform error blocks. Identity: the full commit SHA and the run's time window (17:32:55–17:33:34Z); the archive's numeric name is not the run or job ID (unexplained).
+    - R4: probe tag removed (`rg_tag_drift_revert.sh --apply`, 17:35:36Z); its absence and the unchanged managed tags (`environment=dev`, `managed_by=terraform`, `project=ai-terraform-drift-detector`) were verified independently (17:35:44Z).
+    - The Phase 11 auth-test log prerequisite remains partially open. The Task 11.1 specification is not updated while Phase 11 is on hold.
+    - Still open (not fixed by this task): the existing auth-test logs (spec §12.1, H1); no live `drift-detection.yml` run inspected for P3/P4; residuals R1–R8 above; the bootstrap and fmt steps of the auth-test still print Terraform's own output for the committed configuration (offline).
 
 #### Task 12.2 — End-to-End Drift Scenario Test Matrix
 - **Status**: ⬜ NOT STARTED
