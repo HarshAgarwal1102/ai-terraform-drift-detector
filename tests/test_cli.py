@@ -27,6 +27,8 @@ import unittest
 from importlib.metadata import PackageNotFoundError, entry_points, version
 from unittest import mock
 
+from tiers import integration
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -575,6 +577,7 @@ class TestErrorHandling(CliTestCase):
             code = cli.main(list(self.ARGS))
         self.assertEqual(code, cli.EXIT_BROKEN_PIPE)
 
+    @integration
     def test_broken_pipe_real_process(self):
         env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, "src"))
         proc = subprocess.Popen([sys.executable, "-m", "drift_engine.cli", *self.ARGS, "--format", "console"],
@@ -780,6 +783,7 @@ class TestModuleEntryPoint(CliTestCase):
         self.assertTrue(os.path.exists(out))
 
 
+@integration
 class TestProcess(CliTestCase):
     def test_python_module_invocation(self):
         out = os.path.join(self.tmp, "report.json")

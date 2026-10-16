@@ -1,0 +1,118 @@
+# Task 12.1 — Python test suite (PROJECT_PLAN.md, Task 12.1 Design Review, Decision 5).
+#
+# Two jobs on every push to main, every pull request and on manual dispatch:
+#   - fast: the fast tier, every test with neither tier marker
+#     (pytest -m "not integration and not mutation"); target < 60 s (Decision 4);
+#   - full: every test, the unchanged 85% coverage gate on src/drift_engine
+#     (pyproject.toml fail_under) and a report-only figure for src/ai_engine (Decision 2).
+#
+# Security boundary: contents: read only; no Azure login, no secrets, no OIDC token
+# (no id-token permission); actions pinned by verified full commit SHA (WF-1); the
+# checkout does not persist credentials; no caching (Decision 5). Dependencies come from
+# requirements.txt, which applies ci/ai-, ci/azure- and ci/dev-constraints.txt (Decision 3).
+# tests/conftest.py blocks every non-loopback connection while tests run.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: Fast tier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Pinned Dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+          python -m pip check
+
+      - name: Run Fast Tier
+        run: |
+          set -uo pipefail
+          start=$SECONDS
+          python -m pytest -p no:cacheprovider --strict-markers -m "not integration and not mutation" \
+            --durations=15 tests/
+          rc=$?
+          elapsed=$((SECONDS - start))
+          {
+            echo "### Fast tier"
+            echo "- pytest exit code: ${rc}"
+            echo "- runtime: ${elapsed} s (target < 60 s)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$elapsed" -ge 60 ]; then
+            echo "::warning::Fast tier took ${elapsed} s (target < 60 s, Task 12.1 Decision 4)."
+          fi
+          exit "$rc"
+
+  full:
+    name: Full suite and coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Pinned Dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+          python -m pip check
+
+      # One run measures both packages; the gate is applied afterwards to src/drift_engine
+      # only, with fail_under from pyproject.toml (85), exactly as `pytest --cov=src/drift_engine`.
+      - name: Run Full Suite
+        run: |
+          set -uo pipefail
+          start=$SECONDS
+          python -m pytest -p no:cacheprovider --strict-markers --durations=25 \
+            --cov=src/drift_engine --cov=src/ai_engine --cov-report= --cov-fail-under=0 tests/
+          rc=$?
+          elapsed=$((SECONDS - start))
+          {
+            echo "### Full suite"
+            echo "- pytest exit code: ${rc}"
+            echo "- runtime: ${elapsed} s (monitored budget; never a reason to skip tests)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Coverage Gate and Report
+        run: |
+          set -uo pipefail
+          python -m coverage report --include='src/drift_engine/*'
+          gate=$?
+          ai_total=$(python -m coverage report --include='src/ai_engine/*' --fail-under=0 | tail -n 1)
+          {
+            echo "### Coverage"
+            echo "- src/drift_engine gate (fail_under from pyproject.toml): exit code ${gate}"
+            echo "- src/ai_engine (report only, no gate): ${ai_total}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$gate"

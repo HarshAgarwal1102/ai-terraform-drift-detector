@@ -29,6 +29,8 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
+from tiers import integration
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "detect_drift.py")
 FIXTURE_SOURCE = os.path.join(ROOT, "tests", "fixtures", "plan_evidence")
@@ -664,6 +666,7 @@ class TestCli(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
 
+    @integration
     def test_exit_codes_and_default_output(self):
         for name, expected in (("in_sync", 0), ("external_drift", 0), ("failed_run", 1)):
             d = os.path.join(self.tmp, name)

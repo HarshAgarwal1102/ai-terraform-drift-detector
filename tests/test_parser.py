@@ -22,6 +22,8 @@ import time
 import unittest
 import unittest.mock
 
+from tiers import mutation
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -439,6 +441,7 @@ class TestIdentityFields(unittest.TestCase):
                     self.assertIn(message, report["failure"]["reason"])
 
 
+@mutation
 class TestFuzzedPlans(unittest.TestCase):
     """Random structural damage to real plans: success or EvidenceError, nothing else."""
 

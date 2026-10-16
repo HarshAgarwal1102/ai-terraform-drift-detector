@@ -5,7 +5,8 @@
 # Setup (from the repository root):
 #   python3 -m venv .venv
 #   source .venv/bin/activate
-#   pip install -e ".[dev,ai,azure]"  # full dev setup; same as: pip install -r requirements.txt
+#   pip install -r requirements.txt   # full dev setup, pinned by ci/*-constraints.txt (Task 12.1)
+#   pip install -e ".[dev,ai,azure]"  # the same extras with the unpinned pyproject.toml ranges
 #   pip install -e ".[dev]"           # drift engine only; the AI engine and Azure SDK tests are skipped
 # -----------------------------------------------
 
@@ -72,3 +73,9 @@ show_missing = true
 # pytest also runs the existing unittest-based suite (tests/test_detect_drift.py).
 testpaths = ["tests"]
 addopts = "-ra"
+# Task 12.1 test tiers (Decision 4). The fast tier is every test with neither
+# marker: pytest -m "not integration and not mutation". The full suite runs all.
+markers = [
+    "integration: runs a subprocess, bash harness, git or a loopback server",
+    "mutation: mutation, fuzz or leak-scan loop over many variants",
+]

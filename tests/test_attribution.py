@@ -36,6 +36,8 @@ import types
 import unittest
 from unittest import mock
 
+from tiers import integration, mutation
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -920,6 +922,7 @@ class SafetyTests(_Base):
                          and (node.module or "").startswith("drift_engine")}
         self.assertEqual(drift_imports, {"drift_engine.activity_logs", "drift_engine.logs", "drift_engine.models"})
 
+    @integration
     def test_importing_and_running_never_loads_azure(self):
         scenario = self.scenario(None, self.W(8) + self.D(9))
         code = ("import json, sys; from drift_engine import cli; code = cli.main(sys.argv[1:]);"
@@ -1004,6 +1007,7 @@ MUTANTS = {
 }
 
 
+@mutation
 class SafeguardMutationTests(_Base):
     """Each mutant removes one safeguard from a copy of attribution.py (loaded in-process;
     the repository file is never changed) and must change the result of at least one

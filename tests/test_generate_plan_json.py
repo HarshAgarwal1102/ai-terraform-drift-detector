@@ -31,6 +31,8 @@ sys.path.insert(0, str(TESTS))
 from test_auth_test_workflow import FAKE_TERRAFORM, JQ_SHIM, _exe  # noqa: E402
 from test_investigation_workflow import _analyze  # noqa: E402
 
+pytestmark = pytest.mark.integration
+
 SCRIPT = ROOT / "scripts" / "generate_plan_json.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 JQ = shutil.which("jq")

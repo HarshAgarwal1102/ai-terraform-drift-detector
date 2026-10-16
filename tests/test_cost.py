@@ -213,6 +213,7 @@ def test_in_sync_report_has_no_resources(report, in_sync):
     assert all(doc["totals"][g]["with_cost"] == doc["totals"][g]["without_cost"] == 0 for g in cost.GROUPS)
 
 
+@pytest.mark.integration
 def test_imports_no_restricted_module():
     """Phase 9B G14: ai_engine (Task 10.3) may import this module, so it must not load the Activity
     Log, attribution, investigation or WHO modules (or the Azure SDK)."""

@@ -110,6 +110,7 @@ def test_output_is_deterministic(tmp_path):
 @requires_ai
 @pytest.mark.parametrize("content, message", [
     (None, "cannot read"),
+    (b"\xff\xfe{}", "cannot read the drift report: UnicodeDecodeError"),  # corrupted bytes, not UTF-8
     ("{not json", "not valid JSON"),
     ({"outcome": "succeeded"}, "does not match the public drift report contract"),
     ("FAILED_RUN", "drift status is unknown"),
@@ -121,6 +122,8 @@ def test_rejected_input_writes_nothing(tmp_path, capsys, content, message):
         write_json(src, report("plan_evidence", "failed_run"))
     elif content == "INTERNAL":
         write_json(src, internal_report("plan_evidence", "external_drift"))
+    elif isinstance(content, bytes):
+        src.write_bytes(content)
     elif content is not None:
         write_json(src, content)
     out = tmp_path / "out"
@@ -179,6 +182,7 @@ def test_usage_errors_exit_2():
     assert exc.value.code == 2
 
 
+@pytest.mark.integration
 def test_missing_ai_extra_is_a_clear_usage_error(tmp_path):
     """Without langgraph (core install), the command explains the ai extra and exits 2."""
     code = (
@@ -436,6 +440,7 @@ def run_step(workflow, name: str, tmp_path: Path, env: dict[str, str]):
     return result, outputs, summary.read_text()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("branch, event, ok", [("main", "schedule", True), ("main", "workflow_dispatch", True),
                                                ("feature", "schedule", False), ("main", "push", False),
                                                ("main", "pull_request", False)])
@@ -444,6 +449,7 @@ def test_source_run_verification(workflow, tmp_path, branch, event, ok):
     assert (result.returncode == 0) is ok, result.stdout
 
 
+@pytest.mark.integration
 def test_missing_artifact_means_unknown_not_failure(workflow, tmp_path):
     result, outputs, summary = run_step(workflow, "Check for a valid detection result", tmp_path, {})
     assert result.returncode == 0
@@ -457,6 +463,7 @@ def source_report(tmp_path: Path, data) -> Path:
     return write_json(directory / "drift_report.json", data)
 
 
+@pytest.mark.integration
 def test_present_artifact_is_detected(workflow, tmp_path):
     path = source_report(tmp_path, report("plan_evidence", "in_sync"))
     result, outputs, _ = run_step(workflow, "Check for a valid detection result", tmp_path, {})
@@ -485,6 +492,7 @@ def bound(fixture: str, run_id: str | None = "github-123-2", internal: bool = Fa
     return data
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("fixture", ["external_drift", "in_sync"])  # has_drift true and false
 def test_valid_bound_report_is_analysed(workflow, tmp_path, fixture):
     path = source_report(tmp_path, bound(fixture))
@@ -493,6 +501,7 @@ def test_valid_bound_report_is_analysed(workflow, tmp_path, fixture):
     assert outputs == {"valid": "true"}
 
 
+@pytest.mark.integration
 def test_failed_public_report_means_unknown(workflow, tmp_path):  # decision 6: a valid failed run -> UNKNOWN
     path = source_report(tmp_path, bound("failed_run"))
     result, outputs, summary = run_step(workflow, "Validate and bind the drift report", tmp_path,
@@ -502,6 +511,7 @@ def test_failed_public_report_means_unknown(workflow, tmp_path):  # decision 6: 
     assert "Detection result unknown: no AI analysis" in summary
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("data", ["{not json", {"outcome": "succeeded"}, "INTERNAL", "INTERNAL_FAILED"])
 def test_invalid_or_non_public_report_fails_the_job(workflow, tmp_path, data):  # decision 6
     builders = {"INTERNAL": lambda: bound("external_drift", internal=True),
@@ -515,6 +525,7 @@ def test_invalid_or_non_public_report_fails_the_job(workflow, tmp_path, data):  
     assert "not a valid public drift report" in result.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("run_id", ["github-123-1", "github-124-2", "local-20261001T171607Z-1", None])
 def test_report_from_another_run_or_attempt_fails(workflow, tmp_path, run_id):
     path = source_report(tmp_path, bound("external_drift", run_id))
@@ -524,6 +535,7 @@ def test_report_from_another_run_or_attempt_fails(workflow, tmp_path, run_id):
     assert "does not match 'github-123-2'" in result.stdout
 
 
+@pytest.mark.integration
 @requires_ai
 def test_summary_has_counts_only(workflow, tmp_path):
     out = tmp_path / "runner" / "ai-analysis"

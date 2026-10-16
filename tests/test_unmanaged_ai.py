@@ -42,6 +42,7 @@ FORBIDDEN = ("drift_engine.activity_logs", "drift_engine.attribution", "drift_en
 # --------------------------------------------------------------------------- module boundary (G14 addendum)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("module", ["drift_engine.unmanaged_cost", "drift_engine.unmanaged_public"])
 def test_public_modules_load_no_restricted_module_or_azure_sdk(module):
     code = (f"import sys, {module}; print(','.join(sorted(m for m in sys.modules "

@@ -15,6 +15,8 @@ import subprocess
 import tempfile
 import unittest
 
+from tiers import integration
+
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -157,6 +159,7 @@ class RunTflintScriptTests(unittest.TestCase):
         env["PATH"] = "/usr/bin:/bin"
         return subprocess.run(["bash", SCRIPT], env=env, capture_output=True, text=True, timeout=30)
 
+    @integration
     def test_plugin_dir_must_be_outside_the_repository(self):
         for plugin_dir, message in ((None, "must be set"), (os.path.join(ROOT, "terraform"), "outside the repository"),
                                     (ROOT, "outside the repository"),
@@ -166,6 +169,7 @@ class RunTflintScriptTests(unittest.TestCase):
             self.assertIn(message, result.stderr)
             self.assertNotIn("Installing", result.stdout)
 
+    @integration
     def test_plugin_dir_outside_repository_passes_the_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = self._run(tmp)

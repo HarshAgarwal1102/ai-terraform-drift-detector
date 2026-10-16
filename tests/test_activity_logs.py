@@ -35,6 +35,8 @@ import unittest
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
+from tiers import integration
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -1577,6 +1579,7 @@ exit 1
 """
 
 
+@integration
 @unittest.skipUnless(HAS_AZURE, "needs the 'azure' extra (pip install -e '.[azure]')")
 class CachedAudienceCliTests(_Base):
     """Task 9B.5: the real AzureCliCredential and collect_evidence against a fake `az` that
@@ -1720,6 +1723,7 @@ class CredentialErrorLogRedactionTests(_Base):
         for secret in AZ_STDERR_SECRETS:
             self.assertNotIn(secret, joined)
 
+    @integration
     def test_cli_stderr_never_carries_the_credential_error_text(self):
         plan, manifest = bundle(self.tmp, "plan_evidence", "external_drift")
         for options in ([], ["--log-level", "debug"], ["--log-level", "debug", "--log-format", "json"]):
@@ -1737,6 +1741,7 @@ class CredentialErrorLogRedactionTests(_Base):
                 if options:  # drift_engine's own logs are not suppressed
                     self.assertIn("activity_log_query_finished", proc.stderr)
 
+    @integration
     def test_redaction_holds_through_propagation_and_host_handlers(self):
         # The filter runs on the originating azure.identity logger before any handler, so the
         # record every handler up the hierarchy (and lastResort) receives is already redacted.
@@ -1771,6 +1776,7 @@ class CredentialErrorLogRedactionTests(_Base):
                 self.assertIn("get_token_info failed: ClientAuthenticationError", proc.stderr)
                 self.assertNotIn("Traceback", proc.stderr)
 
+    @integration
     def test_debug_account_details_never_reach_host_handlers(self):
         # azure-identity logs a successful token request at DEBUG with the token's claims
         # pre-formatted ("[Authenticated account] Client ID ... Tenant ID ... UPN ... Object ID").
@@ -1817,6 +1823,7 @@ class CredentialErrorLogRedactionTests(_Base):
                 for kept in kept_lines:
                     self.assertIn(kept, proc.stderr)
 
+    @integration
     def test_unrelated_logs_are_not_suppressed(self):
         program = textwrap.dedent(f"""
             import logging, sys
@@ -1892,6 +1899,7 @@ RUN_CLI = textwrap.dedent("""
 """)
 
 
+@integration
 @unittest.skipIf(al is None, "drift_engine is not installed (pip install -e '.[dev]')")
 class ImportBoundaryTests(_Base):
     def run_cli(self, args, block_azure=False):

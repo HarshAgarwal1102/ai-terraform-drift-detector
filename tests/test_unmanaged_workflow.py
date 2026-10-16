@@ -250,6 +250,7 @@ def _assert_clean(proc, outputs, runner, publishable: bool):
         assert stat.S_IMODE(restricted.stat().st_mode) == 0o700
 
 
+@pytest.mark.integration
 def test_complete_inventory_is_publishable(harness, case):
     proc, outputs, runner, calls = harness.run(*case, {"source": "portal"})
     _assert_clean(proc, outputs, runner, True)
@@ -265,6 +266,7 @@ def test_complete_inventory_is_publishable(harness, case):
     assert "azure-constraints.txt" in pip and "[azure]" in pip
 
 
+@pytest.mark.integration
 def test_failed_listing_is_published_with_its_code(harness, case):
     proc, outputs, runner, _ = harness.run(*case, {"source": "forbidden"})
     _assert_clean(proc, outputs, runner, True)
@@ -272,6 +274,7 @@ def test_failed_listing_is_published_with_its_code(harness, case):
         "failed", "listing_failed", "authorization_failed=1")
 
 
+@pytest.mark.integration
 def test_failed_detail_read_is_incomplete(harness, case):
     proc, outputs, runner, _ = harness.run(*case, {"source": "detail_failed"})
     _assert_clean(proc, outputs, runner, True)
@@ -279,6 +282,7 @@ def test_failed_detail_read_is_incomplete(harness, case):
         "incomplete", "incomplete", "throttled=1")
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("mode,failure", [({"rc": 2}, "inventory_usage"), ({"rc": 70}, "internal_error"),
                                           ({"rc": 73}, "write_failed"), ({"rc": 9}, "internal_error"),
                                           ({"rc": 0}, "internal_error"),  # exit 0 without a document
@@ -291,6 +295,7 @@ def test_engine_outcomes_map_to_fixed_codes(harness, case, mode, failure):
         "failed", failure, "")
 
 
+@pytest.mark.integration
 def test_inventory_of_another_report_is_never_published(harness, case):
     plan, report = case
     doc = inv.collect_inventory(plan, report, portal_vm_source())
@@ -300,6 +305,7 @@ def test_inventory_of_another_report_is_never_published(harness, case):
     assert outputs["inventory_failure"] == "public_check_failed"
 
 
+@pytest.mark.integration
 def test_rc_and_outcome_must_agree(harness, case):
     plan, report = case
     doc = inv.collect_inventory(plan, report, portal_vm_source())  # complete, but the engine claims exit 1
@@ -308,6 +314,7 @@ def test_rc_and_outcome_must_agree(harness, case):
     assert outputs["inventory_failure"] == "internal_error"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kwargs,failure", [({"venv_fail": True}, "install_failed"), ({"pip_rc": 1}, "install_failed"),
                                             ({"extra_site": ("rogue", "1.0")}, "pin_mismatch"),
                                             ({"timeout_hit": True}, "timeout"),
@@ -321,6 +328,7 @@ def test_setup_failures(harness, case, kwargs, failure):
         assert calls == []
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("bound,engine_ran", [("60", False), ("180", False), ("30", False), ("300", False),
                                                ("45", True)])
 def test_every_blocking_stage_is_bounded_and_a_hit_is_timeout(harness, case, bound, engine_ran):
@@ -357,6 +365,7 @@ def test_no_blocking_command_runs_unbounded():
     assert unbounded == [], unbounded
 
 
+@pytest.mark.integration
 def test_stale_directories_are_refused(harness, case, tmp_path):
     runner = tmp_path / "runner1"
     (runner / "unmanaged").mkdir(parents=True)
@@ -380,6 +389,7 @@ def run_block(script: str, tmp_path: Path, env: dict[str, str], cwd: Path | None
     return proc, _outputs(gh), summary.read_text()
 
 
+@pytest.mark.integration
 def test_inventory_step_maps_a_script_failure_and_exits_0(wf, tmp_path):
     (tmp_path / "scripts").mkdir()
     _exe(tmp_path / "scripts" / "inventory_analysis.sh", "#!/bin/sh\nexit 3\n")
@@ -394,6 +404,7 @@ def test_inventory_step_maps_a_script_failure_and_exits_0(wf, tmp_path):
     assert not public.exists() and "::error::Unmanaged resource inventory failed unexpectedly" in proc.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("rc,ok", [(0, True), (1, True), (2, False), (70, False)])
 def test_price_step_records_the_exit_code(wf, tmp_path, rc, ok):
     shim = tmp_path / "bin"
@@ -423,6 +434,7 @@ OK = {"INVENTORY_STATUS": "complete", "INVENTORY_FAILURE": "none", "INVENTORY_UP
       "VERIFY_OUTCOME": "success", "REPORT_UPLOAD_OUTCOME": "success"}
 
 
+@pytest.mark.integration
 def test_require_findings_warn_but_pass(wf, tmp_path, case):
     _documents(case, tmp_path)
     step = steps_by_name(wf["jobs"]["unmanaged"])["Require Unmanaged Inventory"]
@@ -432,6 +444,7 @@ def test_require_findings_warn_but_pass(wf, tmp_path, case):
     assert "inventory=complete, pricing=complete, unmanaged=6" in proc.stdout
 
 
+@pytest.mark.integration
 def test_require_partial_pricing_warns_but_passes(wf, tmp_path, case):
     _documents(case, tmp_path, prices=FakePrices(override={"Standard_B1s": []}))
     step = steps_by_name(wf["jobs"]["unmanaged"])["Require Unmanaged Inventory"]
@@ -439,6 +452,7 @@ def test_require_partial_pricing_warns_but_passes(wf, tmp_path, case):
     assert proc.returncode == 0 and "::warning::Unmanaged cost estimate is partial: 1 unavailable" in proc.stdout
 
 
+@pytest.mark.integration
 def test_require_pricing_api_failure_fails(wf, tmp_path, case):
     _documents(case, tmp_path, prices=FakePrices(fail="service_error"))
     step = steps_by_name(wf["jobs"]["unmanaged"])["Require Unmanaged Inventory"]
@@ -447,6 +461,7 @@ def test_require_pricing_api_failure_fails(wf, tmp_path, case):
     assert "never $0" in proc.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("override", [{"INVENTORY_STATUS": "failed", "INVENTORY_FAILURE": "listing_failed"},
                                       {"INVENTORY_STATUS": "incomplete"}, {"INVENTORY_STATUS": ""},
                                       {"INVENTORY_UPLOAD_OUTCOME": "failure"}, {"VERIFY_OUTCOME": "failure"},
@@ -458,6 +473,7 @@ def test_require_failures_are_explicit(wf, tmp_path, case, override):
     assert proc.returncode == 1 and "::error::" in proc.stdout
 
 
+@pytest.mark.integration
 def test_require_clean_inventory_passes_silently(wf, tmp_path, case):
     from unmanaged_fixtures import FakeArm
     _documents(case, tmp_path, source=FakeArm([[]]))
@@ -466,6 +482,7 @@ def test_require_clean_inventory_passes_silently(wf, tmp_path, case):
     assert proc.returncode == 0 and "::warning::" not in proc.stdout
 
 
+@pytest.mark.integration
 def test_summary_renders_codes_and_the_verified_section(wf, tmp_path, case):
     _documents(case, tmp_path)
     step = steps_by_name(wf["jobs"]["unmanaged"])["Unmanaged Summary"]
@@ -478,6 +495,7 @@ def test_summary_renders_codes_and_the_verified_section(wf, tmp_path, case):
     assert SUB not in summary and "/subscriptions/" not in summary
 
 
+@pytest.mark.integration
 def test_summary_without_verified_documents_shows_codes_only(wf, tmp_path):
     step = steps_by_name(wf["jobs"]["unmanaged"])["Unmanaged Summary"]
     env = {"INVENTORY_STATUS": "failed", "INVENTORY_FAILURE": "listing_failed",
@@ -489,6 +507,7 @@ def test_summary_without_verified_documents_shows_codes_only(wf, tmp_path):
     assert "Estimated monthly cost" not in summary
 
 
+@pytest.mark.integration
 def test_summary_rejects_unexpected_codes(wf, tmp_path):
     step = steps_by_name(wf["jobs"]["unmanaged"])["Unmanaged Summary"]
     env = {"INVENTORY_STATUS": "<script>", "INVENTORY_FAILURE": "", "INVENTORY_DETAIL": "",

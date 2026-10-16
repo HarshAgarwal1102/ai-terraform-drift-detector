@@ -24,6 +24,8 @@ import types
 import unittest
 from unittest import mock
 
+from tiers import integration, mutation
+
 TESTS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TESTS)
 
@@ -231,6 +233,7 @@ class LeakScanTests(_PubBase):
             for sample in SAMPLES.values():
                 self.assertNotIn(sample, finding)
 
+    @mutation
     def test_a_planted_value_in_every_public_string_is_caught(self):
         document = self.public(self.rich())
         sites = list(leaves(document))
@@ -522,6 +525,7 @@ class BoundaryTests(unittest.TestCase):
     FORBIDDEN = ("drift_engine.activity_logs", "drift_engine.attribution", "drift_engine.investigation",
                  "drift_engine.who")
 
+    @integration
     @unittest.skipIf(pub is None, "drift_engine is not installed")
     def test_importing_the_public_module_loads_no_restricted_module(self):
         code = ("import json, sys; import drift_engine.investigation_public; "
@@ -560,6 +564,7 @@ class BoundaryTests(unittest.TestCase):
                                   if m.split(".")[0] == "drift_engine" and m not in self.AI_ALLOWED]
         self.assertEqual(offenders, [])
 
+    @integration
     @unittest.skipIf(pub is None, "drift_engine is not installed")
     def test_importing_the_ai_engine_loads_no_restricted_module(self):
         try:
@@ -662,6 +667,7 @@ MUTANTS = {
 }
 
 
+@mutation
 @unittest.skipIf(pub is None, "drift_engine is not installed (pip install -e '.[dev]')")
 class SafeguardMutationTests(_PubBase):
     """Each mutant removes one safeguard from an in-process copy of a module (the

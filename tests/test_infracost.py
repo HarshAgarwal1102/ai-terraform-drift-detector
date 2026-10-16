@@ -293,6 +293,7 @@ def test_check_mode_file_set_and_run(tmp_path, drift_report_path):
 # --------------------------------------------------------------------------- sanitiser: CLI usage (exit 64)
 
 
+@pytest.mark.integration
 def test_cli_exit_codes(tmp_path, drift_report_path):
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -406,6 +407,7 @@ def harness(tmp_path):
     return Harness(tmp_path)
 
 
+@pytest.mark.integration
 def test_script_success_end_to_end_with_the_real_sanitiser(harness, drift_report_path):
     result = harness.run(drift_report_path)
     assert_status(result, "none")
@@ -429,6 +431,7 @@ def test_script_success_end_to_end_with_the_real_sanitiser(harness, drift_report
     assert KEY not in (harness.ctl / "argv").read_text()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("raw_name", ["in_sync"])
 def test_script_in_sync_sample(harness, drift_report_path, raw_name):
     assert_status(harness.run(drift_report_path, raw_data=raw(RAW_SYNC)), "none")
@@ -461,6 +464,7 @@ SCRIPT_CASES = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", sorted(SCRIPT_CASES))
 def test_script_reason_codes(harness, drift_report_path, name):
     kwargs, failure = SCRIPT_CASES[name]
@@ -475,6 +479,7 @@ def test_script_reason_codes(harness, drift_report_path, name):
         assert "synthetic breakdown failure" in result["stdout"]  # I5: log tail on failure only
 
 
+@pytest.mark.integration
 def test_script_directories_must_be_new_or_empty(harness, drift_report_path, tmp_path):
     stale = tmp_path / "stale_cost"
     stale.mkdir()
@@ -482,6 +487,7 @@ def test_script_directories_must_be_new_or_empty(harness, drift_report_path, tmp
     assert_status(harness.run(drift_report_path, COST_DIR=str(stale)), "usage")
 
 
+@pytest.mark.integration
 def test_script_cost_dir_inside_repository_and_missing_sanitiser(tmp_path, drift_report_path):
     # A copy of the scripts tree, so neither case touches the repository.
     tree = tmp_path / "tree" / "scripts"
@@ -672,6 +678,7 @@ def step_sim(tmp_path, drift_report_path, wf):
     return run, tmp_path
 
 
+@pytest.mark.integration
 def test_cost_step_executes_successfully(step_sim):
     run, tmp = step_sim
     proc, outputs, runner = run()
@@ -692,6 +699,7 @@ def oidc_seen(tmp: Path) -> str:
     return path.read_text() if path.exists() else ""
 
 
+@pytest.mark.integration
 def test_cost_step_without_injected_oidc_does_not_reexec(step_sim):
     run, tmp = step_sim
     proc, outputs, _ = run(inject_oidc=False)  # guard: no re-exec needed, no loop
@@ -699,6 +707,7 @@ def test_cost_step_without_injected_oidc_does_not_reexec(step_sim):
     assert oidc_seen(tmp) == ""
 
 
+@pytest.mark.integration
 def test_run20_mechanism_is_caught_by_the_runner_realistic_harness(step_sim, wf):
     """Regression for CI run #20: step-level blanking without the re-exec. Under the runner-realistic harness
     the script fails closed with oidc_token_present (step still exits 0); under the old harness, which took the
@@ -719,6 +728,7 @@ def test_run20_mechanism_is_caught_by_the_runner_realistic_harness(step_sim, wf)
     assert outputs == {"cost_status": "succeeded", "cost_failure": "none"}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("variant", ["checksum_mismatch", "pinned_hash_vs_crafted_tarball", "download_failure"])
 def test_cost_step_install_failures_exit_zero(step_sim, variant):
     run, _ = step_sim
@@ -730,6 +740,7 @@ def test_cost_step_install_failures_exit_zero(step_sim, variant):
     assert not (runner / "cost").exists()  # the script never ran
 
 
+@pytest.mark.integration
 def test_cost_step_script_failure_exits_zero(step_sim):
     run, _ = step_sim
     proc, outputs, _ = run(key="")
@@ -737,6 +748,7 @@ def test_cost_step_script_failure_exits_zero(step_sim):
     assert "::error::Cost estimate failed (script exit 1)" in proc.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("status,failure,upload,rc", [
     ("succeeded", "none", "success", 0), ("failed", "price_not_found", "skipped", 1), ("", "", "", 1),
     ("succeeded", "none", "failure", 1), ("succeeded", "none", "skipped", 1)])
@@ -746,6 +758,7 @@ def test_cost_job_gate(wf, tmp_path, status, failure, upload, rc):
     assert _run_block(gate, env, tmp_path).returncode == rc
 
 
+@pytest.mark.integration
 def test_cost_job_verify_and_totals_only_summary(wf, tmp_path, drift_report_path):
     rc, out = sanitize(tmp_path, RAW_SKU, drift_report_path)
     assert rc == 0
@@ -795,6 +808,7 @@ SANITISER_MUTANTS = {
 SANITISER_NO_OP = ('"""The input cannot be published (exit 1)."""', '"""The input cannot be published."""')
 
 
+@pytest.mark.mutation
 class TestSanitiserMutants:
     """Each mutant removes one safeguard from an in-process copy of the sanitiser (the repository
     file is never changed) and must change at least one scenario's outcome."""
@@ -880,6 +894,8 @@ SCRIPT_NO_OP = ("# No `set -e`: every exit status is captured and mapped explici
                 "# No `set -e`: exit statuses are captured and mapped explicitly.")
 
 
+@pytest.mark.mutation
+@pytest.mark.integration
 class TestScriptMutants:
     """Each mutant removes one safeguard from a temporary copy of infracost_analysis.sh (run next to
     the real sanitiser) and must change at least one scenario's outcome."""

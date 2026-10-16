@@ -315,6 +315,7 @@ def _closed_port() -> int:
         return sock.getsockname()[1]
 
 
+@pytest.mark.integration
 @requires_ai
 def test_invoke_llm_unreachable_endpoint_degrades():
     env = {**OPENAI_ENV, "OPENAI_BASE_URL": f"http://127.0.0.1:{_closed_port()}/v1",

@@ -265,6 +265,7 @@ def test_every_committed_real_plan_is_covered():
     assert sorted(REAL_EXPECTED) == sorted(p.name for p in REAL.iterdir() if (p / "plan.sanitized.json").exists())
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", sorted(REAL_EXPECTED))
 def test_counts_real_terraform_plans(runner, sentinel, name):
     plan_rc, expected = REAL_EXPECTED[name]
@@ -277,6 +278,7 @@ def test_counts_real_terraform_plans(runner, sentinel, name):
 # --------------------------------------------------------------------------- counts: synthetic and assumed
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name, expected", [
     ("importing_resource", counts(change=1) | {"import": 1}),
     ("moved_resource", counts(change=1) | {"moved": 1}),
@@ -287,6 +289,7 @@ def test_counts_synthetic_plans_with_assumed_exit_2(runner, sentinel, name, expe
     assert_success(proc, summary, sentinel, 2, expected)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("case, entries, outputs, plan_rc, expected", [
     ("create_before_destroy", [rc_entry(["create", "delete"])], {}, 2,
      counts(add=1, destroy=1, replace=1)),
@@ -351,18 +354,21 @@ def _rejections(s: str) -> dict:
 REJECTION_CASES = sorted(_rejections("x"))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("case", REJECTION_CASES)
 def test_invalid_plan_json_fails_closed(runner, sentinel, case):
     proc, summary, _ = runner.run(_rejections(sentinel)[case], plan_rc=2)
     assert_failure(proc, summary, sentinel, "plan_json_invalid")
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("raw", ["not json {", '{"a": 1}\n{"b": 2}\n', "[1, 2]", ""])
 def test_unparseable_show_output_fails_closed(runner, sentinel, raw):
     proc, summary, _ = runner.run(raw + sentinel if raw.startswith("not") else raw, plan_rc=2)
     assert_failure(proc, summary, sentinel, "plan_json_invalid")
 
 
+@pytest.mark.integration
 def test_jq_error_text_never_reaches_the_log(runner, sentinel):
     proc, summary, run_dir = runner.run(REAL / "external_drift" / "plan.sanitized.json", plan_rc=2,
                                         jq_fail_on="tfv")
@@ -370,6 +376,7 @@ def test_jq_error_text_never_reaches_the_log(runner, sentinel):
     assert sentinel in (run_dir / "auth-test" / "jq.log").read_text()  # runner-local only
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("plan_rc, name", [(0, "external_drift"), (2, "in_sync")])
 def test_exit_code_and_plan_must_agree(runner, sentinel, plan_rc, name):
     proc, summary, _ = runner.run(REAL / name / "plan.sanitized.json", plan_rc=plan_rc)
@@ -379,6 +386,7 @@ def test_exit_code_and_plan_must_agree(runner, sentinel, plan_rc, name):
 # --------------------------------------------------------------------------- fail closed: process
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("env, plan_rc, code", [
     ({"FAKE_INIT_RC": "1"}, 0, "init_failed"),
     ({"FAKE_VALIDATE_RC": "1"}, 0, "validate_failed"),
@@ -396,11 +404,13 @@ def test_process_failures_have_fixed_codes(runner, sentinel, env, plan_rc, code)
     assert_failure(proc, summary, sentinel, code)
 
 
+@pytest.mark.integration
 def test_missing_runner_temp_fails_closed(runner, sentinel):
     proc, summary, _ = runner.run(REAL / "in_sync" / "plan.sanitized.json", runner_temp=False)
     assert_failure(proc, summary, sentinel, "preflight_failed")
 
 
+@pytest.mark.integration
 def test_missing_jq_fails_closed(runner, sentinel, tmp_path):
     tools = tmp_path / "tools"  # what the script needs before its jq check, and no jq
     tools.mkdir()
@@ -410,12 +420,14 @@ def test_missing_jq_fails_closed(runner, sentinel, tmp_path):
     assert_failure(proc, summary, sentinel, "preflight_failed")
 
 
+@pytest.mark.integration
 def test_missing_var_file_fails_closed(runner, sentinel):
     (runner.tf_dir / "dev.tfvars").unlink()
     proc, summary, _ = runner.run(REAL / "in_sync" / "plan.sanitized.json")
     assert_failure(proc, summary, sentinel, "preflight_failed")
 
 
+@pytest.mark.integration
 def test_stale_log_directory_fails_closed(runner, sentinel, tmp_path):
     stale = tmp_path / "stale"
     (stale / "auth-test").mkdir(parents=True)
@@ -423,12 +435,14 @@ def test_stale_log_directory_fails_closed(runner, sentinel, tmp_path):
     assert_failure(proc, summary, sentinel, "preflight_failed")
 
 
+@pytest.mark.integration
 def test_interruption_ends_with_internal_error(runner, sentinel):
     proc, summary, _ = runner.run(REAL / "external_drift" / "plan.sanitized.json", plan_rc=2,
                                   env={"FAKE_PLAN_SIGNAL": "1"})
     assert_failure(proc, summary, sentinel, "internal_error")
 
 
+@pytest.mark.integration
 def test_inherited_xtrace_is_switched_off(runner, sentinel):
     proc, summary, _ = runner.run(REAL / "external_drift" / "plan.sanitized.json", plan_rc=2,
                                   env={"SHELLOPTS": "xtrace"})
@@ -437,6 +451,7 @@ def test_inherited_xtrace_is_switched_off(runner, sentinel):
     assert proc.stderr.strip() in ("", "+ set +x")  # only the switch-off itself is traced
 
 
+@pytest.mark.integration
 def test_terraform_is_called_read_only_with_the_contract_flags(runner, sentinel):
     proc, summary, run_dir = runner.run(REAL / "external_drift" / "plan.sanitized.json", plan_rc=2)
     assert proc.returncode == 0
@@ -452,6 +467,7 @@ def test_terraform_is_called_read_only_with_the_contract_flags(runner, sentinel)
     assert not any("apply" in c.split() for c in calls)
 
 
+@pytest.mark.integration
 def test_files_stay_runner_local(runner, sentinel):
     proc, summary, run_dir = runner.run(REAL / "external_drift" / "plan.sanitized.json", plan_rc=2)
     assert proc.returncode == 0
@@ -591,6 +607,7 @@ def _run_auth(tmp_path: Path, which: str, sentinel: str, *, actual=(SUB, TENANT)
 VERIFIED = "Azure OIDC context verified (subscription and tenant match the configured values; not printed)."
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["auth", "drift"])
 def test_auth_check_match_prints_one_fixed_line(tmp_path, sentinel, which):
     proc = _run_auth(tmp_path, which, sentinel, actual=(SUB, f"{TENANT}\n"),
@@ -602,6 +619,7 @@ def test_auth_check_match_prints_one_fixed_line(tmp_path, sentinel, which):
                      "account show --only-show-errors --query tenantId --output tsv"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["auth", "drift"])
 @pytest.mark.parametrize("case", ["subscription", "tenant"])
 def test_auth_check_mismatch_prints_no_value(tmp_path, sentinel, which, case):
@@ -613,6 +631,7 @@ def test_auth_check_mismatch_prints_no_value(tmp_path, sentinel, which, case):
     assert sentinel not in out and SUB not in out and TENANT not in out
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["auth", "drift"])
 def test_auth_check_unavailable_hides_az_error_text(tmp_path, sentinel, which):
     proc = _run_auth(tmp_path, which, sentinel, az_fail=True)
@@ -621,6 +640,7 @@ def test_auth_check_unavailable_hides_az_error_text(tmp_path, sentinel, which):
     assert sentinel not in proc.stdout + proc.stderr
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["auth", "drift"])
 def test_auth_check_empty_context_is_unavailable(tmp_path, sentinel, which):
     proc = _run_auth(tmp_path, which, sentinel, actual=(" ", TENANT))
@@ -628,6 +648,7 @@ def test_auth_check_empty_context_is_unavailable(tmp_path, sentinel, which):
     assert proc.stdout.splitlines() == ["::error::Azure auth check failed: failure_code=auth_context_unavailable"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["auth", "drift"])
 def test_auth_check_missing_configuration(tmp_path, sentinel, which):
     proc = _run_auth(tmp_path, which, sentinel, expected=("", TENANT))
@@ -636,6 +657,7 @@ def test_auth_check_missing_configuration(tmp_path, sentinel, which):
     assert not (tmp_path / "az_calls.log").exists()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("which", ["auth", "drift"])
 def test_auth_check_under_inherited_xtrace_prints_no_value(tmp_path, sentinel, which):
     proc = _run_auth(tmp_path, which, sentinel, actual=(f"{sentinel}-sub", TENANT), xtrace=True)

@@ -1,0 +1,21 @@
+# Test-tooling constraints (Task 12.1, Decision 3).
+#
+# The resolved dependency set of the `dev` extra (pytest, pytest-cov, coverage, jsonschema and
+# their closures), pinned with exact versions for reproducible installs. Resolved 2026-10-14 within
+# the pyproject.toml ranges (pytest>=8,<10; pytest-cov>=5; jsonschema>=4.23,<5); wheels checked for
+# CPython 3.12 on linux x86_64 (the tests workflow) and CPython 3.12/3.13 on macOS arm64.
+# Packages already pinned in ci/ai-constraints.txt or ci/azure-constraints.txt (packaging, and
+# typing_extensions below Python 3.13) are not repeated here: no duplicate pins. requirements.txt
+# applies all three files. Change these pins only through a reviewed update that re-resolves the set.
+
+attrs==26.1.0
+coverage==7.16.2
+iniconfig==2.3.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+pluggy==1.6.0
+pygments==2.21.0
+pytest==9.1.1
+pytest-cov==7.1.0
+referencing==0.37.0
+rpds-py==2026.9.1

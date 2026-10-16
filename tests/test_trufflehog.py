@@ -18,6 +18,8 @@ import subprocess
 import tempfile
 import unittest
 
+from tiers import integration
+
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -141,6 +143,7 @@ class GateHarness(unittest.TestCase):
             return [json.loads(line) for line in fh]
 
 
+@integration
 class GateTests(GateHarness):
     def assert_no_sentinel(self, result):
         self.assertNotIn(SENTINEL, result.stdout)
@@ -305,6 +308,7 @@ class StaticTests(unittest.TestCase):
         self.assertEqual(self.wf["permissions"], {"contents": "read"})
         self.assertEqual(sorted(self.wf["jobs"]), ["tflint", "trivy-config", "trufflehog"])
 
+    @integration
     def test_no_ignore_annotation_in_repository(self):
         tracked = subprocess.run(["git", "grep", "-l", "-I", "-F", IGNORE_ANNOTATION], cwd=ROOT,
                                  capture_output=True, text=True)

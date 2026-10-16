@@ -31,6 +31,8 @@ import types
 import unittest
 from unittest import mock
 
+from tiers import mutation
+
 TESTS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TESTS)
 
@@ -1371,6 +1373,7 @@ MUTANTS = {
 }
 
 
+@mutation
 class SafeguardMutationTests(_Base):
     """Each mutant removes one safeguard from an in-process copy of investigation.py (the
     repository file is never changed) and must change the result of a scenario."""

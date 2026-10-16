@@ -28,6 +28,8 @@ import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from urllib.parse import parse_qs, urlsplit
 
+from tiers import integration, mutation
+
 import yaml
 
 from drift_engine.classifier import evaluate
@@ -322,6 +324,9 @@ class GatingTests(_Base):
         self.assertEqual(ga.run(args_for(big), ENV, self.client_factory(fake)).codes, ["report_invalid"])
         with open(big, "wb") as fh:
             fh.write(b"{not json")
+        self.assertEqual(ga.run(args_for(big), ENV, self.client_factory(fake)).codes, ["report_invalid"])
+        with open(big, "wb") as fh:
+            fh.write(b"\xff\xfe{}")  # corrupted bytes, not UTF-8
         self.assertEqual(ga.run(args_for(big), ENV, self.client_factory(fake)).codes, ["report_invalid"])
         self.assertEqual(fake.requests, [])
 
@@ -1201,6 +1206,7 @@ class BoundaryTests(unittest.TestCase):
     FORBIDDEN = ("ai_engine", "drift_engine.activity_logs", "drift_engine.attribution", "azure", "openai",
                  "langchain", "langgraph", "github", "requests")
 
+    @integration
     def test_import_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = fixture_report("external_drift")
@@ -1381,6 +1387,7 @@ MUTANTS = {
 NO_OP = ("# --------------------------------------------------------------------------- run", "# run")
 
 
+@mutation
 class SafeguardMutationTests(_Base):
     """Each mutant removes one safeguard from an in-process copy of the script (the
     repository file is never changed) and must change at least one scenario's result."""

@@ -198,6 +198,7 @@ def _fixture(name: str) -> tuple[Path, Path]:
     return base / "plan.sanitized.json", base / "detection_run.json"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name, drift", [("external_drift", "true"), ("in_sync", "false"),
                                          ("external_deletion", "true")])
 def test_analyze_step_layout(wf, tmp_path, engine_shim, name, drift):
@@ -213,6 +214,7 @@ def test_analyze_step_layout(wf, tmp_path, engine_shim, name, drift):
     assert "/subscriptions/" not in (runner / "drift" / "drift_report.json").read_text()
 
 
+@pytest.mark.integration
 def test_analyze_projection_failure_is_unknown_and_uploads_nothing(wf, tmp_path, engine_shim):
     plan, manifest = _fixture("external_drift")
     doc = json.loads(manifest.read_text())
@@ -227,6 +229,7 @@ def test_analyze_projection_failure_is_unknown_and_uploads_nothing(wf, tmp_path,
     assert "erin@example.com" not in proc.stdout + proc.stderr
 
 
+@pytest.mark.integration
 def test_analyze_failed_evidence_is_unknown(wf, tmp_path, engine_shim):
     proc, outputs, _ = _analyze(wf, tmp_path, engine_shim, *_fixture("external_drift"), evidence="failure")
     assert proc.returncode != 0 and outputs["drift_detected"] == "unknown"
@@ -422,6 +425,7 @@ SCRIPTED = {
 }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("name", list(SCRIPTED))
 def test_outcome_mapping(harness, scenarios, name, api_server):
     key, spec, expected = SCRIPTED[name]
@@ -435,6 +439,7 @@ def test_outcome_mapping(harness, scenarios, name, api_server):
     assert not any(c["gh_token"] for c in calls)  # the token reaches only the anchor fetch
 
 
+@pytest.mark.integration
 def test_detail_codes_come_from_the_runner_only_evidence(harness, scenarios):
     evidence = json.dumps({"scopes": [{"error": {"code": "throttled"}}, {"error": {"code": "throttled"}},
                                       {"error": {"code": "authorization_failed"}}, {"error": None},
@@ -447,6 +452,7 @@ def test_detail_codes_come_from_the_runner_only_evidence(harness, scenarios):
     _assert_clean(proc, outputs, runner, True)
 
 
+@pytest.mark.integration
 def test_detail_codes_count_the_auth_reason(harness, scenarios):
     # Task 9B.5: the fixed auth_reason of authentication_failed scopes; anything else is ignored
     evidence = json.dumps({"scopes": [{"error": {"code": "authentication_failed", "http_status": None,
@@ -474,6 +480,7 @@ def test_script_auth_reason_allowlist_matches_the_engine():
     assert tuple(re.findall(r'"([a-z_]+)"', listed)) == AUTH_REASONS
 
 
+@pytest.mark.integration
 def test_timeout_is_bounded_in_the_script(harness, scenarios):
     proc, outputs, runner, _ = harness.run(scenarios["complete"], drift="false", mode={"rc": 0}, timeout_hit=True)
     assert (outputs["investigation_status"], outputs["investigation_failure"]) == ("failed", "timeout")
@@ -481,6 +488,7 @@ def test_timeout_is_bounded_in_the_script(harness, scenarios):
     _assert_clean(proc, outputs, runner, False)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("kwargs, failure", [
     ({"venv_fail": True}, "install_failed"),
     ({"pip_rc": 1}, "install_failed"),
@@ -494,6 +502,7 @@ def test_setup_failures_run_nothing(harness, scenarios, kwargs, failure):
     _assert_clean(proc, outputs, runner, False)
 
 
+@pytest.mark.integration
 def test_pinned_install_command(harness, scenarios):
     harness.run(scenarios["complete"], drift="false", mode={"rc": 0, "public": scenarios["complete"][4]})
     pip = (harness.ctrl / "pip_calls").read_text().split()
@@ -501,6 +510,7 @@ def test_pinned_install_command(harness, scenarios):
     assert pip[6] == str(AZURE_CONSTRAINTS) and pip[7] == f"{ROOT}[azure]"
 
 
+@pytest.mark.integration
 def test_stale_directories_are_refused(harness, scenarios):
     runner = harness.tmp / "runner1"
     (runner / "investigation").mkdir(parents=True)
@@ -521,6 +531,7 @@ def test_stale_directories_are_refused(harness, scenarios):
 # --------------------------------------------------------------------------- real investigate runs
 
 
+@pytest.mark.integration
 def test_no_drift_runs_the_real_investigation_without_azure_or_fetch(harness, scenarios, api_server):
     proc, outputs, runner, calls = harness.run(scenarios["no_drift"], drift="false", api=api_server.url)
     assert (outputs["investigation_status"], outputs["investigation_failure"],
@@ -539,6 +550,7 @@ def test_no_drift_runs_the_real_investigation_without_azure_or_fetch(harness, sc
     assert "outcome=complete resources=0" in proc.stdout
 
 
+@pytest.mark.integration
 def test_drifted_run_fetches_anchors_and_fails_bindably_without_azure(harness, scenarios, api_server, tmp_path):
     """Real investigate with three fetched candidates; no `az` on PATH -> credential_unavailable -> a failed but
     bindable investigation that is uploaded (decision 1)."""
@@ -557,6 +569,7 @@ def test_drifted_run_fetches_anchors_and_fails_bindably_without_azure(harness, s
     assert not api_server.storage_authorized  # the token never reached the storage redirect target
 
 
+@pytest.mark.integration
 def test_anchor_fetch_failure_fails_closed(harness, scenarios, api_server):
     api_server.fail_listing = True
     proc, outputs, runner, calls = harness.run(scenarios["complete"], api=api_server.url)
@@ -721,6 +734,7 @@ def test_archive_extraction_rules():
         fetch.extract_report(buffer.getvalue())
 
 
+@pytest.mark.integration
 def test_fetch_writes_candidates_and_skips_bad_artifacts(api_server, tmp_path):
     good = b'{"x": 1}'
     api_server.add_run(10, report=good, created="2026-10-04T00:00:00Z")
@@ -749,6 +763,7 @@ def fetch_max() -> int:
     return _load_fetch().MAX_ZIP_BYTES
 
 
+@pytest.mark.integration
 def test_fetch_retries_then_fails_closed(api_server, tmp_path, monkeypatch):
     fetch = _load_fetch()
     api_server.flaky = 2
@@ -764,6 +779,7 @@ def test_fetch_retries_then_fails_closed(api_server, tmp_path, monkeypatch):
     assert proc.returncode == 1 and proc.stdout.strip() == "anchor_fetch=failed reason=listing_failed"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("token, args, setup", [("", (), None), (TOKEN, ("--now", "garbage"), None),
                                                  (TOKEN, (), "nonempty")])
 def test_fetch_usage_errors(api_server, tmp_path, token, args, setup):
@@ -775,6 +791,7 @@ def test_fetch_usage_errors(api_server, tmp_path, token, args, setup):
     assert proc.returncode == 2 and api_server.requests == []
 
 
+@pytest.mark.integration
 def test_fetched_candidates_feed_the_anchor_trust_checks(api_server, tmp_path):
     """The fetch output is exactly what `investigate` reads (G9): a valid public in-sync report is accepted, an
     internal-format report and a missing report are report_invalid."""
@@ -814,6 +831,7 @@ def _require(wf, tmp_path, drift, status, upload, verify):
 
 
 # G18 (PROJECT_PLAN.md Phase 9B, amends decision 1): the four status cases, on drifted and no-drift runs.
+@pytest.mark.integration
 @pytest.mark.parametrize("drift, status, upload, verify, ok", [
     # succeeded
     ("true", "succeeded", "success", "success", True),
@@ -845,6 +863,7 @@ def test_require_investigation_success(wf, tmp_path, drift, status, upload, veri
         assert "::error::" in proc.stdout and "Drift result unaffected." in proc.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("status, upload, verify", [
     ("succeeded", "success", "success"), ("succeeded", "failure", "skipped"), ("succeeded", "success", "failure"),
     ("incomplete", "success", "success"), ("incomplete", "failure", "skipped"), ("incomplete", "success", "failure"),
@@ -857,6 +876,7 @@ def test_require_investigation_success_never_depends_on_drift_once_run(wf, tmp_p
     assert drifted.returncode == clean.returncode
 
 
+@pytest.mark.integration
 def test_summary_is_counts_only(wf, tmp_path, scenarios):
     (tmp_path / "drift-investigation").mkdir()
     (tmp_path / "drift-investigation" / "drift_investigation.json").write_text(scenarios["complete"][4])
@@ -874,6 +894,7 @@ def test_summary_is_counts_only(wf, tmp_path, scenarios):
     assert "| Status | `invalid` |" in summary
 
 
+@pytest.mark.integration
 def test_investigation_step_block_maps_a_script_crash(wf, tmp_path):
     repo = tmp_path / "repo"
     (repo / "scripts").mkdir(parents=True)
@@ -940,6 +961,7 @@ def _evidence(wf, tmp_path, *, rc=0, plan=None, manifest=None, touch_lock=False,
 
 
 # Plan exit 0/2 are valid evidence; drift is decided by the classification alone (exit 2 = pending changes).
+@pytest.mark.integration
 @pytest.mark.parametrize("name, plan_rc, drift", [
     ("in_sync", "0", "false"), ("converged_drift", "0", "true"),
     ("external_drift", "2", "true"), ("external_deletion", "2", "true"),
@@ -959,6 +981,7 @@ def test_plan_exit_0_and_2_are_valid_and_classification_decides_drift(wf, tmp_pa
     assert ("::warning::Drift detected" in proc.stdout) is (drift == "true")
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("case", ["plan_failed", "unusable_artifact_dir", "unexpected_plan_exit_code",
                                   "lock_modified", "non_dev_var_file"])
 def test_evidence_failures_fail_the_step_and_drift_is_unknown(wf, tmp_path, engine_shim, case):
@@ -988,6 +1011,7 @@ def test_evidence_failures_fail_the_step_and_drift_is_unknown(wf, tmp_path, engi
 
 # Task 12.1A (P4): the runner-local plan.log can hold planned attribute values; no failure
 # path of Generate Plan Evidence may print any of it (previously its last 50 lines were shown).
+@pytest.mark.integration
 @pytest.mark.parametrize("case", ["plan_failed", "unusable_artifact_dir", "unexpected_plan_exit_code",
                                   "lock_modified"])
 def test_evidence_failures_never_print_plan_log(wf, tmp_path, case):
@@ -1065,6 +1089,7 @@ def _run_summary(wf, tmp_path, drift, stage="success"):
     return proc, summary.read_text()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("drift", ["true", "false"])
 def test_run_summary_reports_drift_as_a_valid_result(wf, tmp_path, drift):
     proc, summary = _run_summary(wf, tmp_path, drift)

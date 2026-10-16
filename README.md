@@ -55,7 +55,9 @@ Remediation is planned, not built (Phase 11). See
 - **In progress: Phase 12 — Testing & Security Hardening.** Task 12.1A (Terraform plan and
   diagnostic log exposure hardening) is complete: commit `6d1aa86` on `main`, verified by a real
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
-  Tasks 12.1–12.3 have not started.
+  Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is implemented
+  and validated locally; its first CI run is pending until it is pushed. Tasks 12.2–12.3 have not
+  started.
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
   the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
@@ -78,7 +80,7 @@ Remediation is planned, not built (Phase 11). See
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1–12.3 not started) |
+| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 validated locally, first CI run pending; 12.2–12.3 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -292,10 +294,13 @@ each network inherits its resource group's name and location.
 ├── terraform-auth-test.yml       # OIDC authentication + terraform plan (plan-only)
 ├── drift-detection.yml           # Daily (02:00 UTC) + manual drift scan: preflight → plan & drift-engine analyze (+ unmanaged inventory, investigation, Infracost) → issues / cost / investigation / unmanaged / report (Phases 5, 8, 9B, 10)
 ├── security-scan.yml             # Static analysis on push/PR, no Azure access: TFLint (9.1), Trivy config (9.2), TruffleHog (9.3)
-└── ai-analysis.yml               # After each drift-detection run on main: no-LLM AI report artifact (9A.1)
+├── ai-analysis.yml               # After each drift-detection run on main: no-LLM AI report artifact (9A.1)
+└── tests.yml                     # pytest on push/PR, no Azure access: fast tier + full suite with coverage gate (12.1)
 
 ci/
-└── ai-constraints.txt            # Exact pins for the AI stack installed in CI (9A.1)
+├── ai-constraints.txt            # Exact pins for the AI stack installed in CI (9A.1)
+├── azure-constraints.txt         # Exact pins for the investigation's Azure SDK venv (9B.5)
+└── dev-constraints.txt           # Exact pins for the test tooling, applied by requirements.txt (12.1)
 
 terraform/
 ├── bootstrap/                    # Remote-state storage (local state)
@@ -352,6 +357,7 @@ tests/
 ├── fixtures/retail_prices/       # Real Azure Retail Prices API samples, Central India (Task 10.4)
 ├── corpora/, mutation/           # Guard/injection corpora and safeguard mutants (Task 6.7)
 ├── scenarios/                    # Azure CLI tag-drift inject / revert / runner (Task 3.6)
+├── tiers.py                      # `integration` / `mutation` markers usable without pytest (Task 12.1)
 └── test_*.py                     # Unit tests (see Testing)
 
 docs/
@@ -979,29 +985,60 @@ them. All engine rules are deterministic. None of this uses an LLM.
 ## 🧪 Testing & Validation
 
 ```bash
-# Full suite with the coverage gate (inside the dev virtual environment; fails below 85%)
+# Pinned dev environment: requirements.txt applies ci/ai-, ci/azure- and ci/dev-constraints.txt
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Full suite with the coverage gate (fails below 85% for src/drift_engine)
 pytest --cov=src/drift_engine tests/
 
-# Without installing anything: the Pydantic-dependent tests are skipped
+# Fast tier: every test without the `integration` or `mutation` marker (about 22 s)
+pytest -m "not integration and not mutation" tests/
+
+# Without installing anything: only the standard-library test modules run; the modules that
+# need pytest, Pydantic or PyYAML fail to import (25 of them at present)
 python3 -m unittest discover -s tests
 
 # Terraform format + validate (no Azure authentication)
 ./scripts/validate.sh
 ```
 
+**Test tiers (Task 12.1).** Two markers, registered in `pyproject.toml`, split the suite:
+`integration` (the test runs a subprocess, a bash workflow harness, git or a loopback server)
+and `mutation` (a mutation, fuzz or leak-scan loop over many variants). Files written for plain
+`unittest` take the markers from `tests/tiers.py`, so they still import without pytest. The full
+suite always runs every test; the tiers only decide what the fast job runs.
+
+**CI ([`tests.yml`](.github/workflows/tests.yml), Task 12.1).** On every push to `main`, every
+pull request and on manual dispatch, two jobs run on `ubuntu-24.04` with Python 3.12:
+- `fast`: the fast tier, with its runtime in the step summary (warning above the 60 s target);
+- `full`: every test, then the unchanged 85% gate on `src/drift_engine` and a report-only
+  coverage figure for `src/ai_engine`.
+
+The workflow has `contents: read` only: no Azure login, secrets or OIDC token. Its actions are
+pinned by full commit SHA (`actions/checkout` v6.1.0, `actions/setup-python` v6.3.0), the checkout
+keeps no credentials and nothing is cached. It installs through `requirements.txt`, so CI and a
+local environment get the same 66 pinned packages. The pinned set installs from wheels on CPython
+3.12 (Linux x86_64 and macOS arm64) and 3.13 (macOS arm64). On 3.14 the AI pin `tiktoken==0.11.0`
+has no wheel; everything else resolves.
+
 State after Task 4.7: **319 tests pass** with `pytest` (Python 3.13 and 3.14), with **99.87%**
 line and branch coverage of `src/drift_engine`. With plain `python3` and no installation, the
 same 319 run and 90 are skipped (they need Pydantic and PyYAML).
 
-Latest recorded full run (Task 9.2): **1137 passed, 679 skipped**, with the optional `ai` and
-`azure` extras not installed, and 96.05% coverage of `src/drift_engine` (the gate is 85%).
-Later phases added the test files below. Their per-task counts are in the
+Latest recorded full run (Task 12.1, 2026-10-14, a fresh `pip install -r requirements.txt`
+environment on CPython 3.12): **2,882 passed**, 0 skipped, in about 4 minutes; coverage
+**98.85%** of `src/drift_engine` (the gate is 85%) and 97.69% of `src/ai_engine` (reported, no
+gate). The fast tier is 2,542 of them in about 22 s. Phases after Task 4.7 added the test files
+below. Their per-task counts are in the
 [PROJECT_PLAN.md](PROJECT_PLAN.md) completion notes:
 - `test_ai_*.py`, `test_mutation_corpus.py`: Phase 6;
 - `test_activity_logs.py`, `test_attribution*.py`: Phase 7;
 - `test_github_*.py`: Phase 8;
 - `test_tflint_integration.py`, `test_trivy_config.py`: Phase 9;
-- `test_infracost.py`, `test_cost.py`, `test_ai_cost_impact.py`: Phase 10.
+- `test_infracost.py`, `test_cost.py`, `test_ai_cost_impact.py`: Phase 10;
+- `test_auth_test_workflow.py`, `test_generate_plan_json.py`: Task 12.1A;
+- `test_tests_workflow.py` (the tests workflow, dev constraints and tiers): Task 12.1.
 
 | Test file | Covers | Tests |
 |---|---|---|
@@ -1024,7 +1061,8 @@ tests/scenarios/run_rg_tag_drift_scenario.sh --apply   # inject tag drift, detec
 
 Its approved run on 2026-10-02 passed 18/18 checks (Task 3.6). Additional validation per
 task (golden-output comparisons, fuzzing, mutation checks) is recorded in the completion
-notes in [PROJECT_PLAN.md](PROJECT_PLAN.md). No CI workflow runs the Python tests yet.
+notes in [PROJECT_PLAN.md](PROJECT_PLAN.md). Since Task 12.1, `tests.yml` runs the Python tests
+in CI (above).
 
 ### Static Terraform linting (TFLint, Task 9.1)
 
@@ -1330,7 +1368,7 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1–12.3 not started |
+| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 validated locally, first CI run pending; 12.2–12.3 not started |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
 

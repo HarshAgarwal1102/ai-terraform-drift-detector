@@ -5,7 +5,8 @@
 # Resolved 2026-10-05 for CPython 3.12 on linux x86_64 (the plan-and-analyze job's runtime)
 # within the pyproject.toml ranges (pydantic>=2.11,<3; PyYAML>=6.0,<7; azure-mgmt-monitor>=7,<8;
 # azure-identity>=1.19,<2), aligned with ci/ai-constraints.txt for every shared package.
-# Local development keeps the pyproject.toml ranges. Change these pins only through a
+# requirements.txt applies them to local development too (Task 12.1, Decision 3); the package
+# itself keeps the pyproject.toml ranges. Change these pins only through a
 # reviewed update that re-resolves the whole set.
 
 annotated-types==0.8.0

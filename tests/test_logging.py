@@ -20,6 +20,8 @@ import tempfile
 import unittest
 import unittest.mock
 
+from tiers import integration
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -87,6 +89,7 @@ class TestSilentByDefault(LoggingTestCase):
             classifier.evaluate(os.path.join(self.tmp, "missing.json"))
         self.assertEqual(err.getvalue(), "")
 
+    @integration
     def test_classifier_script_output_unchanged(self):
         bundle = os.path.join(self.tmp, "bundle")
         os.makedirs(bundle)

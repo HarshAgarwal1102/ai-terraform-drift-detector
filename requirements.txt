@@ -5,4 +5,10 @@
 #
 #   python3 -m venv .venv && source .venv/bin/activate
 #   pip install -r requirements.txt
+#
+# The constraint files pin the complete resolved set (Task 12.1, Decision 3), so a
+# fresh environment installs exactly the versions the tests workflow uses.
+-c ci/ai-constraints.txt
+-c ci/azure-constraints.txt
+-c ci/dev-constraints.txt
 -e .[dev,ai,azure]

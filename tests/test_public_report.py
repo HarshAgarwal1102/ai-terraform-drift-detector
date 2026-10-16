@@ -23,6 +23,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tiers import mutation
+
 TESTS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TESTS)
 
@@ -357,6 +359,7 @@ class VerificationTests(_Base):
 
 
 class ScanTests(_Base):
+    @mutation
     def test_every_string_and_key_position_is_scanned(self):
         _, public, _ = self.project(self.ids_plan())
         positions = []
@@ -639,6 +642,7 @@ MUTANTS = {
 }
 
 
+@mutation
 class SafeguardMutationTests(_Base):
     def outcomes(self, module) -> tuple:
         ids, key = self.ids_plan(), self.tags_key_plan()

@@ -20,6 +20,8 @@ import subprocess
 import tempfile
 import unittest
 
+from tiers import integration
+
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -160,6 +162,7 @@ class GateHarness(unittest.TestCase):
             return [json.loads(line) for line in fh]
 
 
+@integration
 class GateTests(GateHarness):
     def assert_fails(self, result, message: str):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -389,6 +392,7 @@ class StaticTests(unittest.TestCase):
         for key in ("justification", "scope"):
             self.assertGreater(len(entry[key]), 40)
 
+    @integration
     def test_no_ignore_or_config_files_in_repository(self):
         tracked = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"], cwd=ROOT, capture_output=True,
                                  text=True, check=True).stdout.split()

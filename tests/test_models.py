@@ -23,6 +23,8 @@ import sys
 import tempfile
 import unittest
 
+from tiers import mutation
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
@@ -435,6 +437,7 @@ class TestSchemaAgreement(ModelTestCase):
             with self.subTest(name):
                 self.assertEqual(self.verdicts(_set(report(base), path, value)), (False, False))
 
+    @mutation
     def test_random_mutations_agree(self):
         # Floats with no fraction (1.0) are left out: JSON Schema counts them as integers,
         # the strict models do not. That is the one deliberate difference.
