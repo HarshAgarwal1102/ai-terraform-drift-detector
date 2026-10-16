@@ -1049,12 +1049,15 @@ class DeterminismTests(_Base):
 
 
 class CliTests(_Base):
-    def main(self, args, source=None, clock=None):
+    def main(self, args, source=None, clock=None, ci=False):
         clock = clock or FakeClock()
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(cli, "_activity_log_source", return_value=source or FakeSource()), \
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"} if ci else {}), \
+                mock.patch.object(cli, "_activity_log_source", return_value=source or FakeSource()), \
                 mock.patch.object(cli, "_now", clock), mock.patch.object(cli, "_sleep", clock.sleep), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            if not ci:  # hermetic: the GitHub Actions runner sets it, which turns on the stdout guard
+                os.environ.pop("GITHUB_ACTIONS", None)
             code = cli.main(args)
         return code, out.getvalue(), err.getvalue()
 
@@ -1326,6 +1329,12 @@ class CliErrorTests(CliTests):
         code, _, err = self.main(args, FakeSource({RG: [page(*self.log.tags(at_time(8)))]}))
         self.assertEqual(code, 73)
         self.assertIn("cannot write", err)
+
+    def test_standard_output_is_refused_in_github_actions(self):
+        args = self.args(self.plan(nsg_drift()))
+        code, out, err = self.main(args[:args.index("--output")], ci=True)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("needs --output FILE", err)
 
     def test_real_clock_and_sleep(self):
         self.assertIsNotNone(cli._now().utcoffset())

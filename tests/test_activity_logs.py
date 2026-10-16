@@ -1950,10 +1950,13 @@ class ImportBoundaryTests(_Base):
 
 @unittest.skipIf(al is None, "drift_engine is not installed (pip install -e '.[dev]')")
 class CliTests(_Base):
-    def main(self, args, source=None):
+    def main(self, args, source=None, ci=False):
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(cli, "_activity_log_source", return_value=source or FakeSource()), \
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"} if ci else {}), \
+                mock.patch.object(cli, "_activity_log_source", return_value=source or FakeSource()), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            if not ci:  # hermetic: the GitHub Actions runner sets it, which turns on the stdout guard
+                os.environ.pop("GITHUB_ACTIONS", None)
             code = cli.main(args)
         return code, out.getvalue(), err.getvalue()
 
@@ -1998,6 +2001,12 @@ class CliTests(_Base):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["window"]["lookback_days"], 7)
         self.assertTrue(out.endswith("}\n"))
+
+    def test_standard_output_is_refused_in_github_actions(self):
+        paths = bundle(self.tmp, "plan_evidence", "external_drift")
+        code, out, err = self.main(self.args(paths, output=False), NoCallSource(), ci=True)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("needs --output FILE", err)
 
     def test_incomplete_and_failed_exit_1(self):
         cases = [

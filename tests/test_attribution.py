@@ -1128,13 +1128,16 @@ class CliTests(_Base):
             logger.removeHandler(handler)
         logger.setLevel(logging.NOTSET)
 
-    def run_cli(self, scenario, *extra, output=True):
+    def run_cli(self, scenario, *extra, output=True, ci=False):
         args = ["attribute", "--report", scenario.report_path, "--evidence", scenario.evidence_path, *extra]
         self.output = os.path.join(self.tmp, "drift_attribution.json")
         if output:
             args += ["--output", self.output]
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"} if ci else {}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            if not ci:  # hermetic: the GitHub Actions runner sets it, which turns on the stdout guard
+                os.environ.pop("GITHUB_ACTIONS", None)
             code = cli.main(args)
         return code, out.getvalue(), err.getvalue()
 
@@ -1160,6 +1163,12 @@ class CliTests(_Base):
         scenario = self.scenario(None, self.W(8) + self.D(9))
         code, out, _ = self.run_cli(scenario, output=False)
         self.assertEqual((code, out), (0, at.render_attribution(scenario.attribute())))
+
+    def test_standard_output_is_refused_in_github_actions(self):
+        scenario = self.scenario(None, self.W(8) + self.D(9))
+        code, out, err = self.run_cli(scenario, output=False, ci=True)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("needs --output FILE", err)
 
     def test_incomplete_and_failed(self):
         cases = [

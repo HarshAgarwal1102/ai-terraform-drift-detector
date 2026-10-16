@@ -56,8 +56,8 @@ Remediation is planned, not built (Phase 11). See
   diagnostic log exposure hardening) is complete: commit `6d1aa86` on `main`, verified by a real
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
   Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is implemented
-  and validated locally; its first CI run is pending until it is pushed. Tasks 12.2–12.3 have not
-  started.
+  and pushed. Its first CI run failed on 3 tests that assumed they never run inside GitHub Actions;
+  the fix is validated locally and not yet pushed. Tasks 12.2–12.3 have not started.
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
   the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
@@ -80,7 +80,7 @@ Remediation is planned, not built (Phase 11). See
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 validated locally, first CI run pending; 12.2–12.3 not started) |
+| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 pushed, first CI run failed (fix pending push); 12.2–12.3 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -1368,7 +1368,7 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 validated locally, first CI run pending; 12.2–12.3 not started |
+| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 pushed, first CI run failed (fix pending push); 12.2–12.3 not started |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
 
