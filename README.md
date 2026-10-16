@@ -55,9 +55,9 @@ Remediation is planned, not built (Phase 11). See
 - **In progress: Phase 12 — Testing & Security Hardening.** Task 12.1A (Terraform plan and
   diagnostic log exposure hardening) is complete: commit `6d1aa86` on `main`, verified by a real
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
-  Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is implemented
-  and pushed. Its first CI run failed on 3 tests that assumed they never run inside GitHub Actions;
-  the fix is validated locally and not yet pushed. Tasks 12.2–12.3 have not started.
+  Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is complete:
+  `tests.yml` run #2 passed (fast tier 48 s; 2,885 tests; 98.85% `src/drift_engine` coverage).
+  Tasks 12.2–12.3 have not started.
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
   the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
@@ -80,7 +80,7 @@ Remediation is planned, not built (Phase 11). See
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 pushed, first CI run failed (fix pending push); 12.2–12.3 not started) |
+| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 complete (tests.yml run #2 passed); 12.2–12.3 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -1026,10 +1026,10 @@ State after Task 4.7: **319 tests pass** with `pytest` (Python 3.13 and 3.14), w
 line and branch coverage of `src/drift_engine`. With plain `python3` and no installation, the
 same 319 run and 90 are skipped (they need Pydantic and PyYAML).
 
-Latest recorded full run (Task 12.1, 2026-10-14, a fresh `pip install -r requirements.txt`
-environment on CPython 3.12): **2,882 passed**, 0 skipped, in about 4 minutes; coverage
-**98.85%** of `src/drift_engine` (the gate is 85%) and 97.69% of `src/ai_engine` (reported, no
-gate). The fast tier is 2,542 of them in about 22 s. Phases after Task 4.7 added the test files
+Latest recorded full run (Task 12.1, `tests.yml` run #2 on 2026-10-16, `ubuntu-24.04`, CPython
+3.12): **2,885 passed**, 0 failed, 0 skipped, in 224 s; coverage **98.85%** of `src/drift_engine`
+(the gate is 85%) and 97.69% of `src/ai_engine` (reported, no gate). The fast tier is 2,545 of
+them: 48 s on the runner, about 22 s locally. Phases after Task 4.7 added the test files
 below. Their per-task counts are in the
 [PROJECT_PLAN.md](PROJECT_PLAN.md) completion notes:
 - `test_ai_*.py`, `test_mutation_corpus.py`: Phase 6;
@@ -1368,7 +1368,7 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 pushed, first CI run failed (fix pending push); 12.2–12.3 not started |
+| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 complete (tests.yml run #2 passed); 12.2–12.3 not started |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
 
