@@ -124,8 +124,8 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 12 — Testing & Security Hardening (🟡 WORK IN PROGRESS since 2026-10-13; Task 12.1A 🟢 COMPLETED 2026-10-14; Task 12.1 🟢 COMPLETED 2026-10-16; Tasks 12.2–12.3 ⬜ NOT STARTED). Phase 11 is on hold (user decision 2026-10-13; see below).
-- **Current Active Task**: Task 12.2 — End-to-End Drift Scenario Test Matrix (⬜ NOT STARTED; dependency Task 12.1 🟢). Not started automatically (Execution Rule 8); it starts only on user approval. Task 12.1 — Comprehensive Unit & Integration Test Suite is 🟢 COMPLETED (2026-10-16; commits `5ddeb86` and `cd38ffe`, `tests.yml` run #2; see its completion notes). Task 12.1A (log-exposure hardening) is 🟢 COMPLETED (2026-10-14; commit `6d1aa86`, auth-test run #68). Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11).
+- **Current Active Phase**: Phase 12 — Testing & Security Hardening (🟡 WORK IN PROGRESS since 2026-10-13; Task 12.1A 🟢 COMPLETED 2026-10-14; Task 12.1 🟢 COMPLETED 2026-10-16; Task 12.2 🟢 COMPLETED 2026-10-16; Task 12.3 ⬜ NOT STARTED). Phase 11 is on hold (user decision 2026-10-13; see below).
+- **Current Active Task**: Task 12.3 — Least Privilege RBAC & Secret Hardening Audit (⬜ NOT STARTED; dependencies Task 12.2 🟢 and Task 9.3 🟢). Not started automatically (Execution Rule 8); it starts only on user approval. Task 12.2 — End-to-End Drift Scenario Test Matrix is 🟢 COMPLETED (2026-10-16; see its completion notes). Task 12.1 is 🟢 COMPLETED (2026-10-16; commits `5ddeb86` and `cd38ffe`, `tests.yml` run #2). Task 12.1A (log-exposure hardening) is 🟢 COMPLETED (2026-10-14; commit `6d1aa86`, auth-test run #68). Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11).
 - **On hold**: Phase 11 — Human-Approved Remediation (🔴 BLOCKED — on hold, user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on it. It resumes at Task 11.1 on user instruction. Task 11.1 — Safe Remediation Architecture & Controls stays 🟡 WORK IN PROGRESS (since 2026-10-11; dependency Task 8.3 🟢), paused. Documentation only: its specification is a draft under user review and not yet in the repository; not complete until the user approves it. No apply, Azure write, GitHub environment or RBAC change is part of it (Tasks 11.2–11.3 need separate user approval, Execution Rules 10 and 13).
 - **Last completed**: Phase 10 — FinOps / Cost Analysis (🟢 2026-10-11). Tasks 10.3 and 10.4 were verified together by the user-approved drift-detection dispatch #44 `38140497702` on commit `8ef89b6` and its AI analysis run #27 `38140599354` (see the Task 10.3 and 10.4 completion notes). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 10 of 14 (Phases 1–10). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
@@ -5178,7 +5178,7 @@ Phase 11 enforces strict human approval controls before applying any automated i
 ---
 
 ### PHASE 12 — Testing & Security Hardening
-**Status**: 🟡 WORK IN PROGRESS — Task 12.1A 🟢 COMPLETED (2026-10-14); Task 12.1 🟢 COMPLETED (2026-10-16); Tasks 12.2 and 12.3 ⬜ NOT STARTED.
+**Status**: 🟡 WORK IN PROGRESS — Task 12.1A 🟢 COMPLETED (2026-10-14); Task 12.1 🟢 COMPLETED (2026-10-16); Task 12.2 🟢 COMPLETED (2026-10-16); Task 12.3 ⬜ NOT STARTED.
 
 Phase 12 builds a comprehensive end-to-end test suite and performs security hardening across all platform components.
 
@@ -5321,18 +5321,29 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
     - Still open (not fixed by this task): the existing auth-test logs (spec §12.1, H1); no live `drift-detection.yml` run inspected for P3/P4; residuals R1–R8 above; the bootstrap and fmt steps of the auth-test still print Terraform's own output for the committed configuration (offline).
 
 #### Task 12.2 — End-to-End Drift Scenario Test Matrix
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED (2026-10-16) — 135-case matrix passes locally; its first `tests.yml` run follows the push
+- **Completed**: 2026-10-16
+- **Started**: 2026-10-16
 - **Objective**: Implement scenario matrix testing: No Drift, Single Resource Drift, Multi-Resource Drift, Security Drift, Cost Drift, AI Unavailable, Azure API Failure.
 - **Dependencies**: Task 12.1
 - **Files/Areas**: `tests/integration/`
+  - Implemented in `tests/integration/test_scenario_matrix.py` (new); notes in `README.md` and this plan. No product code, workflow, dependency or pin changed.
 - **Acceptance Criteria**:
-  - [ ] Matrix tests verify graceful degradation (e.g., if LLM API is down, system still produces deterministic drift report).
+  - [x] Matrix tests verify graceful degradation (e.g., if LLM API is down, system still produces deterministic drift report).
 - **Validation**:
-  - [ ] Run full scenario test matrix.
+  - [x] Run full scenario test matrix. *(2026-10-16: 135 passed in 7.8 s, also with `GITHUB_ACTIONS=true`; full suite 3,020 passed; see Completion Notes.)*
 - **Implementation Notes**:
   - Resiliency verification across all failure modes.
 - **Completion Notes**:
-  - None.
+  - **Design**: every case runs the real stages in-process, chained as the workflows chain them: `drift-engine analyze` (internal + public report) → `investigate` (Azure Activity Log) → `ai-analysis` (deterministic report; optional LLM) → GitHub issue publication (`scripts/github_automation.py`), plus the cost path (real `scripts/sanitize_infracost.py` on the committed Infracost v0.10.46 sample → `ai-analysis --cost`) and the unmanaged path (`inventory` → `unmanaged-cost` → `ai-analysis --unmanaged`). Manifests carry a GitHub run binding (`github-123-1`) as in CI. The test helpers clear `GITHUB_ACTIONS` and every LLM variable, so local and CI runs behave alike. No network: Azure, GitHub and Retail Prices are the existing scripted fakes; `tests/conftest.py` blocks non-loopback connections. Module tier: `integration` (it runs a loopback server), so the `tests.yml` full job runs it and the fast tier is unchanged.
+  - **Scenario rows (committed fixtures)**: No Drift `plan_evidence/in_sync` (0 drifted, INFO); Single Resource Drift `plan_evidence/external_drift` (1, LOW); Multi-Resource Drift `cost_config_plans/combined_security_cost_config` (2: NSG and storage account, CRITICAL; the only fixture with more than one drifted resource); Security Drift `security_plans/nsg_open_inbound` (1, CRITICAL, includes the prompt-injection description); Cost Drift `infracost/service_plan_sku_drift` (1, MEDIUM; 106.58 → 119.72, +13.14 USD/month). Healthy assertions: analyze outcome, `has_drift`, drifted count and highest severity; Azure queried only when there is drift; AI report written and verified by the CLI, LLM `not_attempted`, resources equal to the drifted set; exactly one issue per drifted resource (security issue body carries CRITICAL); the whole pipeline byte-deterministic on a second run.
+  - **AI Unavailable** (30 cases: 5 rows × 6 outages; real OpenAI client, `AI_LLM_MAX_RETRIES=0`, 1 s timeout): refused connection, HTTP 500, 503, 429, timeout and a reply that is not the JSON envelope. Exit 0; report written and verified; LLM status `failed` (`invalid_output` for the bad reply; `not_attempted` without drift); the deterministic sections (`report_version`, `provenance`, `summary`, `investigation`, `resources`, `remediation`, `cost`, `unmanaged`) identical to the no-LLM report; the LLM-routed `analysis` sections empty with the fixed reason `LLM call failed (<ExceptionType>)`; drift reports byte-identical; neither the API key nor a marker in the provider's error body appears in any output.
+  - **Azure API Failure** (87 cases): Activity Log, all 13 `QUERY_FAILURE_CODES` × 5 rows: with drift, `investigate` exits 1 with `INVESTIGATION FAILED [evidence_failed]` / "Drift detection results are unaffected", public investigation `failed`; the AI report still writes with investigation `failed` and identical summary, remediation, cost, analysis and per-resource drift facts; issue publication sends exactly the same requests; without drift Azure is never queried. Resource Manager inventory, all 14 `SCOPE_FAILURE_CODES`: inventory `failed` / `listing_failed` (exit 1), unmanaged cost `inventory_not_complete`, AI report records it, drift sections unchanged. Retail Prices, all 8 `API_FAILURES`: unmanaged cost exits 1 with the same code, AI report records it, drift sections unchanged. Drift reports byte-identical in every case.
+  - **Infracost unavailable** (5 cases): no Infracost result → cost `rejected` / `cost_input_incomplete` with an explicit message; summary, remediation, investigation and drift facts unchanged.
+  - **Mutation check** (scratch copies, not committed): 7 of 7 injected product defects caught: LLM failure raising instead of degrading; investigation failure exiting 0; the AI CLI rejecting a failed investigation; a missing Infracost result crashing it; provider error text leaking into the report (caught only after the error-body marker and exact-reason checks were added); a stage touching the drift report; collapsed pricing failure codes.
+  - **Results (2026-10-16, macOS arm64, CPython 3.13.12, pinned `requirements.txt` venv)**: matrix 135 passed in 7.8 s (8.2 s with `GITHUB_ACTIONS=true`); full suite **3,020 passed** (2,885 + 135), 0 failed, 0 skipped in 252.6 s; coverage gate passed, `src/drift_engine` 98.85%, `src/ai_engine` 97.69% (unchanged: the matrix exercises paths the unit tests already cover); fast tier unchanged (2,545); `--strict-markers` collection 3,020; dummy credentials follow the repository's existing `sk-test-not-real` form (no secret-shaped strings).
+  - **Not covered (outside this task)**: a GitHub API outage during issue publication (covered by Task 8.1/8.3 unit tests, not repeated here); the `ai` extra not installed (an explicit usage error by design, not a degradation); live Azure, which the matrix never touches.
+  - **Follow-up (not an acceptance criterion)**: push, then confirm the matrix in the `tests.yml` full job on `ubuntu-24.04` / Python 3.12.
 
 #### Task 12.3 — Least Privilege RBAC & Secret Hardening Audit
 - **Status**: ⬜ NOT STARTED

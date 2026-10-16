@@ -57,7 +57,8 @@ Remediation is planned, not built (Phase 11). See
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
   Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is complete:
   `tests.yml` run #2 passed (fast tier 48 s; 2,885 tests; 98.85% `src/drift_engine` coverage).
-  Tasks 12.2–12.3 have not started.
+  Task 12.2 (end-to-end scenario matrix with failure injection, 135 cases) is complete and passes
+  locally; its first CI run follows the next push. Task 12.3 has not started.
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
   the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
@@ -80,7 +81,7 @@ Remediation is planned, not built (Phase 11). See
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 complete (tests.yml run #2 passed); 12.2–12.3 not started) |
+| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 complete (tests.yml run #2 passed); 12.2 complete (passes locally, first CI run pending); 12.3 not started) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -357,6 +358,7 @@ tests/
 ├── fixtures/retail_prices/       # Real Azure Retail Prices API samples, Central India (Task 10.4)
 ├── corpora/, mutation/           # Guard/injection corpora and safeguard mutants (Task 6.7)
 ├── scenarios/                    # Azure CLI tag-drift inject / revert / runner (Task 3.6)
+├── integration/                  # End-to-end scenario matrix with failure injection (Task 12.2)
 ├── tiers.py                      # `integration` / `mutation` markers usable without pytest (Task 12.1)
 └── test_*.py                     # Unit tests (see Testing)
 
@@ -995,6 +997,9 @@ pytest --cov=src/drift_engine tests/
 # Fast tier: every test without the `integration` or `mutation` marker (about 22 s)
 pytest -m "not integration and not mutation" tests/
 
+# End-to-end scenario matrix with failure injection (Task 12.2; about 8 s)
+pytest tests/integration/
+
 # Without installing anything: only the standard-library test modules run; the modules that
 # need pytest, Pydantic or PyYAML fail to import (25 of them at present)
 python3 -m unittest discover -s tests
@@ -1022,6 +1027,23 @@ local environment get the same 66 pinned packages. The pinned set installs from 
 3.12 (Linux x86_64 and macOS arm64) and 3.13 (macOS arm64). On 3.14 the AI pin `tiktoken==0.11.0`
 has no wheel; everything else resolves.
 
+**Scenario matrix ([`tests/integration/test_scenario_matrix.py`](tests/integration/test_scenario_matrix.py),
+Task 12.2).** Five drift scenarios built from the committed fixtures (no drift, single-resource,
+multi-resource, security and cost drift) run through the real stages in process: `drift-engine analyze`,
+`investigate`, `inventory` / `unmanaged-cost`, the Infracost sanitizer, `ai-analysis` and GitHub issue
+publication. Each dependency is then broken in turn:
+- the LLM API (refused connection, HTTP 500/503/429, timeout, a reply that is not the JSON envelope; real
+  OpenAI client against a loopback server);
+- the Azure Activity Log (all 13 query failure codes), Resource Manager inventory (all 14 codes) and Retail
+  Prices API (all 8 codes);
+- Infracost (no result).
+
+Each failure must be reported with a fixed code and no provider text. The drift reports must stay byte for
+byte the same, and every stage that does not need the failed dependency must still produce its normal,
+verified output. With the LLM down, for example, the AI report's deterministic sections are identical to the
+no-LLM report. No test reaches the network: Azure, GitHub and pricing are fakes, and the LLM outages use
+loopback only. The matrix is in the `integration` tier, so CI's full job runs it.
+
 State after Task 4.7: **319 tests pass** with `pytest` (Python 3.13 and 3.14), with **99.87%**
 line and branch coverage of `src/drift_engine`. With plain `python3` and no installation, the
 same 319 run and 90 are skipped (they need Pydantic and PyYAML).
@@ -1038,7 +1060,8 @@ below. Their per-task counts are in the
 - `test_tflint_integration.py`, `test_trivy_config.py`: Phase 9;
 - `test_infracost.py`, `test_cost.py`, `test_ai_cost_impact.py`: Phase 10;
 - `test_auth_test_workflow.py`, `test_generate_plan_json.py`: Task 12.1A;
-- `test_tests_workflow.py` (the tests workflow, dev constraints and tiers): Task 12.1.
+- `test_tests_workflow.py` (the tests workflow, dev constraints and tiers): Task 12.1;
+- `integration/test_scenario_matrix.py` (scenario matrix, 135 cases): Task 12.2.
 
 | Test file | Covers | Tests |
 |---|---|---|
@@ -1368,7 +1391,7 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 complete (tests.yml run #2 passed); 12.2–12.3 not started |
+| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 complete (tests.yml run #2 passed); 12.2 complete (passes locally, first CI run pending); 12.3 not started |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
 
