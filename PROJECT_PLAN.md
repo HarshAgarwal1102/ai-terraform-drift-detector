@@ -124,8 +124,8 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 12 — Testing & Security Hardening (🟡 WORK IN PROGRESS since 2026-10-13; Task 12.1A 🟢 COMPLETED 2026-10-14; Task 12.1 🟢 COMPLETED 2026-10-16; Task 12.2 🟢 COMPLETED 2026-10-16; Task 12.3 ⬜ NOT STARTED). Phase 11 is on hold (user decision 2026-10-13; see below).
-- **Current Active Task**: Task 12.3 — Least Privilege RBAC & Secret Hardening Audit (⬜ NOT STARTED; dependencies Task 12.2 🟢 and Task 9.3 🟢). Not started automatically (Execution Rule 8); it starts only on user approval. Task 12.2 — End-to-End Drift Scenario Test Matrix is 🟢 COMPLETED (2026-10-16; see its completion notes). Task 12.1 is 🟢 COMPLETED (2026-10-16; commits `5ddeb86` and `cd38ffe`, `tests.yml` run #2). Task 12.1A (log-exposure hardening) is 🟢 COMPLETED (2026-10-14; commit `6d1aa86`, auth-test run #68). Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11).
+- **Current Active Phase**: Phase 12 — Testing & Security Hardening (🟡 WORK IN PROGRESS since 2026-10-13; all tasks complete: Task 12.1A 🟢 2026-10-14, Tasks 12.1, 12.2 and 12.3 🟢 2026-10-16; the scope deferred into Phase 12 is still open, see below). Phase 11 is on hold (user decision 2026-10-13; see below).
+- **Current Active Task**: none selected. Every Phase 12 task is 🟢. The scope deferred into Phase 12 (Super-Linter from Task 9.4; SHA pinning and other hardening of the existing workflows; the historical auth-test logs, H1) has no task yet and needs a user scheduling decision, as recorded under Phase 12. Phase 11 is on hold, and Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11). Last completed: Task 12.3 — Least Privilege RBAC & Secret Hardening Audit (🟢 2026-10-16; see its completion notes). Task 12.2 is 🟢 (2026-10-16; commit `dd84aaa`, `tests.yml` run #4); Task 12.1 is 🟢 (2026-10-16; commits `5ddeb86` and `cd38ffe`, `tests.yml` run #2); Task 12.1A is 🟢 (2026-10-14; commit `6d1aa86`, auth-test run #68).
 - **On hold**: Phase 11 — Human-Approved Remediation (🔴 BLOCKED — on hold, user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on it. It resumes at Task 11.1 on user instruction. Task 11.1 — Safe Remediation Architecture & Controls stays 🟡 WORK IN PROGRESS (since 2026-10-11; dependency Task 8.3 🟢), paused. Documentation only: its specification is a draft under user review and not yet in the repository; not complete until the user approves it. No apply, Azure write, GitHub environment or RBAC change is part of it (Tasks 11.2–11.3 need separate user approval, Execution Rules 10 and 13).
 - **Last completed**: Phase 10 — FinOps / Cost Analysis (🟢 2026-10-11). Tasks 10.3 and 10.4 were verified together by the user-approved drift-detection dispatch #44 `38140497702` on commit `8ef89b6` and its AI analysis run #27 `38140599354` (see the Task 10.3 and 10.4 completion notes). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 10 of 14 (Phases 1–10). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
@@ -5178,7 +5178,7 @@ Phase 11 enforces strict human approval controls before applying any automated i
 ---
 
 ### PHASE 12 — Testing & Security Hardening
-**Status**: 🟡 WORK IN PROGRESS — Task 12.1A 🟢 COMPLETED (2026-10-14); Task 12.1 🟢 COMPLETED (2026-10-16); Task 12.2 🟢 COMPLETED (2026-10-16); Task 12.3 ⬜ NOT STARTED.
+**Status**: 🟡 WORK IN PROGRESS — Task 12.1A 🟢 COMPLETED (2026-10-14); Task 12.1 🟢 COMPLETED (2026-10-16); Task 12.2 🟢 COMPLETED (2026-10-16); Task 12.3 🟢 COMPLETED (2026-10-16). All tasks are complete; the deferred scope recorded below is still open.
 
 Phase 12 builds a comprehensive end-to-end test suite and performs security hardening across all platform components.
 
@@ -5343,24 +5343,37 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
   - **Mutation check** (scratch copies, not committed): 7 of 7 injected product defects caught: LLM failure raising instead of degrading; investigation failure exiting 0; the AI CLI rejecting a failed investigation; a missing Infracost result crashing it; provider error text leaking into the report (caught only after the error-body marker and exact-reason checks were added); a stage touching the drift report; collapsed pricing failure codes.
   - **Results (2026-10-16, macOS arm64, CPython 3.13.12, pinned `requirements.txt` venv)**: matrix 135 passed in 7.8 s (8.2 s with `GITHUB_ACTIONS=true`); full suite **3,020 passed** (2,885 + 135), 0 failed, 0 skipped in 252.6 s; coverage gate passed, `src/drift_engine` 98.85%, `src/ai_engine` 97.69% (unchanged: the matrix exercises paths the unit tests already cover); fast tier unchanged (2,545); `--strict-markers` collection 3,020; dummy credentials follow the repository's existing `sk-test-not-real` form (no secret-shaped strings).
   - **Not covered (outside this task)**: a GitHub API outage during issue publication (covered by Task 8.1/8.3 unit tests, not repeated here); the `ai` extra not installed (an explicit usage error by design, not a degradation); live Azure, which the matrix never touches.
-  - **Follow-up (not an acceptance criterion)**: push, then confirm the matrix in the `tests.yml` full job on `ubuntu-24.04` / Python 3.12.
+  - **CI (2026-10-16, follow-up, not an acceptance criterion)**: commit `dd84aaa` pushed on user approval; `tests.yml` run #4 succeeded (fast tier 45 s; full suite step 364 s and the coverage gate step passed), with Security Scan #36 and Terraform Auth & Validation #72 also successful. The per-test count in the log was not read: logs need a signed-in GitHub session.
 
 #### Task 12.3 — Least Privilege RBAC & Secret Hardening Audit
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED (2026-10-16) — acceptance criteria met; the CI identity verified against the documented least-privilege design
+- **Completed**: 2026-10-16
+- **Started**: 2026-10-16
 - **Objective**: Conduct security audit of Azure Service Principals, GitHub Secrets, OIDC permissions, and API key handling.
 - **Dependencies**: Task 12.2, Task 9.3
 - **Dependency note**: Task 9.3 added 2026-10-03 (Phase 9 re-evaluation): this task's validation runs TruffleHog, which Task 9.3 integrates.
-- **Files/Areas**: `docs/security-audit.md`
+- **Files/Areas**: `docs/security-audit.md`. The detailed audit report is kept private (owner decision, 2026-10-17) and is not in the repository; this record is the public summary.
 - **Acceptance Criteria**:
-  - [ ] Audit confirms no hardcoded secrets exist in repository.
-  - [ ] OIDC claims restricted to specific GitHub repo and branch.
+  - [x] Audit confirms no hardcoded secrets exist in repository. *(TruffleHog: 0 findings on the full history and the working tree; manual checks.)*
+  - [x] OIDC claims restricted to specific GitHub repo and branch. *(One federated credential with the exact immutable-ID subject for `refs/heads/main`; default subject template.)*
 - **Validation**:
-  - [ ] Run TruffleHog + manual security checklist.
+  - [x] Run TruffleHog + manual security checklist. *(2026-10-16; 14-item checklist in the private report.)*
 - **Implementation Notes**:
   - Production-grade security audit.
 - **Completion Notes**:
-  - None.
-
+  - **Method (2026-10-16, read-only)**:
+    - Azure and Entra ID through the existing Azure CLI session: app, service principal, federated credentials, credential metadata, role assignments (`--all --include-inherited`), Graph memberships and grants.
+    - GitHub through its anonymous public REST API.
+    - Workflows and code statically.
+    - Output was redacted; no secret value was read. The audit changed nothing in Azure, Entra ID, GitHub settings, secrets or workflows.
+  - **TruffleHog 3.97.9**: the official release, checksum-verified (the release checksum list contains the repository's pinned Linux SHA-256). `scripts/run_trufflehog.sh` on the full history: **0 findings** (78 commits, 4 refs). The working tree: **0 findings**.
+  - **Verified end state (2026-10-16, re-checked 2026-10-17)**:
+    - **OIDC**: exactly one federated credential (`github-main-branch`, issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`, subject `repo:HarshAgarwal1102@117922914/ai-terraform-drift-detector@1400148970:ref:refs/heads/main`, no claims expression). It matches the repository's IDs and GitHub's default immutable subject template.
+    - **RBAC**: exactly the 2 documented assignments (`Reader` on the subscription; `Storage Blob Data Contributor` on the `tfstate` container). Confirmed by the Azure CLI and the Resource Manager API; no inherited assignments.
+    - **Credentials and permissions**: no client secret or certificate on the app or the service principal; no API permissions, grants or memberships.
+  - **Passed**: no hardcoded credentials; tenant, client and object IDs absent from the repository; no Terraform state ever committed; no `pull_request_target`; API keys environment-only, scoped and never logged.
+  - **Remediated during the task**: the audit found deviations from the documented design on the CI identity: additional role assignments and a client secret, added outside this repository. They were removed in Azure outside this audit, and two read-only re-audits (2026-10-16) verified the removal.
+  - **Follow-up**: the remaining hardening recommendations are tracked in the private report. Those that change existing workflows need a separately approved task (WF-1).
 ---
 
 ### PHASE 13 — Professional Dashboard

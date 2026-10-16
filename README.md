@@ -57,8 +57,11 @@ Remediation is planned, not built (Phase 11). See
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
   Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is complete:
   `tests.yml` run #2 passed (fast tier 48 s; 2,885 tests; 98.85% `src/drift_engine` coverage).
-  Task 12.2 (end-to-end scenario matrix with failure injection, 135 cases) is complete and passes
-  locally; its first CI run follows the next push. Task 12.3 has not started.
+  Task 12.2 (end-to-end scenario matrix with failure injection, 135 cases) is complete; `tests.yml`
+  run #4 passed on its commit. Task 12.3 (least-privilege and secret audit) is complete: the
+  repository has no hardcoded secrets, the OIDC trust is limited to this repository's `main` branch,
+  and the CI identity has only its two documented roles and no client secret (verified 2026-10-16).
+  The detailed audit report is kept private.
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
   the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
@@ -81,7 +84,7 @@ Remediation is planned, not built (Phase 11). See
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 complete (tests.yml run #2 passed); 12.2 complete (passes locally, first CI run pending); 12.3 not started) |
+| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 complete (tests.yml run #2 passed); 12.2 complete (tests.yml run #4 passed); 12.3 complete (least-privilege and secret audit)) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -1357,11 +1360,11 @@ registration holds zero credentials.
 |---|---|
 | Backend Isolation | State storage is separated from app storage. |
 | No Committed Secrets | Credentials, tokens, state files and plan artifacts are gitignored; drift evidence is written outside the repository. |
-| OIDC Authentication | Workload Identity replaces static Azure client secrets in GitHub Actions. |
+| OIDC Authentication | Workload Identity replaces static Azure client secrets in GitHub Actions. The single federated credential accepts only this repository's `main` branch, and the identity has no client secret or certificate (both re-verified 2026-10-16). |
 | State Security | State blob versioning enabled; container set to private. |
-| Least Privilege | Exactly two RBAC assignments on the CI identity: `Reader` (subscription) and `Storage Blob Data Contributor` (`tfstate` container). No `Contributor`, `Owner`, or `User Access Administrator`. |
-| Plan-Only CI | GitHub Actions has **no autonomous `terraform apply` capability**, enforced by RBAC rather than convention — the identity holds no write actions. Any future remediation/apply capability would require explicit human approval. |
-| No Storage Account Keys | `listkeys` is denied to the CI identity, so state access uses Entra ID on the data plane (`ARM_USE_AZUREAD=true`) instead of account keys. |
+| Least Privilege | Exactly two RBAC assignments on the CI identity: `Reader` (subscription) and `Storage Blob Data Contributor` (`tfstate` container). No `Contributor`, `Owner`, or `User Access Administrator`. Re-verified by the Task 12.3 audit (2026-10-16). |
+| Plan-Only CI | GitHub Actions has **no autonomous `terraform apply` capability**, enforced by RBAC rather than convention: the identity holds no control-plane write actions (`*/read` only; re-verified 2026-10-16). Its data-plane write is limited to the `tfstate` container. Any future remediation/apply capability requires explicit human approval. |
+| No Storage Account Keys | `listkeys` is denied to the CI identity (re-verified 2026-10-16), so state access uses Entra ID on the data plane (`ARM_USE_AZUREAD=true`) instead of account keys. |
 | Sensitive Values Redacted | Values Terraform marks sensitive are never emitted in drift reports. |
 | Static Security Scanning | TFLint and Trivy config check `terraform/` on every push and PR (`security-scan.yml`, `contents: read`, no Azure, no OIDC). HIGH/CRITICAL Trivy findings fail the job except one documented, expiring risk acceptance (AZU-0012, until 2027-03-31). |
 | Secret Scanning | TruffleHog scans the full Git history on every push and PR. Every result fails the job; secret values are never printed or uploaded; candidates are never sent to provider APIs (Task 9.3). |
@@ -1391,7 +1394,7 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 complete (tests.yml run #2 passed); 12.2 complete (passes locally, first CI run pending); 12.3 not started |
+| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 complete (tests.yml run #2 passed); 12.2 complete (tests.yml run #4 passed); 12.3 complete (least-privilege and secret audit) |
 | 13 | Professional dashboard | ⬜ Planned |
 | 14 | Final documentation / demo | ⬜ Planned |
 
