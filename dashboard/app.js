@@ -13,7 +13,7 @@
   const REFRESH_MS = 60000;
   const state = { token: null, summary: null, drifts: [], remediations: [], unmanaged: null, callerAccess: true, run: "",
     historyQuery: "",
-    filters: { severity: "", type: "", environment: "" }, timer: null };
+    filters: { severity: "", type: "", environment: "" }, timer: null, loads: 0 };
   const $ = (id) => document.getElementById(id);
 
   class ApiError extends Error {
@@ -66,7 +66,9 @@
   }
 
   async function load() {
+    const loadId = ++state.loads;  // a retried load() owns the busy flag until it finishes
     setStatus("Loading…");
+    $("refresh").setAttribute("aria-busy", "true");
     try {
       const [summary, drifts, remediations, unmanaged] = await Promise.all([api("/api/summary"), loadDrifts(),
         api("/api/remediations" + runQuery("?")), api("/api/unmanaged" + runQuery("?"))]);
@@ -81,6 +83,8 @@
       if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
       if (err.status === 404 && state.run) { state.run = ""; return load(); }  // the run is gone
       setStatus(R.errorMessage(err.code, window.location.origin), true);
+    } finally {
+      if (loadId === state.loads) $("refresh").removeAttribute("aria-busy");
     }
   }
 
@@ -194,11 +198,21 @@
     });
     $("modal-close").addEventListener("click", () => $("modal").close());
     $("modal").addEventListener("click", (event) => { if (event.target === $("modal")) $("modal").close(); });
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+    const isDark = () => {
+      const chosen = document.documentElement.dataset.theme;
+      return chosen ? chosen === "dark" : systemDark.matches;
+    };
+    const syncThemeSwitch = () => {
+      const dark = isDark();
+      $("theme").setAttribute("aria-checked", String(dark));
+      $("theme-state").textContent = dark ? "ON" : "OFF";
+    };
     $("theme").addEventListener("click", () => {
-      const root = document.documentElement;
-      const dark = root.dataset.theme ? root.dataset.theme === "dark"
-        : window.matchMedia("(prefers-color-scheme: dark)").matches;
-      root.dataset.theme = dark ? "light" : "dark";
+      document.documentElement.dataset.theme = isDark() ? "light" : "dark";
+      syncThemeSwitch();
     });
+    systemDark.addEventListener("change", syncThemeSwitch);
+    syncThemeSwitch();
   });
 })();

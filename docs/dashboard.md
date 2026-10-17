@@ -199,7 +199,7 @@ goes to `/api/*` with the bearer token.
 - **Security**: a strict Content-Security-Policy (`default-src 'none'`; scripts, styles and
   `connect-src` limited to the same origin; no inline code; no framing). Every value from the API
   is HTML-escaped before it is rendered.
-- **Themes**: follows the system light/dark setting; the Theme button switches for the session.
+- **Themes**: follows the system light/dark setting; the Dark mode rocker switch in the top bar overrides it for the session.
 
 Component tests: `node --test dashboard/render.test.js` (also run by `tests/test_dashboard_ui.py`).
 
