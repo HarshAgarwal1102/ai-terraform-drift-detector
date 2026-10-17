@@ -1,0 +1,129 @@
+{
+  "anchors": {
+    "accepted": 15,
+    "examined": 38,
+    "rejected": {
+      "report_invalid": 23
+    }
+  },
+  "binding": {
+    "drift_report_sha256": "64ba26717406d8633d8d62d4bc94530b27127d9939f4f39acd0e285df9240f72",
+    "evidence_outcome": "complete",
+    "observation": {
+      "finished_at": "2026-10-11T03:40:55.000000Z",
+      "started_at": "2026-10-11T03:40:37.000000Z"
+    },
+    "plan_timestamp": "2026-10-11T03:40:47Z",
+    "run_id": "github-38109121618-1"
+  },
+  "completeness": {
+    "max_ingestion_delay_ms": 119689,
+    "not_before": "2026-10-11T03:50:55.000000Z",
+    "polls": 1,
+    "queried_at": "2026-10-11T03:50:55.000106Z",
+    "settled": true
+  },
+  "exposure": {
+    "caller_identity": "withheld",
+    "correlation_id": "withheld",
+    "event_id": "withheld",
+    "resource_id": "withheld",
+    "who_path": "local_only"
+  },
+  "failure": null,
+  "outcome": "complete",
+  "public_version": "1",
+  "resources": [
+    {
+      "actor_attribution": {
+        "claim": null,
+        "rule": null,
+        "status": "not_confirmed"
+      },
+      "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+      "automated_events": [],
+      "decisive_operation": null,
+      "deletion_rule": null,
+      "descendant_events": 0,
+      "descendant_operations": {},
+      "drift_action": "update",
+      "operations": [
+        {
+          "attached_events": 0,
+          "available_at": "2026-10-11T02:29:00.000000Z",
+          "caller_status": "recorded",
+          "caller_type": "user",
+          "capable_areas": [
+            "tags"
+          ],
+          "client_app": "azure_portal",
+          "end": "2026-10-11T02:27:03.028847Z",
+          "in_window": true,
+          "op_id": "op-1",
+          "operation_name": "Microsoft.Resources/tags/write",
+          "outcome": "successful",
+          "pipeline_identity": false,
+          "relations": [
+            "exact",
+            "extension"
+          ],
+          "role": "capable",
+          "start": "2026-10-11T02:27:00.310062Z",
+          "timing": "before_observation"
+        },
+        {
+          "attached_events": 0,
+          "available_at": "2026-10-11T03:36:07.000000Z",
+          "caller_status": "recorded",
+          "caller_type": "user",
+          "capable_areas": [
+            "tags"
+          ],
+          "client_app": "azure_portal",
+          "end": "2026-10-11T03:34:32.794486Z",
+          "in_window": true,
+          "op_id": "op-2",
+          "operation_name": "Microsoft.Resources/tags/write",
+          "outcome": "successful",
+          "pipeline_identity": false,
+          "relations": [
+            "exact",
+            "extension"
+          ],
+          "role": "capable",
+          "start": "2026-10-11T03:34:30.341314Z",
+          "timing": "before_observation"
+        }
+      ],
+      "property_link": "inferred_not_provable",
+      "property_link_reason": "no_property_values_in_activity_log",
+      "reason": "multiple_capable_operations",
+      "relevant_areas": [
+        "tags"
+      ],
+      "unreadable_events_in_scope": false,
+      "verdict": "ambiguous",
+      "window": {
+        "anchor": {
+          "finished_at": "2026-10-11T02:09:32.000000Z",
+          "plan_timestamp": "2026-10-11T02:09:22Z",
+          "report_sha256": "aacce5024c756d851134d3e87ce44b8dc325cfc192de9e1aa47649a64c41f85e",
+          "run_id": "github-38104177960-1",
+          "started_at": "2026-10-11T02:09:11.000000Z"
+        },
+        "kind": "anchor",
+        "start": "2026-10-11T02:08:11.000000Z"
+      }
+    }
+  ],
+  "rules": {
+    "automated_overlap_minutes": 5,
+    "deletion_rules_version": "2",
+    "lookback_days": 30,
+    "poll_cap_minutes": 20,
+    "poll_interval_minutes": 2,
+    "settle_margin_minutes": 10,
+    "skew_seconds": 60,
+    "table_version": "1"
+  }
+}

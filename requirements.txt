@@ -1,7 +1,7 @@
 # Development environment for the Python drift engine, AI analysis engine and
 # Activity Log collector. Dependencies are declared once, in pyproject.toml; this
-# file installs the package in editable mode together with its dev, ai (Phase 6)
-# and azure (Phase 7) extras.
+# file installs the package in editable mode together with its dev, ai (Phase 6),
+# azure (Phase 7) and dashboard (Phase 13) extras.
 #
 #   python3 -m venv .venv && source .venv/bin/activate
 #   pip install -r requirements.txt
@@ -10,5 +10,6 @@
 # fresh environment installs exactly the versions the tests workflow uses.
 -c ci/ai-constraints.txt
 -c ci/azure-constraints.txt
+-c ci/dashboard-constraints.txt
 -c ci/dev-constraints.txt
--e .[dev,ai,azure]
+-e .[dev,ai,azure,dashboard]

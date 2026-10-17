@@ -214,7 +214,8 @@ def test_entry_points_and_core_dependencies():
     text = PYPROJECT.read_text(encoding="utf-8")
     scripts = re.search(r"\[project\.scripts\]\n(.*?)\n\[", text, re.S).group(1)
     entries = dict(re.findall(r'^([\w-]+) = "([^"]+)"', scripts, re.M))
-    assert entries == {"drift-engine": "drift_engine.cli:main", "ai-analysis": "ai_engine.cli:main"}
+    assert entries == {"drift-engine": "drift_engine.cli:main", "ai-analysis": "ai_engine.cli:main",
+                       "dashboard-api": "dashboard_api.cli:main"}  # Task 13.1
     core = re.search(r"^dependencies = \[(.*?)\]", text, re.S | re.M).group(1)
     assert sorted(re.findall(r'"([A-Za-z0-9_-]+)', core)) == ["PyYAML", "pydantic"]  # no LLM stack in the core
 

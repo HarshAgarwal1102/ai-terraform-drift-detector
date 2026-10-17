@@ -1,0 +1,10 @@
+{
+  "cost_sign_convention": "diffTotalMonthlyCost = totalMonthlyCost (desired, planned_values) - pastTotalMonthlyCost (actual, refreshed prior_state); drift cost = -diffTotalMonthlyCost",
+  "drift_report_sha256": "db9db841af415434ecd3c1cc3c11ad8365ee54adf6136b6662ac10e7cb9d0b5b",
+  "environment": "dev",
+  "generated_at": "2026-10-11T02:47:01Z",
+  "infracost_version": "v0.10.46",
+  "mode": "plan_json_breakdown",
+  "pricing": "list_prices_usd_no_usage_file",
+  "run_id": "github-38105671846-1"
+}

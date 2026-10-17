@@ -124,8 +124,8 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: Phase 12 — Testing & Security Hardening (🟡 WORK IN PROGRESS since 2026-10-13; all tasks complete: Task 12.1A 🟢 2026-10-14, Tasks 12.1, 12.2 and 12.3 🟢 2026-10-16; the scope deferred into Phase 12 is still open, see below). Phase 11 is on hold (user decision 2026-10-13; see below).
-- **Current Active Task**: none selected. Every Phase 12 task is 🟢. The scope deferred into Phase 12 (Super-Linter from Task 9.4; SHA pinning and other hardening of the existing workflows; the historical auth-test logs, H1) has no task yet and needs a user scheduling decision, as recorded under Phase 12. Phase 11 is on hold, and Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11). Last completed: Task 12.3 — Least Privilege RBAC & Secret Hardening Audit (🟢 2026-10-16; see its completion notes). Task 12.2 is 🟢 (2026-10-16; commit `dd84aaa`, `tests.yml` run #4); Task 12.1 is 🟢 (2026-10-16; commits `5ddeb86` and `cd38ffe`, `tests.yml` run #2); Task 12.1A is 🟢 (2026-10-14; commit `6d1aa86`, auth-test run #68).
+- **Current Active Phase**: Phase 13 — Professional Dashboard (🟡 WORK IN PROGRESS since 2026-10-17, user instruction to move to Phase 13). Phase 12 stays 🟡: all its tasks are 🟢 (Task 12.1A 2026-10-14; Tasks 12.1, 12.2 and 12.3 2026-10-16), but the scope deferred into it is still open (see Phase 12). Phase 11 is on hold (user decision 2026-10-13; see below).
+- **Current Active Task**: Task 13.3 — Live Data Integration & Real-Time Status Monitoring (⬜ NOT STARTED; its validation needs user actions: a real Azure drift and scan run, the user's `az login`, and a real PR/issue state, Execution Rule 10). Last completed: Task 13.2 — UI Component Development & Visual Analytics (🟢 2026-10-17) and Task 13.1 — Dashboard Data API & State Engine (🟢 2026-10-17, design approved by the user); both committed on branch `phase-13-dashboard`, not pushed. The user lifted the 2026-10-11 instruction not to start Phase 13 on 2026-10-17. Previously: none selected; every Phase 12 task is 🟢. The scope deferred into Phase 12 (Super-Linter from Task 9.4; SHA pinning and other hardening of the existing workflows; the historical auth-test logs, H1) has no task yet and needs a user scheduling decision, as recorded under Phase 12. Phase 11 is on hold, and Phase 13 (dashboard) is not to be designed or started yet (user instruction, 2026-10-11). Last completed: Task 12.3 — Least Privilege RBAC & Secret Hardening Audit (🟢 2026-10-16; see its completion notes). Task 12.2 is 🟢 (2026-10-16; commit `dd84aaa`, `tests.yml` run #4); Task 12.1 is 🟢 (2026-10-16; commits `5ddeb86` and `cd38ffe`, `tests.yml` run #2); Task 12.1A is 🟢 (2026-10-14; commit `6d1aa86`, auth-test run #68).
 - **On hold**: Phase 11 — Human-Approved Remediation (🔴 BLOCKED — on hold, user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on it. It resumes at Task 11.1 on user instruction. Task 11.1 — Safe Remediation Architecture & Controls stays 🟡 WORK IN PROGRESS (since 2026-10-11; dependency Task 8.3 🟢), paused. Documentation only: its specification is a draft under user review and not yet in the repository; not complete until the user approves it. No apply, Azure write, GitHub environment or RBAC change is part of it (Tasks 11.2–11.3 need separate user approval, Execution Rules 10 and 13).
 - **Last completed**: Phase 10 — FinOps / Cost Analysis (🟢 2026-10-11). Tasks 10.3 and 10.4 were verified together by the user-approved drift-detection dispatch #44 `38140497702` on commit `8ef89b6` and its AI analysis run #27 `38140599354` (see the Task 10.3 and 10.4 completion notes). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 10 of 14 (Phases 1–10). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
@@ -5377,11 +5377,11 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
 ---
 
 ### PHASE 13 — Professional Dashboard
-**Status**: ⬜ NOT STARTED
+**Status**: 🟡 WORK IN PROGRESS (started 2026-10-17 on user instruction; Tasks 13.1 and 13.2 🟢 2026-10-17; Task 13.3 next, needs user actions)
 
 Phase 13 builds a web-based management dashboard consuming live platform APIs and data to visualize drift status, security risks, cost impacts, and remediation workflows.
 
-> **Required feature: caller recorded by Azure for every detected drift (user, 2026-10-10, finalized the same day)**: this is a required dashboard feature, not an optional enhancement. It is documented only; nothing is implemented, and Tasks 13.1–13.3 stay ⬜ NOT STARTED.
+> **Required feature: caller recorded by Azure for every detected drift (user, 2026-10-10, finalized the same day)**: this is a required dashboard feature, not an optional enhancement. It was documented only until Phase 13 started (2026-10-17); it is implemented by Tasks 13.1–13.3.
 > - **Display**: every detected drift row/card shows a field labelled **`Caller recorded by Azure`**:
 >   - **human user**: the recorded caller's available name;
 >   - **service principal or managed identity**: the identity's available name or identifier, as Azure recorded it;
@@ -5400,17 +5400,18 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 >   - G12's local-only `drift-engine who` command.
 
 #### Task 13.1 — Dashboard Data API & State Engine
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED (2026-10-17; design approved by the user 2026-10-17)
+- **Started**: 2026-10-17
 - **Objective**: Build lightweight Python backend API (FastAPI) to serve live drift reports, history, and status metrics, including the on-demand `Caller recorded by Azure` value for every detected drift (Phase 13 required feature).
 - **Dependencies**: Tasks 4.6, 8.3, 9A.1, 9B.5 (investigation and AI report v2 artifacts), 9B.6 (real-Azure proof of the Phase 9B WHO correlation the lookup reuses; added 2026-10-10)
 - **Files/Areas**: `src/dashboard_api/` (reuses matching logic from `src/drift_engine/who.py`, `activity_logs.py` and `investigation.py`; the `drift-engine who` command keeps its behaviour)
 - **Acceptance Criteria**:
-  - [ ] Endpoints for `/api/summary`, `/api/drifts`, `/api/reports/{id}`, `/api/remediations`.
-  - [ ] Consumes real `drift_report.json` and AI report artifacts.
-  - [ ] For every detected drift, the backend returns the `Caller recorded by Azure` value defined in the Phase 13 required feature: the recorded name or identifier, or `Unknown`. It is retrieved on demand from Azure Activity Log and correlated with the drift's identified change.
-  - [ ] Caller identity is returned only to authenticated and authorized users and is never persisted in the database, reports or logs.
+  - [x] Endpoints for `/api/summary`, `/api/drifts`, `/api/reports/{id}`, `/api/remediations`.
+  - [x] Consumes real `drift_report.json` and AI report artifacts. *(Tested on the unchanged public artifacts of Task 9B.6 runs #38, #39 and #40.)*
+  - [x] For every detected drift, the backend returns the `Caller recorded by Azure` value defined in the Phase 13 required feature: the recorded name or identifier, or `Unknown`. It is retrieved on demand from Azure Activity Log and correlated with the drift's identified change. *(Verified with a fake Activity Log source through the shared `who.lookup_operation`; the real-Azure check is Task 13.3's validation.)*
+  - [x] Caller identity is returned only to authenticated and authorized users and is never persisted in the database, reports or logs.
 - **Validation**:
-  - [ ] `pytest tests/test_dashboard_api.py` passes.
+  - [x] `pytest tests/test_dashboard_api.py` passes. *(Local, 2026-10-17; not yet run in `tests.yml`.)*
 - **Implementation Notes**:
   - Data layer for dynamic dashboard UI.
   - **Correlation**:
@@ -5427,26 +5428,41 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
     - no caller identity in logs, the database or reports (using a sentinel caller in fixtures).
   - **Design review first**: sign-in, authorization, and the backend's read-only Azure credential. Any new Azure resource, role or GitHub setting needs user approval (Execution Rules 12 and 13).
 - **Completion Notes**:
-  - None.
+  - **Implementation (2026-10-17, committed on branch `phase-13-dashboard`, not pushed)**: `src/dashboard_api/` (`store.py`, `callers.py`, `auth.py`, `views.py`, `app.py`, `cli.py`); `docs/dashboard.md`; `tests/test_dashboard_api.py`; fixtures `tests/fixtures/dashboard/real_9b6/` (the 9B.6 public artifacts of runs #38, #39 and #40, copied unchanged; 0 findings from the public leak scan and the identifier scan).
+    - **Data**: the API indexes downloaded workflow artifacts in any layout (for example `gh run download`) on every request. It attaches the AI report, public investigation and cost run to a drift report only when they are bound to it by run id and canonical SHA-256 (`investigation_public.load_public` and `check_binding` for the investigation). Ambiguous or conflicting artifacts are not used and are reported as fixed codes. It writes nothing and has no database.
+    - **Caller**: from the decisive operation of the bound public investigation, via `who.lookup_operation`, which is `who.py`'s former `_lookup` made shared (the only change to `who.py`; `drift-engine who` behaviour and `tests/test_who.py` are unchanged). It returns the recorded value or `Unknown` with a fixed status code. Lookups are refused in GitHub Actions (G12).
+    - **Design for review (no new Azure resource, role or GitHub setting)**: one bearer token per user, stored only as a SHA-256 digest in a local users file that neither group nor others can write (otherwise every request fails closed with 503). Roles: `viewer` (all endpoints) and `caller_reader` (`include_caller=true`, otherwise 403). The server binds only to loopback. The caller lookup uses the operator's own read-only `az login` (`AzureCliCredential`, as `drift-engine who` does). All responses are sent with `Cache-Control: no-store`; the OpenAPI docs are disabled; validation errors never echo input.
+    - **Dependencies**: new `dashboard` extra (`fastapi`, `uvicorn`) and `dashboard-api` entry point; `ci/dashboard-constraints.txt` pins the six packages not pinned elsewhere; `requirements.txt` applies it, so `tests.yml` installs it with no workflow change. `tests/test_tests_workflow.py` and `tests/test_ai_cli.py` were updated for the new constraints file and entry point. The drift and AI workflows do not install the extra.
+  - **Validation (2026-10-17, CPython 3.13, pinned `requirements.txt`)**: `tests/test_dashboard_api.py` 19 passed (47 subtests): human, service principal and managed identity callers; all 12 `Unknown` cases; unauthenticated, unauthorized and unusable users-file requests; sentinel callers absent from logs, files and every non-caller response. Full suite: 3039 passed, 1 failed (`test_entry_points_and_core_dependencies` expected the old entry points; fixed, then the affected files passed: 101 passed). Fast tier after the fix: 2565 passed. Coverage: `src/dashboard_api` 78–100% per module, all measured source 98%. A live `dashboard-api` on `127.0.0.1` over the real fixtures returned 401 without a token, 403 for `include_caller` as a viewer and 200 with `no-store` for the maintainer; `--host 0.0.0.0` was refused. gitleaks 8.30.1: no leaks in the new files (TruffleHog is not installed locally; `security-scan.yml` runs it on push).
+  - **Design review (2026-10-17)**: the user approved the design: hashed bearer-token users file, `viewer` and `caller_reader` roles, loopback-only server, the user's own read-only `az login`. No Azure resource, role or GitHub setting was added.
+  - **Not part of this task**: a `tests.yml` run (needs a commit and push) and the real-Azure caller check (Task 13.3).
 
 #### Task 13.2 — UI Component Development & Visual Analytics
-- **Status**: ⬜ NOT STARTED
+- **Status**: 🟢 COMPLETED (2026-10-17; committed on branch `phase-13-dashboard`, not pushed)
+- **Started**: 2026-10-17
 - **Objective**: Build modern, responsive dashboard UI displaying executive overview metrics, drift breakdown charts, and active risk feeds.
 - **Dependencies**: Task 13.1
 - **Files/Areas**: `dashboard/`
 - **Acceptance Criteria**:
-  - [ ] Overview Cards: Total Resources, Active Drifts, Security Exposure, Monthly Cost Impact.
-  - [ ] Interactive tables filtering drifts by severity, resource type, and environment.
-  - [ ] Detailed modal showing AI analysis, HCL diff, and remediation status.
-  - [ ] Every detected drift row/card shows its resource, changed property, expected and actual value, operation time, and the `Caller recorded by Azure` field (recorded name or identifier, or `Unknown`), obtained only through the backend.
+  - [x] Overview Cards: Total Resources, Active Drifts, Security Exposure, Monthly Cost Impact.
+  - [x] Interactive tables filtering drifts by severity, resource type, and environment. *(Plus a run filter: latest per environment or any run of the history.)*
+  - [x] Detailed modal showing AI analysis, HCL diff, and remediation status. *(The diff is a Terraform-style expected/actual diff built from the drift report's attribute changes.)*
+  - [x] Every detected drift row/card shows its resource, changed property, expected and actual value, operation time, and the `Caller recorded by Azure` field (recorded name or identifier, or `Unknown`), obtained only through the backend.
 - **Validation**:
-  - [ ] UI renders cleanly and dynamically updates from API data.
+  - [x] UI renders cleanly and dynamically updates from API data. *(Built-in browser, 2026-10-17, over the real 9B.6 fixtures.)*
 - **Implementation Notes**:
   - Modern web interface with dark mode and visual feedback.
   - Browser code holds no Azure credentials, never calls Azure, and does not write caller data to browser storage.
   - Component tests render a human name, a service principal or managed identity name or identifier, and `Unknown`.
 - **Completion Notes**:
-  - None.
+  - **Implementation (2026-10-17, committed on branch `phase-13-dashboard`, not pushed)**: `dashboard/` (`index.html`, `styles.css`, `render.js`: pure escaped render functions, `app.js`: sign-in, loading and events, `render.test.js`: component tests); `src/dashboard_api/app.py` serves exactly those four browser files at `/` from the same origin and adds a strict Content-Security-Policy to every response (`default-src 'none'`; same-origin scripts, styles and `connect-src`; no inline code; `frame-ancestors 'none'`); `tests/test_dashboard_ui.py`; `docs/dashboard.md` (UI section). No new dependency, no build step, no CDN.
+    - Sign-in with a dashboard token held in memory only. All data comes from `/api/*`; a viewer without `caller_reader` gets the rows without callers and sees "Not available (needs the caller_reader role)". Refresh on demand and every 60 s (can be switched off). Light and dark themes.
+  - **Validation (2026-10-17)**:
+    - Component tests (`node --test`, Node 20.7): 10 passed, 0 failed: human name, service principal and managed identity identifiers, every `Unknown` reason, the hidden-caller state, the drift row fields, HTML escaping of crafted values, the three filters and the run selector, overview cards (no invented cost) and the detail modal.
+    - `tests/test_dashboard_ui.py` 7 passed: no browser storage, cookies or external hosts (Azure included) in the browser code; no inline script, style or handler; one `fetch`, to `/api/*` only; the UI served with the CSP, unknown paths 404 and `/api/*` still 401 without a token.
+    - Built-in browser on a loopback `dashboard-api` over the real fixtures with a session test token: the overview cards, severity breakdown and run history rendered; selecting run `github-38105671846-1` loaded its drift row (`tags.drift_test`, `(absent)` → `"primary-r2"`, operation time 2026-10-11 02:27:00 UTC, `Microsoft.Resources/tags/write`, caller `Unknown`: no local Terraform state configured); the modal showed the diff, the AI narrative and both remediation options (`pending`, not allowed, `manual_after_approval`). No console errors (so no CSP violations); browser storage and cookies empty; light theme and a 375 px viewport without horizontal page scroll; the server log shows only same-origin requests and no token. The session test token, users file and launch configuration were removed afterwards.
+    - Full suite: 3047 passed (4018 subtests); fast tier: 2571 passed. gitleaks 8.30.1: no leaks in `dashboard/`, `src/dashboard_api/` or the new tests.
+  - **Not verified**: a real caller name in the browser (needs the user's `az login` and a local Terraform state: Task 13.3); a `tests.yml` run (needs a commit and push).
 
 #### Task 13.3 — Live Data Integration & Real-Time Status Monitoring
 - **Status**: ⬜ NOT STARTED

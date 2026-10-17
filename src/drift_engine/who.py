@@ -141,14 +141,16 @@ def run_who(public_bytes: bytes, terraform_bytes: bytes, *, source: al.ActivityL
     results = []
     for resource in public.resources:
         for op in resource.operations:
-            results.append(_lookup(resource.address, targets[resource.address], op, source, now))
+            results.append(lookup_operation(resource.address, targets[resource.address], op, source, now))
     complete = bool(results) and all(r["status"] == "matched" for r in results)
     log_event(logger, logging.INFO if complete else logging.WARNING, "who_finished", "WHO lookup finished",
               operations=len(results), statuses=dict(sorted(Counter(r["status"] for r in results).items())))
     return WhoResult(_document(public, now, None, results), complete)
 
 
-def _lookup(address: str, arm: al.ArmId, op: pub.Operation, source: al.ActivityLogSource, now: datetime) -> dict:
+def lookup_operation(address: str, arm: al.ArmId, op: pub.Operation, source: al.ActivityLogSource,
+                     now: datetime) -> dict:
+    """The recorded caller(s) of one public operation; shared with the dashboard backend (Task 13.1)."""
     result = {"address": address, "op_id": op.op_id, "operation_name": op.operation_name, "start": op.start,
               "end": op.end, "status": "", "callers": []}
     start, end = al.parse_timestamp(op.start), al.parse_timestamp(op.end)

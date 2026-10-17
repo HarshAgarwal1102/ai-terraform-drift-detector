@@ -41,13 +41,14 @@ def pins_of(path: Path) -> dict[str, str]:
     return pins
 
 
-def dev_closure() -> dict[str, list]:
-    """Every distribution the `dev` extra needs (markers evaluated for this interpreter, extras propagated)."""
+def dev_closure(extra: str = "dev") -> dict[str, list]:
+    """Every distribution the `dev` (or another) extra needs (markers evaluated for this interpreter, extras
+    propagated)."""
     from importlib.metadata import PackageNotFoundError, requires
     from packaging.requirements import Requirement
 
     project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
-    pending = [Requirement(spec) for spec in project["optional-dependencies"]["dev"]]
+    pending = [Requirement(spec) for spec in project["optional-dependencies"][extra]]
     closure: dict[str, list] = {}
     expanded: set[tuple[str, str]] = set()
     while pending:
@@ -61,7 +62,7 @@ def dev_closure() -> dict[str, list]:
             try:
                 children = requires(req.name) or []
             except PackageNotFoundError:
-                pytest.fail(f"{req.name} (required by drift-engine[dev]) is not installed")
+                pytest.fail(f"{req.name} (required by drift-engine[{extra}]) is not installed")
             for child in map(Requirement, children):
                 if child.marker is None or child.marker.evaluate({"extra": extra}):
                     pending.append(child)
@@ -105,11 +106,28 @@ def test_installed_dev_tools_match_their_pins():
     assert {n: (version(n), v) for n, v in dev.items() if version(n) != v} == {}
 
 
+@pytest.mark.skipif(importlib.util.find_spec("fastapi") is None, reason="needs the dashboard extra")
+def test_dashboard_constraints_equal_the_rest_of_the_dashboard_closure():
+    """Task 13.1: ci/dashboard-constraints.txt pins exactly what the `dashboard` extra needs beyond the ai and
+    azure pins, never repeats another file's pin, and stays inside the declared ranges."""
+    dashboard = pins_of(CI / "dashboard-constraints.txt")
+    other = {**pins_of(CI / "ai-constraints.txt"), **pins_of(CI / "azure-constraints.txt"),
+             **pins_of(CI / "dev-constraints.txt")}
+    assert sorted(set(dashboard) & set(other)) == [], "pinned again in dashboard-constraints.txt"
+    closure = dev_closure("dashboard")
+    every = {**other, **dashboard}
+    assert sorted(set(closure) - set(every)) == [], "required by the dashboard extra but not pinned"
+    assert sorted(set(dashboard) - set(closure)) == [], "pinned but not required by the dashboard extra"
+    outside = sorted(f"{req} (pinned {every[name]})" for name, reqs in closure.items() for req in reqs
+                     if not req.specifier.contains(every[name], prereleases=True))
+    assert outside == [], "pins outside the declared ranges"
+
+
 def test_requirements_apply_every_constraint_file():
     lines = [line.strip() for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.startswith("#")]
-    assert lines == ["-c ci/ai-constraints.txt", "-c ci/azure-constraints.txt", "-c ci/dev-constraints.txt",
-                     "-e .[dev,ai,azure]"]
+    assert lines == ["-c ci/ai-constraints.txt", "-c ci/azure-constraints.txt", "-c ci/dashboard-constraints.txt",
+                     "-c ci/dev-constraints.txt", "-e .[dev,ai,azure,dashboard]"]
 
 
 # --------------------------------------------------------------------------- Decision 4: tiers
