@@ -142,6 +142,19 @@
     state.timer = $("auto-refresh").checked && state.token ? setInterval(load, REFRESH_MS) : null;
   }
 
+  // Eye toggle on the token field: show or mask what was typed (never stored either way).
+  function setTokenVisible(show) {
+    $("token").type = show ? "text" : "password";
+    $("token-toggle").setAttribute("aria-pressed", String(show));
+    $("token-toggle").setAttribute("aria-label", show ? "Hide token" : "Show token");
+  }
+
+  // Phone-only account menu (on wide screens it is always shown inline and this is a no-op visually).
+  function setMenu(open) {
+    document.querySelector(".topbar").dataset.menu = open ? "open" : "";
+    $("account-toggle").setAttribute("aria-expanded", String(open));
+  }
+
   function signOut(message) {
     state.token = null;
     state.summary = null;
@@ -153,6 +166,7 @@
     state.historyQuery = "";
     $("history-search").value = "";
     clearInterval(state.timer);
+    $("signout").hidden = true;
     $("app").hidden = true;
     $("signin").hidden = false;
     $("signin-error").textContent = message || "";
@@ -164,15 +178,32 @@
       event.preventDefault();
       const token = $("token").value.trim();
       $("token").value = "";
+      setTokenVisible(false);
       if (!token) return;
       state.token = token;
       $("signin").hidden = true;
       $("app").hidden = false;
+      $("signout").hidden = false;
       load().then(schedule);
     });
+    $("token-toggle").addEventListener("click", () => setTokenVisible($("token").type === "password"));
     $("refresh").addEventListener("click", load);
     $("auto-refresh").addEventListener("change", schedule);
-    $("signout").addEventListener("click", () => signOut(""));
+    $("signout").addEventListener("click", () => { setMenu(false); signOut(""); });
+    $("account-toggle").addEventListener("click", () => {
+      const open = $("account-toggle").getAttribute("aria-expanded") !== "true";
+      setMenu(open);
+      if (open) $("theme").focus();
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".topbar-actions")) setMenu(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && $("account-toggle").getAttribute("aria-expanded") === "true") {
+        setMenu(false);
+        $("account-toggle").focus();
+      }
+    });
     ["severity", "type", "environment"].forEach((key) => {
       $("filter-" + key).addEventListener("change", (event) => { state.filters[key] = event.target.value; render(); });
     });

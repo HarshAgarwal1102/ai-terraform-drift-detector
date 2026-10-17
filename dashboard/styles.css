@@ -7,10 +7,10 @@
   --sw-bezel: #e3e7ed; --sw-rim: #ffffff; --sw-inset: rgba(30, 40, 60, 0.18); --sw-drop: rgba(30, 40, 60, 0.15);
   --sw-paddle-hi: #fbfcfd; --sw-paddle-lo: #e4e8ee; --sw-edge: rgba(255, 255, 255, 0.9); --sw-side: #c5cbd5;
   --sw-label: #5d6677; --sw-led-off: #b9bfca; --glow-accent: transparent; --glow-power: transparent;
-  --card-hi: #ffffff; --card-lo: #f1f3f7;
+  --card-hi: #ffffff; --card-lo: #f1f3f7; --panel-alt: #eef1f6; --grid-line: rgba(47, 111, 223, 0.07);
   --key-primary-hi: #3f7cec; --key-primary-lo: #2a63cf; --key-primary-side: #1d4596; --key-primary-rim: #5a8ff0;
   --logo-top: #2f6fdf; --logo-left: #2556b3; --logo-right: #1c428c; --logo-ghost: #8a93a3;
-  --drift-top: #e06a2a; --drift-left: #b8531d; --drift-right: #964316;
+  --drift-top: #e06a2a; --drift-left: #b8531d; --drift-right: #964316; --drift-text: #a84a17;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -23,10 +23,10 @@
   --sw-paddle-hi: #2c323d; --sw-paddle-lo: #1f242c; --sw-edge: rgba(255, 255, 255, 0.06); --sw-side: #13171d;
   --sw-label: #8a93a3; --sw-led-off: #3a414d;
   --glow-accent: rgba(108, 156, 255, 0.6); --glow-power: rgba(255, 154, 92, 0.6);
-  --card-hi: #1f252e; --card-lo: #181d25;
+  --card-hi: #1f252e; --card-lo: #181d25; --panel-alt: #151a22; --grid-line: rgba(108, 156, 255, 0.07);
   --key-primary-hi: #7aa6ff; --key-primary-lo: #5584f0; --key-primary-side: #2f56b8; --key-primary-rim: #8fb2ff;
   --logo-top: #6c9cff; --logo-left: #3f63c4; --logo-right: #2d4a99; --logo-ghost: #9aa3b5;
-  --drift-top: #ff9a5c; --drift-left: #c8692f; --drift-right: #a3521f;
+  --drift-top: #ff9a5c; --drift-left: #c8692f; --drift-right: #a3521f; --drift-text: #ff9a5c;
     color-scheme: dark;
   }
 }
@@ -39,10 +39,10 @@
   --sw-paddle-hi: #2c323d; --sw-paddle-lo: #1f242c; --sw-edge: rgba(255, 255, 255, 0.06); --sw-side: #13171d;
   --sw-label: #8a93a3; --sw-led-off: #3a414d;
   --glow-accent: rgba(108, 156, 255, 0.6); --glow-power: rgba(255, 154, 92, 0.6);
-  --card-hi: #1f252e; --card-lo: #181d25;
+  --card-hi: #1f252e; --card-lo: #181d25; --panel-alt: #151a22; --grid-line: rgba(108, 156, 255, 0.07);
   --key-primary-hi: #7aa6ff; --key-primary-lo: #5584f0; --key-primary-side: #2f56b8; --key-primary-rim: #8fb2ff;
   --logo-top: #6c9cff; --logo-left: #3f63c4; --logo-right: #2d4a99; --logo-ghost: #9aa3b5;
-  --drift-top: #ff9a5c; --drift-left: #c8692f; --drift-right: #a3521f;
+  --drift-top: #ff9a5c; --drift-left: #c8692f; --drift-right: #a3521f; --drift-text: #ff9a5c;
   color-scheme: dark;
 }
 
@@ -61,10 +61,20 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 select, input[type="password"] { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
   padding: 6px 8px; }
 
-.topbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;
-  background: var(--surface); border-bottom: 1px solid var(--border); }
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
+[hidden] { display: none !important; }  /* classes below set display; hidden must still win */
+
+.topbar { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.topbar h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 .theme-caption { color: var(--muted); font-size: 0.85rem; }
+
+/* Account menu: inline in the top bar on wide screens, a dropdown behind the account key on phones. */
+.topbar .account-toggle { display: none; width: 44px; height: 44px; padding: 0; justify-content: center; }
+.account-toggle svg { width: 18px; height: 18px; }
+.account-toggle[aria-expanded="true"] { transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--sw-side), 0 2px 4px var(--sw-drop), inset 0 1px 0 var(--sw-edge); }
+.account-menu, .menu-row { display: flex; align-items: center; gap: 10px; }
 
 /* Rocker switch for dark mode: the paddle rocks right with a lit LED when on, left when off. */
 .theme-switch { position: relative; width: 88px; height: 46px; padding: 0; border-radius: 14px;
@@ -103,7 +113,8 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 
 @media (prefers-reduced-motion: reduce) {
   .switch-paddle, .key, .key-primary { transition: none; }
-  .logo-lg .drift { animation: none; }
+  .logo-lg .drift, .logo-xl .drift, .flow-node, .radar-sweep, .radar-blip { animation: none; }
+  .flow-pulse { display: none; }
   .key-refresh[aria-busy="true"] .key-icon svg { animation: none; }
 }
 .brand { display: flex; align-items: center; gap: 10px; }
@@ -116,7 +127,8 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 .logo .drift .face-top { fill: var(--drift-top); } .logo .drift .face-left { fill: var(--drift-left); }
 .logo .drift .face-right { fill: var(--drift-right); }
 .logo .ghost { fill: none; stroke: var(--logo-ghost); stroke-width: 1.5; stroke-dasharray: 3 2.5; }
-.logo-lg .drift { animation: logo-drift 3.2s ease-in-out infinite; }
+.logo-xl { width: 76px; height: 76px; }
+.logo-lg .drift, .logo-xl .drift { animation: logo-drift 3.2s ease-in-out infinite; }
 @keyframes logo-drift { 50% { transform: translate(-3px, 2px); } }
 
 .signin { max-width: 420px; margin: 56px auto; padding: 32px; border-radius: 18px; border: 1px solid var(--sw-rim);
@@ -129,18 +141,129 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
   justify-content: center; background: var(--sw-bezel); border: 1px solid var(--sw-rim);
   box-shadow: inset 0 3px 8px var(--sw-inset); }
 .signin-tagline { margin: 8px 0 0; color: var(--accent); font-size: 1.05rem; font-weight: 600; }
+.drift-word { color: var(--drift-text); }
 .signin-sub { margin: 0; color: var(--muted); font-size: 0.9rem; }
-.signin-hint { margin: 0 0 16px; color: var(--muted); font-size: 0.85rem; }
 .signin form { display: grid; gap: 8px; }
 .signin label { font-size: 0.85rem; font-weight: 600; }
-.signin input[type="password"] { height: 44px; padding: 0 14px; border-radius: 12px; background: var(--sw-bezel);
+.secure-eyebrow { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--accent); font-size: 0.72rem;
+  font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.secure-eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 6px 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+.signin-brand + .secure-eyebrow { margin-bottom: 8px; }
+.token-field { position: relative; }
+/* Typed as password or (eye toggle) text, so match the field by id rather than by type. */
+.signin #token { width: 100%; height: 44px; padding: 0 44px 0 14px; border-radius: 12px; background: var(--sw-bezel);
   border: 1px solid var(--border); box-shadow: inset 0 2px 5px var(--sw-inset); }
-.key-primary { margin-top: 12px; height: 46px; border-radius: 12px; border: 1px solid var(--key-primary-rim);
+.signin #token::placeholder { color: var(--muted); opacity: 0.8; }
+.token-toggle { position: absolute; top: 4px; right: 4px; width: 36px; height: 36px; padding: 0; display: flex;
+  align-items: center; justify-content: center; border-radius: 9px; background: transparent; color: var(--muted); }
+.token-toggle:hover { color: var(--text); }
+.token-toggle svg { width: 17px; height: 17px; }
+.token-toggle .eye-closed, .token-toggle[aria-pressed="true"] .eye-open { display: none; }
+.token-toggle[aria-pressed="true"] .eye-closed { display: block; }
+.token-help { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.key-primary { display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 12px; height: 46px; border-radius: 12px; border: 1px solid var(--key-primary-rim);
   background: linear-gradient(135deg, var(--key-primary-hi), var(--key-primary-lo)); color: var(--accent-text);
   font-weight: 600; box-shadow: 0 3px 0 var(--key-primary-side), 0 8px 16px var(--sw-drop),
   inset 0 1px 0 rgba(255, 255, 255, 0.28); transition: transform 0.08s ease, box-shadow 0.08s ease; }
 .key-primary:active { transform: translateY(2px);
   box-shadow: 0 1px 0 var(--key-primary-side), 0 3px 6px var(--sw-drop), inset 0 1px 0 rgba(255, 255, 255, 0.28); }
+.key-primary svg { width: 15px; height: 15px; }
+
+/* Radar (wide screens): a 4 s sweep; each blip flashes as the beam passes its angle (delay = angle / 360 × 4 s). */
+.radar { position: absolute; inset: 0; }
+.radar-ring { position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent); }
+.radar-ring.inner { inset: 70px; border-color: color-mix(in srgb, var(--accent) 12%, transparent); }
+.radar-sweep { position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg 290deg, color-mix(in srgb, var(--accent) 30%, transparent) 360deg);
+  animation: radar-spin 4s linear infinite; }
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+.radar-blip { --blip: var(--accent); position: absolute; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--blip); opacity: 0.4; animation: radar-blip 4s ease-out infinite; }
+.radar-blip.is-drift { --blip: var(--drift-top); width: 10px; height: 10px; left: 344px; top: 62px;
+  animation-delay: 0.444s; }                                                  /* 40° */
+.radar-blip:nth-child(5) { left: 413px; top: 251px; animation-delay: 1.111s; } /* 100° */
+.radar-blip:nth-child(6) { left: 148px; top: 404px; animation-delay: 2.222s; } /* 200° */
+.radar-blip:nth-child(7) { left: 19px; top: 181px; animation-delay: 3.111s; }  /* 280° */
+@keyframes radar-blip {
+  0% { opacity: 1; transform: scale(1.7); box-shadow: 0 0 12px 3px color-mix(in srgb, var(--blip) 65%, transparent); }
+  35%, 100% { opacity: 0.4; transform: scale(1); box-shadow: none; }
+}
+
+/* Wide sign-in page: brand panel left; workflow + card right on a blueprint grid. Phones keep the card only. */
+.brand-panel, .flow, .signin-title, .radar { display: none; }
+@media (min-width: 900px) {
+  .signin-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 1180px;
+    margin: 16px auto; border: 1px solid var(--border); border-radius: 20px; overflow: hidden;
+    box-shadow: 0 18px 40px var(--sw-drop); }
+  .brand-panel { display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 56px 48px;
+    background: var(--panel-alt); border-right: 1px solid var(--border); }
+  .signin-side { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+    padding: 36px 40px; background-color: var(--bg);
+    background-image: linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 28px 28px; }
+  .radar-stage { position: relative; flex: none; width: 440px; height: 440px; display: flex; align-items: center;
+    justify-content: center; }
+  .radar { display: block; }
+  .signin-page .signin { position: relative; width: 330px; margin: 0; padding: 26px; }
+  .signin-page .signin-brand { display: none; }
+  .signin-title { display: block; font-size: 1.3rem; margin: 0 0 6px; }
+  .flow { display: block; }
+}
+.eyebrow { margin: 6px 0 0; color: var(--muted); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; }
+.brand-tagline { margin: 0; font-size: 2rem; line-height: 1.2; }
+.brand-sub { margin: 0; color: var(--muted); }
+.features { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 16px; }
+.features li { display: flex; gap: 14px; align-items: flex-start; color: var(--muted); font-size: 0.9rem; }
+.features strong { display: block; color: var(--text); font-size: 0.95rem; }
+.feature-icon { flex: none; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center;
+  justify-content: center; color: var(--accent); background: var(--sw-bezel); border: 1px solid var(--sw-rim);
+  box-shadow: inset 0 1px 3px var(--sw-inset); }
+.feature-icon.cost { color: var(--drift-text); }
+.feature-icon svg { width: 17px; height: 17px; }
+
+/* Workflow loop (5 s): the pulse crosses the track in 4 s; step n lights at n s, as the pulse arrives. */
+.flow { width: 100%; max-width: 440px; margin: 0; padding: 16px 16px 14px; border-radius: 16px;
+  border: 1px solid var(--sw-rim); background: linear-gradient(160deg, var(--card-hi), var(--card-lo));
+  box-shadow: 0 12px 28px var(--sw-drop), inset 0 1px 0 var(--sw-edge); }
+.flow-caption { margin: 0 0 12px 4px; color: var(--muted); font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase; }
+.flow-track { position: relative; }
+.flow-line { position: absolute; top: 21px; left: 10%; right: 10%; height: 2px;
+  background: repeating-linear-gradient(90deg, var(--border) 0 6px, transparent 6px 10px); }
+.flow-pulse { position: absolute; top: 17px; left: 10%; width: 10px; height: 10px; margin-left: -5px;
+  border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px 2px var(--accent);
+  animation: flow-pulse 5s linear infinite; }
+@keyframes flow-pulse {
+  0% { left: 10%; opacity: 1; }
+  80% { left: 90%; opacity: 1; }
+  90%, 100% { left: 90%; opacity: 0; }
+}
+.flow-steps { position: relative; z-index: 1; list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.flow-steps li { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  color: var(--muted); font-size: 0.75rem; }
+.flow-steps li.is-drift { color: var(--drift-text); font-weight: 600; }
+.flow-node { --hit: var(--accent); width: 42px; height: 42px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; color: var(--muted); background: var(--sw-bezel);
+  border: 1px solid var(--sw-rim); box-shadow: inset 0 2px 5px var(--sw-inset);
+  animation: flow-hit 5s ease-out infinite; }
+.flow-node svg { width: 18px; height: 18px; }
+.is-drift .flow-node { --hit: var(--drift-top); }
+.flow-steps li:nth-child(2) .flow-node { animation-delay: 1s; }
+.flow-steps li:nth-child(3) .flow-node { animation-delay: 2s; }
+.flow-steps li:nth-child(4) .flow-node { animation-delay: 3s; }
+.flow-steps li:nth-child(5) .flow-node { animation-delay: 4s; }
+@keyframes flow-hit {
+  0%, 16% { color: var(--hit); border-color: var(--hit); transform: scale(1.08);
+    box-shadow: inset 0 2px 5px var(--sw-inset), 0 0 0 4px color-mix(in srgb, var(--hit) 22%, transparent),
+      0 0 16px color-mix(in srgb, var(--hit) 45%, transparent); }
+  30%, 100% { transform: scale(1); }
+}
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
 .toolbar #status { flex: 1 1 240px; margin: 0; color: var(--muted); }
 .inline { display: inline-flex; gap: 6px; align-items: center; }
@@ -229,4 +352,17 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 @media (max-width: 640px) {
   main { padding: 12px 16px; }
   .card-value { font-size: 1.4rem; }
+  .topbar h1 { font-size: 1rem; }
+  .topbar .account-toggle { display: inline-flex; }
+  .account-menu { display: none; position: absolute; top: calc(100% + 8px); right: 12px; z-index: 10; width: 240px;
+    flex-direction: column; align-items: stretch; gap: 4px; padding: 8px; border-radius: 16px;
+    border: 1px solid var(--sw-rim); background: linear-gradient(160deg, var(--card-hi), var(--card-lo));
+    box-shadow: 0 18px 40px var(--sw-drop); }
+  .topbar[data-menu="open"] .account-menu { display: flex; }
+  .menu-row { justify-content: space-between; padding: 8px 8px 8px 12px; }
+  .menu-row .theme-caption { color: var(--text); font-size: 0.95rem; }
+  .account-menu .key-signout { height: 48px; padding: 0 12px; border: 0; border-top: 1px solid var(--border);
+    border-radius: 0 0 10px 10px; background: transparent; box-shadow: none; color: var(--drift-text); }
+  .account-menu .key-signout:active { transform: none; background: var(--code); }
+  .toolbar #refresh { margin-left: auto; }
 }
