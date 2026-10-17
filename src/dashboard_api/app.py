@@ -5,7 +5,9 @@ Endpoints (all GET, all require `Authorization: Bearer <token>` of a `viewer`):
 - `/api/drifts`: drifted resources (`report_id`, `environment`, `severity`,
   `resource_type` filters; default: the latest run of each environment);
 - `/api/reports/{report_id}`: one run's bound artifacts and its drift rows;
-- `/api/remediations`: remediation options with approval and execution state.
+- `/api/remediations`: remediation options with approval and execution state;
+- `/api/unmanaged`: resources Terraform does not manage, with their list-price
+  estimate (Task 10.4 data, shown by Task 13.3).
 
 `include_caller=true` on `/api/drifts` and `/api/reports/{id}` adds the
 `Caller recorded by Azure` field to every drift row; it needs the `caller_reader`
@@ -164,7 +166,7 @@ def create_app(*, data_dir: str, users_file: str, terraform_json: str | None = N
     def get_summary(user: User) -> dict[str, Any]:
         idx = index()
         return {"api_version": API_VERSION, "generated_at": al.format_timestamp(now()),
-                **views.summary(idx.latest_per_environment(), idx.bundles, idx.problems)}
+                **views.summary(idx.latest_per_environment(), idx.bundles, idx.problems, idx.issues)}
 
     @app.get("/api/drifts")
     def get_drifts(user: User, report_id: Annotated[str | None, Query(max_length=200)] = None,
@@ -175,7 +177,7 @@ def create_app(*, data_dir: str, users_file: str, terraform_json: str | None = N
         check_caller_access(user, include_caller)
         idx = index()
         bundles = selected(idx, report_id, environment)
-        rows = [row for b in bundles for row in views.drift_rows(b)
+        rows = [row for b in bundles for row in views.drift_rows(b, idx.issues)
                 if (severity is None or row["severity"] == severity.upper())
                 and (resource_type is None or row["type"] == resource_type)
                 and (environment is None or row["environment"] == environment)]
@@ -190,8 +192,9 @@ def create_app(*, data_dir: str, users_file: str, terraform_json: str | None = N
         check_caller_access(user, include_caller)
         if not store.RUN_ID.match(report_id):
             raise ApiError(404, "report_not_found")
-        bundle = selected(index(), report_id, None)[0]
-        rows = views.drift_rows(bundle)
+        idx = index()
+        bundle = selected(idx, report_id, None)[0]
+        rows = views.drift_rows(bundle, idx.issues)
         if include_caller:
             add_callers(rows, {bundle.run_id: bundle})
         return {
@@ -200,6 +203,7 @@ def create_app(*, data_dir: str, users_file: str, terraform_json: str | None = N
             "summary": views.run_summary(bundle),
             "drifts": rows,
             "remediations": views.remediations(bundle),
+            "unmanaged": views.unmanaged(bundle),
             "artifacts": {
                 "drift_report": bundle.report,
                 "drift_report_sha256": bundle.report_sha256,
@@ -218,6 +222,13 @@ def create_app(*, data_dir: str, users_file: str, terraform_json: str | None = N
         return {"api_version": API_VERSION, "reports": [b.run_id for b in bundles], "count": len(options),
                 "pending_approvals": sum(1 for o in options if o["approval"]["status"] == "pending"),
                 "remediations": options}
+
+    @app.get("/api/unmanaged")
+    def get_unmanaged(user: User, report_id: Annotated[str | None, Query(max_length=200)] = None,
+                      environment: Annotated[str | None, Query(max_length=64)] = None) -> dict[str, Any]:
+        bundles = selected(index(), report_id, environment)
+        return {"api_version": API_VERSION, "reports": [b.run_id for b in bundles],
+                "runs": [views.unmanaged(b) for b in bundles]}
 
     def ui_file(name: str) -> FileResponse:
         path = os.path.join(ui_dir or "", name)

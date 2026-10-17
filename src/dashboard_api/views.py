@@ -7,14 +7,26 @@ caller identity appears here; `app.py` adds it on request.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from pydantic import ValidationError
+
+from drift_engine import investigation_public as pub
+from drift_engine import cost as drift_cost
+from drift_engine import unmanaged_cost, unmanaged_public
 from drift_engine.severity import HIGH, SEVERITIES
 
+from dashboard_api import issues as issue_states
 from dashboard_api.store import Bundle
 
 HISTORY_LIMIT = 100
+# AI report versions (ai_engine report_generator): v2 has no cost estimate; v3 adds the validated drift cost
+# (`cost.status`, `cost.cost_delta`, Task 10.3); v4 adds the separate `unmanaged` section (Task 10.4).
+KNOWN_REPORT_VERSIONS = ("2", "3", "4")
+COST_REPORT_VERSIONS = ("3", "4")
+UNMANAGED_REPORT_VERSIONS = ("4",)
 EXPOSED = SEVERITIES[SEVERITIES.index(HIGH):]  # HIGH and CRITICAL
 
 
@@ -58,7 +70,7 @@ def is_drifted(resource: dict) -> bool:
     return resource.get("drift_actions") is not None
 
 
-def drift_rows(bundle: Bundle) -> list[dict]:
+def drift_rows(bundle: Bundle, snapshot: issue_states.Snapshot | None = None) -> list[dict]:
     rows = []
     for resource in bundle.report.get("resources") or []:
         if not isinstance(resource, dict) or not is_drifted(resource):
@@ -88,6 +100,8 @@ def drift_rows(bundle: Bundle) -> list[dict]:
                             "narrative": [s.get("text") for s in (ai_resource.get("analysis") or {}).get("narrative")
                                           or [] if isinstance(s, dict)]},
             "remediation": _recommendation(ai_resource),
+            "issue": issue_states.issue_status(snapshot, bundle.environment, address, bundle.run.get("finished_at")),
+            "remediation_pr": dict(issue_states.REMEDIATION_PR),
         })
     return rows
 
@@ -99,19 +113,36 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _report_version(bundle: Bundle) -> str | None:
+    version = (bundle.ai_report or {}).get("report_version")
+    return version if isinstance(version, str) else None
+
+
 def cost_impact(bundle: Bundle) -> dict:
-    """Monthly cost impact of the drift, from the AI report's validated `cost_impact` (report v3)."""
-    ai = bundle.ai_report
-    if ai is None:
-        return {"status": "no_ai_report", "monthly_cost_delta": None, "display": None, "complete": False}
-    impact = ai.get("cost_impact")
-    if isinstance(impact, dict) and impact.get("status") == "complete":
-        drift = ((impact.get("cost_delta") or {}).get("totals") or {}).get("confirmed_drift") or {}
-        return {"status": "complete", "monthly_cost_delta": drift.get("monthly_cost_delta"),
-                "display": drift.get("display"), "complete": bool(drift.get("complete")),
-                "pricing_source": impact.get("pricing_source")}
-    status = impact.get("status") if isinstance(impact, dict) else "not_available"
-    return {"status": status, "monthly_cost_delta": None, "display": None, "complete": False}
+    """Monthly cost impact of the drift, from the AI report's `cost` section (report v3/v4 only). The embedded
+    `cost_delta` is validated with drift_engine.cost.CostDelta and must be bound to this very run (run id and
+    drift report SHA-256); otherwise no amount is shown."""
+    none = {"monthly_cost_delta": None, "display": None, "complete": False}
+    if bundle.ai_report is None:
+        return dict(none, status="no_ai_report")
+    version = _report_version(bundle)
+    if version not in KNOWN_REPORT_VERSIONS:
+        return dict(none, status="unsupported_report_version")
+    if version not in COST_REPORT_VERSIONS:
+        return dict(none, status="not_available")  # report v2: never an amount
+    impact = bundle.ai_report.get("cost")
+    status = impact.get("status") if isinstance(impact, dict) and isinstance(impact.get("status"), str) else "invalid"
+    if status != "complete":
+        return dict(none, status=status)
+    try:
+        delta = drift_cost.CostDelta.model_validate_json(json.dumps(impact.get("cost_delta")))
+    except (ValidationError, ValueError, TypeError):
+        return dict(none, status="cost_delta_invalid")
+    if delta.binding.run_id != bundle.run_id or delta.binding.drift_report_sha256 != bundle.report_sha256:
+        return dict(none, status="cost_delta_mismatch")
+    drift = delta.totals.confirmed_drift
+    return {"status": "complete", "monthly_cost_delta": drift.monthly_cost_delta, "display": drift.display,
+            "complete": drift.complete, "with_cost": drift.with_cost, "pricing_source": impact.get("pricing_source")}
 
 
 def security_exposure(bundle: Bundle) -> dict:
@@ -142,17 +173,28 @@ def run_summary(bundle: Bundle) -> dict:
         "classification_counts": summary.get("classification_counts") or {},
         "security_exposure": security_exposure(bundle),
         "monthly_cost_impact": cost_impact(bundle),
+        "unmanaged": unmanaged_summary(bundle),
         "artifacts": {"ai_analysis_report": bundle.ai_report is not None,
-                      "investigation": bundle.investigation is not None, "cost_run": bundle.cost_run is not None},
+                      "investigation": bundle.investigation is not None, "cost_run": bundle.cost_run is not None,
+                      "unmanaged_inventory": bundle.inventory is not None},
         "problems": list(bundle.problems),
     }
 
 
-def summary(latest: list[Bundle], history: list[Bundle], problems: dict) -> dict:
+def summary(latest: list[Bundle], history: list[Bundle], problems: dict,
+            snapshot: issue_states.Snapshot | None = None) -> dict:
     runs = [run_summary(b) for b in latest]
     costs = [r["monthly_cost_impact"] for r in runs]
-    amounts = [_decimal(c["monthly_cost_delta"]) for c in costs if c["status"] == "complete"]
-    cost_complete = bool(costs) and len(amounts) == len(costs) and None not in amounts
+    validated = bool(costs) and all(c["status"] == "complete" for c in costs)
+    priced = [c for c in costs if c["status"] == "complete" and c.get("with_cost")]
+    amounts = [_decimal(c["monthly_cost_delta"]) for c in priced]
+    if validated and not priced:
+        cost_status = "no_drift_cost"  # every validated estimate: no cost line for confirmed drift (never "$0")
+    elif validated and None not in amounts:
+        cost_status = "estimated"
+    else:
+        cost_status = "not_available"
+    cost_complete = cost_status == "estimated" and all(c["complete"] for c in priced)
     return {
         "reports_total": len(history),
         "data_problems": dict(sorted(problems.items())),
@@ -160,12 +202,18 @@ def summary(latest: list[Bundle], history: list[Bundle], problems: dict) -> dict
             "total_resources": sum(r["resources_total"] or 0 for r in runs),
             "active_drifts": sum(r["drifted_resources"] or 0 for r in runs),
             "security_exposure": sum(r["security_exposure"]["high_or_critical_drifts"] for r in runs),
-            "monthly_cost_impact": {"monthly_cost_delta": str(sum(amounts)) if cost_complete else None,
-                                    "complete": cost_complete, "currency": "USD" if cost_complete else None},
+            "monthly_cost_impact": {"status": cost_status,
+                                    "monthly_cost_delta": str(sum(amounts)) if cost_status == "estimated" else None,
+                                    "complete": cost_complete,
+                                    "currency": "USD" if cost_status == "estimated" else None},
         },
         "environments": runs,
-        "history": [{k: s[k] for k in ("report_id", "environment", "finished_at", "outcome", "has_drift",
-                                       "drifted_resources", "highest_severity")}
+        "issues": issue_states.summary(snapshot, {(b.environment, r.get("address")) for b in history
+                                                  for r in b.report.get("resources") or []
+                                                  if isinstance(r, dict) and b.environment and r.get("address")}),
+        "history": [dict({k: s[k] for k in ("report_id", "environment", "finished_at", "outcome", "has_drift",
+                                            "drifted_resources", "resources_total", "highest_severity")},
+                         unmanaged={k: s["unmanaged"][k] for k in ("available", "unmanaged", "display", "cost_status")})
                     for s in (run_summary(b) for b in history[:HISTORY_LIMIT])],
     }
 
@@ -202,3 +250,97 @@ def remediations(bundle: Bundle) -> list[dict]:
                           "automatic_apply": execution.get("automatic_apply")},
         })
     return out
+
+
+# --------------------------------------------------------------------------- unmanaged resources (Task 10.4)
+
+def _ai_unmanaged(bundle: Bundle) -> tuple[dict | None, str]:
+    """The AI report's `unmanaged` section (report v4 only) and a status for it."""
+    if bundle.ai_report is None:
+        return None, "no_ai_report"
+    version = _report_version(bundle)
+    if version not in KNOWN_REPORT_VERSIONS:
+        return None, "unsupported_report_version"
+    if version not in UNMANAGED_REPORT_VERSIONS:
+        return None, "not_in_ai_report"  # report v2/v3: no unmanaged section
+    section = bundle.ai_report.get("unmanaged")
+    if not isinstance(section, dict):
+        return None, "invalid"
+    return section, section.get("status") if isinstance(section.get("status"), str) else "invalid"
+
+
+def _listing(bundle: Bundle, section: dict | None) -> tuple[unmanaged_public.Inventory | None, str | None, str | None]:
+    """(inventory, its canonical SHA-256, source): the bound artifact, else the AI report's complete section."""
+    if bundle.inventory is not None:
+        return bundle.inventory, bundle.inventory_sha256, "unmanaged_inventory_artifact"
+    raw = section.get("inventory") if section and section.get("status") == "complete" else None
+    if raw is None:
+        return None, None, None
+    try:
+        inventory = unmanaged_public.load_inventory(raw)
+    except (ValidationError, ValueError, TypeError):
+        return None, None, None
+    if inventory.binding.run_id != bundle.run_id or inventory.binding.drift_report_sha256 != bundle.report_sha256:
+        return None, None, None
+    return inventory, pub.canonical_sha256(raw), "ai_report"
+
+
+def _cost(bundle: Bundle, section: dict | None, status: str, listing_sha: str | None) -> tuple[dict, dict]:
+    """(cost header, ref -> estimate). Amounts only from a complete AI section priced for this very inventory
+    of this very run."""
+    header = {"status": status, "reason": (section or {}).get("reason"), "pricing_source": None, "totals": None}
+    if status != "complete" or listing_sha is None:
+        return header, {}
+    try:
+        ai_inventory_sha = pub.canonical_sha256(section["inventory"])
+        cost = unmanaged_cost.UnmanagedCost.model_validate_json(json.dumps(section["cost"]))
+    except (ValidationError, ValueError, TypeError, KeyError):
+        return dict(header, status="ai_section_invalid"), {}
+    if (ai_inventory_sha != listing_sha or cost.binding.inventory_sha256 != listing_sha
+            or cost.binding.run_id != bundle.run_id or cost.binding.drift_report_sha256 != bundle.report_sha256):
+        return dict(header, status="inventory_mismatch"), {}
+    totals = cost.totals.model_dump(mode="json")
+    header = dict(header, status=cost.status, pricing_source=section.get("pricing_source"), totals=totals)
+    return header, {r.ref: r for r in cost.resources}
+
+
+def unmanaged(bundle: Bundle) -> dict:
+    """Resources in the Terraform-managed resource groups that Terraform does not manage, with their
+    list-price estimate. Never drift; never estimated here."""
+    section, status = _ai_unmanaged(bundle)
+    inventory, listing_sha, source = _listing(bundle, section)
+    cost, estimates = _cost(bundle, section, status, listing_sha)
+    base = {"report_id": bundle.run_id, "environment": bundle.environment, "available": inventory is not None,
+            "source": source, "cost": cost}
+    if inventory is None:
+        return dict(base, outcome=None, failure=None, collected_at=None, counts=None, scopes=[], resources=[],
+                    limitations=[])
+    resources = []
+    for item in inventory.resources:
+        estimate = estimates.get(item.ref)
+        resources.append({
+            "ref": item.ref, "type": item.type, "name": item.name, "name_status": item.name_status,
+            "resource_group": item.resource_group, "location": item.location, "category": item.category,
+            "attached_to": None if item.attached_to is None else
+            {"kind": item.attached_to.kind, "address": item.attached_to.address},
+            "detail_status": item.detail_status,
+            "power_state": item.pricing_inputs.power_state,
+            "estimate": None if estimate is None else
+            {"status": estimate.estimate_status, "reason": estimate.reason, "monthly_cost": estimate.monthly_cost,
+             "display": estimate.display},
+        })
+    return dict(base, outcome=inventory.outcome, failure=inventory.failure, collected_at=inventory.collected_at,
+                counts=inventory.counts.model_dump(mode="json"),
+                scopes=[{"resource_group": s.resource_group, "status": s.status, "error": s.error}
+                        for s in inventory.scopes],
+                resources=resources, limitations=list(inventory.limitations))
+
+
+def unmanaged_summary(bundle: Bundle) -> dict:
+    view = unmanaged(bundle)
+    totals = view["cost"]["totals"] or {}
+    return {"available": view["available"], "outcome": view["outcome"],
+            "unmanaged": (view["counts"] or {}).get("unmanaged"),
+            "attached_to_managed": (view["counts"] or {}).get("attached_to_managed"),
+            "cost_status": view["cost"]["status"], "estimated_monthly_cost": totals.get("estimated_monthly_cost"),
+            "display": totals.get("display"), "complete": bool(totals.get("complete"))}

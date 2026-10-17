@@ -39,6 +39,7 @@ try:
     from dashboard_api.app import create_app
     from drift_engine import investigation as inv
     from drift_engine import investigation_public as pub
+    from drift_engine import who
 except ImportError:  # the dashboard extra (or httpx) is not installed
     TestClient = None
 
@@ -205,6 +206,10 @@ class CallerTests(_DashboardBase):
             "multiple_matches": dict(data=dict(rows=rows), rows=rows + twin),
             "retention_exceeded": dict(data=dict(rows=rows), rows=rows, now=at_time(8) + dt.timedelta(days=91)),
             "query_failed": dict(data=dict(rows=rows), source=FakeSource({RG: [al.SourceError("throttled", 429)]})),
+            "azure_sign_in_unavailable": dict(data=dict(rows=rows),
+                                              source=FakeSource({RG: [al.SourceError("credential_unavailable")]})),
+            "azure_access_denied": dict(data=dict(rows=rows),
+                                        source=FakeSource({RG: [al.SourceError("authorization_failed", 403)]})),
             "address_unknown": dict(data=dict(rows=rows), rows=rows, terraform=state_json({RG_ADDR: RG_ID})),
             "invalid_resource_id": dict(data=dict(rows=rows), rows=rows,
                                         terraform=state_json({NSG_ADDR: "/not/an/id"})),
@@ -218,6 +223,29 @@ class CallerTests(_DashboardBase):
                                                                      headers=self.headers()))
                 self.assertEqual((result["value"], result["status"]), ("Unknown", status))
                 self.assert_no_sentinel(json.dumps(result))
+
+    def test_rejected_azure_sign_in_is_unknown_with_its_reason(self):
+        rows = self.tagged(HUMAN, log=self.log)
+        source = FakeSource({RG: [al.SourceError("authentication_failed", 401)]})
+        result = self.caller(self.client(self.run_dir(rows), source=source)
+                             .get("/api/drifts?include_caller=true", headers=self.headers()))
+        self.assertEqual((result["value"], result["status"]), ("Unknown", "azure_sign_in_unavailable"))
+
+    def test_unsettled_evidence_is_never_looked_up(self):
+        """G8: an investigation whose Activity Log evidence had not settled yields Unknown, with no query."""
+        rows = self.tagged(HUMAN, log=self.log)
+        data = self.run_dir(rows)
+        path = os.path.join(data, "drift-investigation-500", "drift_investigation.json")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertEqual(text.count('"settled": true'), 1)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('"settled": true', '"settled": false'))
+        source = FakeSource({RG: [page(*rows)]})
+        result = self.caller(self.client(data, source=source).get("/api/drifts?include_caller=true",
+                                                                  headers=self.headers()))
+        self.assertEqual((result["value"], result["status"]), ("Unknown", "activity_log_not_settled"))
+        self.assertEqual(source.calls, [])
 
     def test_unreadable_terraform_json_is_unknown(self):
         rows = self.tagged(HUMAN, log=self.log)
@@ -234,6 +262,86 @@ class CallerTests(_DashboardBase):
         self.assertNotIn("caller_recorded_by_azure", response.json()["drifts"][0])
         self.assertEqual(source.calls, [])
         self.assert_no_sentinel(response.text)
+
+
+class AmbiguousVerdictCallerTests(_DashboardBase):
+    """Regression: `github-38109121618-1` (R3, Control A) has verdict `ambiguous` with two capable tag writes
+    (`op-1` R2's, `op-2` R3's). `drift-engine who` matched a caller for each; the dashboard returned only
+    `Unknown` (`no_decisive_operation`) without looking either up. The real public artifacts are used
+    unchanged; the Activity Log rows reproduce the two real operations to the microsecond."""
+
+    OPS = (("2026-10-11T02:27:00.310062Z", "2026-10-11T02:27:03.028847Z"),
+           ("2026-10-11T03:34:30.341314Z", "2026-10-11T03:34:32.794486Z"))
+    PORTAL_USER = {"idtyp": "user", "appid": "c44b4083-3bb0-49c1-b47d-974e53cbdf3c"}
+    OP2_CALLER = "sentinel-r3-op2@example.com"
+    NOW = dt.datetime(2026, 10, 17, 6, 0, tzinfo=dt.timezone.utc)
+
+    def rows(self) -> list[dict]:
+        out = []
+        for (start, end), caller in zip(self.OPS, (HUMAN, self.OP2_CALLER)):
+            begin, done = self.log.tags(at_time(0), rid=RG_ID, caller=caller)
+            out += [dict(begin, eventTimestamp=start, submissionTimestamp=start, claims=self.PORTAL_USER),
+                    dict(done, eventTimestamp=end, submissionTimestamp=end, claims=self.PORTAL_USER)]
+        return out
+
+    def get(self, *, rows=None, source=None, terraform=b"r3", now=None, environ=None, user="maintainer"):
+        terraform = state_json({RG_ADDR: RG_ID}) if terraform == b"r3" else terraform
+        source = source if source is not None else FakeSource({RG: [page(*(self.rows() if rows is None else rows))]})
+        client = self.client(REAL, source=source, terraform=terraform, now=now or self.NOW, environ=environ)
+        return client, client.get(f"/api/reports/{REAL_R3}?include_caller=true", headers=self.headers(user))
+
+    def test_each_operation_has_the_caller_drift_engine_who_finds(self):
+        client, response = self.get()
+        result = self.caller(response)
+        self.assertEqual((result["value"], result["status"]), ("Unknown", "no_decisive_operation"))  # no single caller
+        self.assertEqual([(o["op_id"], o["start"], o["end"], o["role"], o["status"], o["caller_type"], o["value"])
+                          for o in result["operations"]],
+                         [("op-1", *self.OPS[0], "capable", "matched", "user", HUMAN),
+                          ("op-2", *self.OPS[1], "capable", "matched", "user", self.OP2_CALLER)])
+        drifts = client.get(f"/api/drifts?report_id={REAL_R3}&include_caller=true", headers=self.headers()).json()
+        self.assertEqual(drifts["drifts"][0]["caller_recorded_by_azure"], result)
+
+        # the CLI path on the same inputs: `drift-engine who --public --report --terraform`
+        with open(os.path.join(REAL, "drift-investigation-38109121618", "drift_investigation.json"), "rb") as fh:
+            public = fh.read()
+        with open(os.path.join(REAL, "drift-report-38109121618", "drift_report.json"), "rb") as fh:
+            report = fh.read()
+        cli = who.run_who(public, state_json({RG_ADDR: RG_ID}), source=FakeSource({RG: [page(*self.rows())]}),
+                          now=self.NOW, report_bytes=report, environ={})
+        self.assertTrue(cli.complete)
+        self.assertEqual([(r["op_id"], r["status"], r["callers"]) for r in cli.document["results"]],
+                         [(o["op_id"], o["status"], [o["value"]]) for o in result["operations"]])
+        self.assertFalse(any(self.OP2_CALLER in line or HUMAN in line for line in self.capture.text))
+
+    def test_unavailable_evidence_stays_unknown_per_operation(self):
+        rows = self.rows()
+        cases = {
+            "no_match": dict(rows=[]),
+            "retention_exceeded": dict(now=self.NOW + dt.timedelta(days=90)),
+            "resource_ids_unavailable": dict(terraform=None),
+            "address_unknown": dict(terraform=state_json({NSG_ADDR: NSG_ID})),
+            "azure_sign_in_unavailable": dict(source=FakeSource({RG: [al.SourceError("credential_unavailable")]})),
+            "local_only": dict(environ={"GITHUB_ACTIONS": "true"}, source=FakeSource({RG: [page(*rows)]})),
+        }
+        for status, kwargs in cases.items():
+            with self.subTest(status):
+                source = kwargs.get("source")
+                result = self.caller(self.get(**kwargs)[1])
+                self.assertEqual((result["value"], result["status"]), ("Unknown", "no_decisive_operation"))
+                self.assertEqual([(o["op_id"], o["value"], o["status"]) for o in result["operations"]],
+                                 [("op-1", "Unknown", status), ("op-2", "Unknown", status)])
+                self.assert_no_sentinel(json.dumps(result))
+                if status == "local_only":
+                    self.assertEqual(source.calls, [])
+
+    def test_viewer_never_receives_the_operation_callers(self):
+        source = FakeSource({RG: [page(*self.rows())]})
+        client, response = self.get(source=source, user="viewer")
+        self.assertEqual((response.status_code, response.json()), (403, {"error": "caller_access_denied"}))
+        plain = client.get(f"/api/reports/{REAL_R3}", headers=self.headers("viewer"))
+        self.assertNotIn("caller_recorded_by_azure", plain.json()["drifts"][0])
+        self.assertEqual(source.calls, [])
+        self.assert_no_sentinel(plain.text)
 
 
 class AccessTests(_DashboardBase):
@@ -330,9 +438,15 @@ class EndpointTests(_DashboardBase):
         summary = client.get("/api/summary", headers=self.headers()).json()
         self.assertEqual((summary["reports_total"], summary["data_problems"]), (3, {}))
         self.assertEqual([h["report_id"] for h in summary["history"]], [REAL_R4, REAL_R3, REAL_R2])
+        self.assertEqual({(h["drifted_resources"], h["resources_total"]) for h in summary["history"]}, {(0, 5), (1, 5)})
+        self.assertEqual(summary["history"][0]["unmanaged"], {"available": False, "unmanaged": None, "display": None,
+                                                              "cost_status": "not_in_ai_report"})
         latest = summary["environments"][0]
         self.assertEqual((latest["report_id"], latest["environment"], latest["drifted_resources"]), (REAL_R4, "dev", 0))
-        self.assertEqual(latest["artifacts"], {"ai_analysis_report": True, "investigation": True, "cost_run": True})
+        self.assertEqual(latest["artifacts"], {"ai_analysis_report": True, "investigation": True, "cost_run": True,
+                                               "unmanaged_inventory": False})  # 9B.6 predates Task 10.4
+        self.assertEqual((latest["unmanaged"]["available"], latest["unmanaged"]["cost_status"]),
+                         (False, "not_in_ai_report"))
         self.assertEqual(summary["overview"]["total_resources"], 5)
         self.assertEqual(summary["overview"]["monthly_cost_impact"]["complete"], False)  # not estimated by the API
 

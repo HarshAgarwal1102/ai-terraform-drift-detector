@@ -45,21 +45,40 @@
           <div id="severity-bars"></div>
         </section>
         <section class="panel">
-          <h2>Run history</h2>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Finished</th><th>Environment</th><th>Run</th><th>Drifts</th><th>Highest</th></tr></thead>
+          <div class="panel-head">
+            <h2>Run history</h2>
+            <span id="history-count" class="hint"></span>
+          </div>
+          <label class="search">Search runs
+            <input type="search" id="history-search" placeholder="Run id, date, environment or severity"
+                   autocomplete="off" spellcheck="false">
+          </label>
+          <div class="table-wrap history-scroll">
+            <table class="history">
+              <thead><tr><th>Finished</th><th>Environment</th><th>Run</th><th>Drifts</th><th>Highest</th>
+                <th>Unmanaged</th></tr></thead>
               <tbody id="history"></tbody>
             </table>
           </div>
         </section>
       </div>
 
+      <section class="panel" id="unmanaged-panel">
+        <h2>Unmanaged resources</h2>
+        <div id="unmanaged"></div>
+      </section>
+
       <section class="panel">
+        <h2>GitHub drift issues</h2>
+        <div id="issues"></div>
+      </section>
+
+      <section class="panel" id="drifts-panel">
         <div class="panel-head">
           <h2>Active drifts</h2>
           <span id="drift-count" class="hint"></span>
         </div>
+        <p id="drift-context" class="hint" role="status"></p>
         <div class="filters">
           <label>Run <select id="filter-run"></select></label>
           <label>Severity <select id="filter-severity"></select></label>
@@ -69,7 +88,7 @@
         <div class="table-wrap">
           <table class="drifts">
             <thead><tr><th>Resource</th><th>Environment</th><th>Severity</th><th>Changed property (expected → actual)</th>
-              <th>Operation time</th><th>Caller recorded by Azure</th><th></th></tr></thead>
+              <th>Operation time</th><th>Caller recorded by Azure</th><th>GitHub issue</th><th></th></tr></thead>
             <tbody id="drift-rows"></tbody>
           </table>
         </div>

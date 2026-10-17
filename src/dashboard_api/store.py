@@ -12,9 +12,13 @@ to a report only when they are bound to it:
   (the canonical SHA-256, `investigation_public.canonical_sha256`);
 - `drift_investigation.json`: loaded with `investigation_public.load_public` (leak
   scan and strict model) and bound with `investigation_public.check_binding`;
-- `cost_run.json`: `run_id` and `drift_report_sha256`.
+- `cost_run.json`: `run_id` and `drift_report_sha256`;
+- `unmanaged_inventory.json` (Task 10.4, shown by Task 13.3): loaded with
+  `unmanaged_public.load_inventory` (strict model and public leak scan), bound by
+  `binding.run_id` and `binding.drift_report_sha256`.
 Two different documents for one run make that slot ambiguous: neither is used.
-Problems are fixed codes, never file content or paths.
+Problems are fixed codes, never file content or paths. A `github_issues.json` snapshot
+at the top of the data directory (Task 13.3, `issues.py`) is loaded alongside.
 """
 
 from __future__ import annotations
@@ -26,8 +30,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
+
 from drift_engine import investigation_public as pub
+from drift_engine import unmanaged_public
 from drift_engine.logs import log_event
+
+from dashboard_api import issues as issue_states
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +44,8 @@ REPORT_FILE = "drift_report.json"
 AI_REPORT_FILE = "ai_analysis_report.json"
 INVESTIGATION_FILE = pub.PUBLIC_FILE
 COST_RUN_FILE = "cost_run.json"
-FILES = (REPORT_FILE, AI_REPORT_FILE, INVESTIGATION_FILE, COST_RUN_FILE)
+INVENTORY_FILE = unmanaged_public.INVENTORY_FILE
+FILES = (REPORT_FILE, AI_REPORT_FILE, INVESTIGATION_FILE, COST_RUN_FILE, INVENTORY_FILE)
 MAX_FILE_BYTES = pub.MAX_INPUT_BYTES
 MAX_DEPTH = 6
 MAX_FILES = 5000
@@ -57,6 +67,8 @@ class Bundle:
     investigation: pub.PublicInvestigation | None = None
     cost_run: dict | None = None
     problems: tuple[str, ...] = ()
+    inventory: unmanaged_public.Inventory | None = None
+    inventory_sha256: str | None = None
 
     @property
     def run(self) -> dict:
@@ -75,6 +87,7 @@ class Bundle:
 class Index:
     bundles: list[Bundle]  # newest first
     problems: Counter = field(default_factory=Counter)
+    issues: issue_states.Snapshot | None = None
 
     def get(self, run_id: str) -> Bundle | None:
         return next((b for b in self.bundles if b.run_id == run_id), None)
@@ -144,6 +157,7 @@ def load(root: str) -> Index:
     ai_reports: list[dict] = []
     investigations: list[tuple[pub.PublicInvestigation, dict]] = []
     cost_runs: list[dict] = []
+    inventories: list[tuple[unmanaged_public.Inventory, str]] = []
     for name, path in _files(root):
         data = _read(path)
         if data is None:
@@ -158,6 +172,12 @@ def load(root: str) -> Index:
             investigations.append((investigation, _json(data)))
             continue
         doc = _json(data)
+        if name == INVENTORY_FILE:
+            try:
+                inventories.append((unmanaged_public.load_inventory(doc), pub.canonical_sha256(doc)))
+            except (ValidationError, ValueError, TypeError, RecursionError):
+                problems["unmanaged_inventory_invalid"] += 1
+            continue
         if name == REPORT_FILE:
             if not _is_report(doc):
                 problems["report_invalid"] += 1
@@ -193,9 +213,16 @@ def load(root: str) -> Index:
             notes.append("ai_report_investigation_mismatch")
         cost = _single({pub.canonical_sha256(d): d for d in cost_runs
                         if d.get("run_id") == run_id and d.get("drift_report_sha256") == sha}, "cost_run", notes)
-        bundles.append(Bundle(run_id, report, sha, ai, investigation, cost, tuple(notes)))
+        bound_inventory = _single({digest: (doc, digest) for doc, digest in inventories
+                                   if doc.binding.run_id == run_id and doc.binding.drift_report_sha256 == sha},
+                                  "unmanaged_inventory", notes)
+        inventory, inventory_sha = bound_inventory if bound_inventory else (None, None)
+        bundles.append(Bundle(run_id, report, sha, ai, investigation, cost, tuple(notes), inventory, inventory_sha))
     bundles.sort(key=lambda b: (b.finished_at, b.run_id), reverse=True)
+    snapshot, problem = issue_states.load(root)
+    if problem:
+        problems[problem] += 1
     if problems:
         log_event(logger, logging.WARNING, "dashboard_store_problems", "artifact problems skipped",
                   problems=dict(sorted(problems.items())))
-    return Index(bundles, problems)
+    return Index(bundles, problems, snapshot)
