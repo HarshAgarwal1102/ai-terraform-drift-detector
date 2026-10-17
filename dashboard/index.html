@@ -52,13 +52,18 @@
     <!-- Sign-in page. Wide screens: brand panel (left) + workflow and card (right). Phones: the card only. -->
     <section id="signin" class="signin-page">
       <div class="brand-panel">
-        <svg class="logo logo-xl" viewBox="0 0 64 64" role="img"
-          aria-label="Drift Detector logo: stacked infrastructure blocks, the top one drifted out of place">
-          <g><polygon class="face-top" points="32,36 52,46 32,56 12,46"/><polygon class="face-left" points="12,46 32,56 32,60 12,50"/><polygon class="face-right" points="32,56 52,46 52,50 32,60"/></g>
-          <g><polygon class="face-top" points="32,27 52,37 32,47 12,37"/><polygon class="face-left" points="12,37 32,47 32,51 12,41"/><polygon class="face-right" points="32,47 52,37 52,41 32,51"/></g>
-          <polygon class="ghost" points="32,18 52,28 32,38 12,28"/>
-          <g class="drift"><polygon class="face-top" points="41,12 61,22 41,32 21,22"/><polygon class="face-left" points="21,22 41,32 41,36 21,26"/><polygon class="face-right" points="41,32 61,22 61,26 41,36"/></g>
-        </svg>
+        <!-- The logo drawn large, labelled: dashed slot = declared state, orange block = actual state. -->
+        <div class="brand-figure">
+          <svg class="logo logo-hero" viewBox="0 0 64 64" role="img"
+            aria-label="Drift Detector logo: the top block has drifted from its declared position">
+            <g><polygon class="face-top" points="32,36 52,46 32,56 12,46"/><polygon class="face-left" points="12,46 32,56 32,60 12,50"/><polygon class="face-right" points="32,56 52,46 52,50 32,60"/></g>
+            <g><polygon class="face-top" points="32,27 52,37 32,47 12,37"/><polygon class="face-left" points="12,37 32,47 32,51 12,41"/><polygon class="face-right" points="32,47 52,37 52,41 32,51"/></g>
+            <polygon class="ghost" points="32,18 52,28 32,38 12,28"/>
+            <g class="drift"><polygon class="face-top" points="41,12 61,22 41,32 21,22"/><polygon class="face-left" points="21,22 41,32 41,36 21,26"/><polygon class="face-right" points="41,32 61,22 61,26 41,36"/></g>
+          </svg>
+          <span class="figure-label declared" aria-hidden="true">declared<span class="leader"></span></span>
+          <span class="figure-label actual" aria-hidden="true"><span class="leader"></span>actual</span>
+        </div>
         <p class="eyebrow">Terraform Drift Detector</p>
         <h2 class="brand-tagline">Catch the <span class="drift-word">drift</span> before it catches you.</h2>
         <p class="brand-sub">Every resource, exactly as declared in Terraform.</p>
@@ -227,6 +232,36 @@
   <dialog id="modal" aria-label="Drift details">
     <button type="button" id="modal-close" class="close" aria-label="Close">×</button>
     <div id="modal-body"></div>
+  </dialog>
+
+  <!-- Sign-in popup: data-state is "verifying", then "granted" (closes onto the dashboard) or "denied". -->
+  <dialog id="auth-dialog" class="popup" data-state="verifying" aria-labelledby="auth-title"
+    aria-describedby="auth-message">
+    <div class="auth-ring" aria-hidden="true">
+      <span class="auth-sweep"></span>
+      <svg class="auth-mark auth-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      <svg class="auth-mark auth-cross" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>
+    </div>
+    <h2 id="auth-title" aria-live="polite">Verifying token…</h2>
+    <p id="auth-message" class="popup-text">Checking access with the dashboard API</p>
+    <div class="auth-bar" aria-hidden="true"><span></span></div>
+    <button type="button" id="auth-retry" class="key popup-wide" hidden>Try again</button>
+  </dialog>
+
+  <!-- Sign-out confirmation. Cancel has focus first, so Enter or Escape never signs out by accident. -->
+  <dialog id="signout-dialog" class="popup" role="alertdialog" aria-labelledby="signout-title"
+    aria-describedby="signout-message">
+    <span class="popup-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+        stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/></svg>
+    </span>
+    <h2 id="signout-title">Sign out?</h2>
+    <p id="signout-message" class="popup-text">Your token is cleared from this tab’s memory. You’ll need it again to
+      sign back in.</p>
+    <div class="popup-actions">
+      <button type="button" id="signout-cancel" class="key" autofocus>Cancel</button>
+      <button type="button" id="signout-confirm" class="key-danger">Sign out</button>
+    </div>
   </dialog>
 </body>
 </html>
