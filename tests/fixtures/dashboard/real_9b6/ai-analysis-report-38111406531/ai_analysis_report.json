@@ -1,0 +1,158 @@
+{
+  "analysis": {
+    "configuration": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no configuration changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "cost": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no cost-relevant changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "investigation": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no investigated drifted resources",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "risk": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no deterministic risk factors",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "root_cause": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no changes with an origin to analyze",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "security": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no security-relevant changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    }
+  },
+  "cost": {
+    "monetary_impact": "not_determinable_from_evidence",
+    "pricing_source": null
+  },
+  "investigation": {
+    "anchors": {
+      "accepted": 0,
+      "examined": 0,
+      "rejected": {}
+    },
+    "completeness": {
+      "max_ingestion_delay_ms": null,
+      "not_before": null,
+      "polls": 1,
+      "queried_at": "2026-10-11T04:23:59.525190Z",
+      "settled": false
+    },
+    "exposure": {
+      "caller_identity": "withheld",
+      "correlation_id": "withheld",
+      "event_id": "withheld",
+      "resource_id": "withheld",
+      "who_path": "local_only"
+    },
+    "failure": null,
+    "observation": {
+      "finished_at": "2026-10-11T04:23:49.000000Z",
+      "started_at": "2026-10-11T04:23:33.000000Z"
+    },
+    "rules": {
+      "automated_overlap_minutes": 5,
+      "deletion_rules_version": "2",
+      "lookback_days": 30,
+      "poll_cap_minutes": 20,
+      "poll_interval_minutes": 2,
+      "settle_margin_minutes": 10,
+      "skew_seconds": 60,
+      "table_version": "1"
+    },
+    "status": "complete"
+  },
+  "limitations": [
+    "Terraform evidence (drift_report.json) is the source of truth for WHAT changed; AI sections are inference.",
+    "The Azure Activity Log records operations, not property values: an operation is related to drift only by inference (property link inferred_not_provable); only a deletion can be property-confirmed.",
+    "Caller identities are withheld in public reports; WHO is available locally via drift-engine who.",
+    "Client application azure_cli also covers Terraform run locally with Azure CLI authentication.",
+    "Completeness-dependent statements cover only the Activity Log events available at the investigation's query time (queried_at); Microsoft publishes no ingestion SLA.",
+    "No pricing data: monetary impact is not determinable from this evidence (Phase 10).",
+    "Recommendations follow the deterministic recommendation policy v1; investigation verdicts and caller data never change them. Nothing has been executed; every option needs human approval (Phase 11).",
+    "HCL value fragments do not say where a value is defined (resource block, module input or tfvars).",
+    "AI analysis was not performed: no relevant changes."
+  ],
+  "llm": {
+    "attempted": false,
+    "evidence_sent": [],
+    "investigation_sent": [],
+    "max_retries": null,
+    "model": null,
+    "provider": "none",
+    "reason": "no relevant changes",
+    "status": "not_attempted"
+  },
+  "provenance": {
+    "classification_version": "2",
+    "drift_report_sha256": "e85719d37998315ea964e424e4eab4eda59be65086bd05f06dd21faf9d190ea0",
+    "environment": "dev",
+    "investigation_sha256": "cd9de6ddec54e6aa66095293b3b7ea6a9a7fe9478825adcc31387375704106cb",
+    "plan_timestamp": "2026-10-11T04:23:42Z",
+    "run_id": "github-38111406531-1",
+    "versions": {
+      "capable_operations_table": "1",
+      "deletion_rules": "2",
+      "investigation_public": "1",
+      "recommendation_policy": "1",
+      "remediation_catalogue": "1",
+      "report": "2",
+      "statements": "1"
+    }
+  },
+  "remediation": {
+    "approval_required": true,
+    "automatic_apply": false,
+    "catalogue_version": "1",
+    "options": [],
+    "reason": null,
+    "recommendation_policy_version": "1"
+  },
+  "report_version": "2",
+  "resources": [],
+  "summary": {
+    "classification_counts": {
+      "in_sync": 5
+    },
+    "drifted_resources": 0,
+    "failure": null,
+    "has_drift": false,
+    "highest_severity": "INFO",
+    "outcome": "succeeded",
+    "resources_total": 5
+  }
+}

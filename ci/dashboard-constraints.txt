@@ -1,0 +1,15 @@
+# Dashboard data API constraints (Task 13.1).
+#
+# The packages of the `dashboard` extra's resolved closure that ci/ai-constraints.txt and
+# ci/azure-constraints.txt do not already pin (anyio, h11, pydantic, typing-extensions,
+# typing-inspection and the rest are pinned there), with exact versions. Resolved 2026-10-17
+# within the pyproject.toml ranges (fastapi>=0.115,<1; uvicorn>=0.30,<1) on CPython 3.13 macOS
+# arm64; all are pure-Python wheels. requirements.txt applies this file. Change these pins only
+# through a reviewed update that re-resolves the set.
+
+annotated-doc==0.0.5
+click==8.5.0
+fastapi==0.143.3
+opentelemetry-api==1.45.1
+starlette==1.8.0
+uvicorn==0.54.0

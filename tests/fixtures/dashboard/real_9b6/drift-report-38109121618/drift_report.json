@@ -1,0 +1,319 @@
+{
+  "classification_version": "2",
+  "failure": null,
+  "has_drift": true,
+  "outcome": "succeeded",
+  "output_changes": [
+    {
+      "action": "no-op",
+      "actions": [
+        "no-op"
+      ],
+      "name": "resource_groups"
+    },
+    {
+      "action": "no-op",
+      "actions": [
+        "no-op"
+      ],
+      "name": "virtual_networks"
+    }
+  ],
+  "plan": {
+    "applyable": true,
+    "complete": true,
+    "errored": false,
+    "format_version": "1.2",
+    "terraform_version": "1.14.7",
+    "timestamp": "2026-10-11T03:40:47Z"
+  },
+  "public_version": "1",
+  "resource_types": [
+    {
+      "addresses": [
+        "module.network[\"main\"].azurerm_network_security_group.this[\"app\"]"
+      ],
+      "classification_counts": {
+        "in_sync": 1
+      },
+      "resource_count": 1,
+      "type": "azurerm_network_security_group"
+    },
+    {
+      "addresses": [
+        "module.resource_group.azurerm_resource_group.this[\"main\"]"
+      ],
+      "classification_counts": {
+        "external_drift": 1
+      },
+      "resource_count": 1,
+      "type": "azurerm_resource_group"
+    },
+    {
+      "addresses": [
+        "module.network[\"main\"].azurerm_subnet.this[\"app\"]"
+      ],
+      "classification_counts": {
+        "in_sync": 1
+      },
+      "resource_count": 1,
+      "type": "azurerm_subnet"
+    },
+    {
+      "addresses": [
+        "module.network[\"main\"].azurerm_subnet_network_security_group_association.this[\"app\"]"
+      ],
+      "classification_counts": {
+        "in_sync": 1
+      },
+      "resource_count": 1,
+      "type": "azurerm_subnet_network_security_group_association"
+    },
+    {
+      "addresses": [
+        "module.network[\"main\"].azurerm_virtual_network.this"
+      ],
+      "classification_counts": {
+        "in_sync": 1
+      },
+      "resource_count": 1,
+      "type": "azurerm_virtual_network"
+    }
+  ],
+  "resources": [
+    {
+      "action": "no-op",
+      "action_reason": null,
+      "actions": [
+        "no-op"
+      ],
+      "address": "module.network[\"main\"].azurerm_network_security_group.this[\"app\"]",
+      "ambiguous": false,
+      "attribute_changes": [],
+      "attributes": [],
+      "classification": "in_sync",
+      "drift_action": null,
+      "drift_actions": null,
+      "importing": false,
+      "index": "app",
+      "mode": "managed",
+      "module_address": "module.network[\"main\"]",
+      "name": "this",
+      "notes": [],
+      "previous_address": null,
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "severity": {
+        "level": "INFO",
+        "reasons": []
+      },
+      "type": "azurerm_network_security_group"
+    },
+    {
+      "action": "no-op",
+      "action_reason": null,
+      "actions": [
+        "no-op"
+      ],
+      "address": "module.network[\"main\"].azurerm_subnet.this[\"app\"]",
+      "ambiguous": false,
+      "attribute_changes": [],
+      "attributes": [],
+      "classification": "in_sync",
+      "drift_action": null,
+      "drift_actions": null,
+      "importing": false,
+      "index": "app",
+      "mode": "managed",
+      "module_address": "module.network[\"main\"]",
+      "name": "this",
+      "notes": [],
+      "previous_address": null,
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "severity": {
+        "level": "INFO",
+        "reasons": []
+      },
+      "type": "azurerm_subnet"
+    },
+    {
+      "action": "no-op",
+      "action_reason": null,
+      "actions": [
+        "no-op"
+      ],
+      "address": "module.network[\"main\"].azurerm_subnet_network_security_group_association.this[\"app\"]",
+      "ambiguous": false,
+      "attribute_changes": [],
+      "attributes": [],
+      "classification": "in_sync",
+      "drift_action": null,
+      "drift_actions": null,
+      "importing": false,
+      "index": "app",
+      "mode": "managed",
+      "module_address": "module.network[\"main\"]",
+      "name": "this",
+      "notes": [],
+      "previous_address": null,
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "severity": {
+        "level": "INFO",
+        "reasons": []
+      },
+      "type": "azurerm_subnet_network_security_group_association"
+    },
+    {
+      "action": "no-op",
+      "action_reason": null,
+      "actions": [
+        "no-op"
+      ],
+      "address": "module.network[\"main\"].azurerm_virtual_network.this",
+      "ambiguous": false,
+      "attribute_changes": [],
+      "attributes": [],
+      "classification": "in_sync",
+      "drift_action": null,
+      "drift_actions": null,
+      "importing": false,
+      "index": null,
+      "mode": "managed",
+      "module_address": "module.network[\"main\"]",
+      "name": "this",
+      "notes": [],
+      "previous_address": null,
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "severity": {
+        "level": "INFO",
+        "reasons": []
+      },
+      "type": "azurerm_virtual_network"
+    },
+    {
+      "action": "update",
+      "action_reason": null,
+      "actions": [
+        "update"
+      ],
+      "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+      "ambiguous": false,
+      "attribute_changes": [
+        {
+          "assessment": {
+            "category": "configured",
+            "noise_rule": null
+          },
+          "attribute": "tags",
+          "class": "drifted",
+          "desired": {
+            "status": "absent"
+          },
+          "path": [
+            "tags",
+            "drift_test"
+          ],
+          "real": {
+            "status": "value",
+            "value": "primary-r2"
+          },
+          "redacted": false,
+          "severity": {
+            "level": "LOW",
+            "rules": [
+              "tags"
+            ]
+          },
+          "state": {
+            "status": "absent"
+          }
+        },
+        {
+          "assessment": {
+            "category": "configured",
+            "noise_rule": null
+          },
+          "attribute": "tags",
+          "class": "drifted",
+          "desired": {
+            "status": "absent"
+          },
+          "path": [
+            "tags",
+            "drift_test-2"
+          ],
+          "real": {
+            "status": "value",
+            "value": "control-a-r3"
+          },
+          "redacted": false,
+          "severity": {
+            "level": "LOW",
+            "rules": [
+              "tags"
+            ]
+          },
+          "state": {
+            "status": "absent"
+          }
+        }
+      ],
+      "attributes": [
+        {
+          "class": "drifted",
+          "name": "tags"
+        }
+      ],
+      "classification": "external_drift",
+      "drift_action": "update",
+      "drift_actions": [
+        "update"
+      ],
+      "importing": false,
+      "index": "main",
+      "mode": "managed",
+      "module_address": "module.resource_group",
+      "name": "this",
+      "notes": [],
+      "previous_address": null,
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "severity": {
+        "level": "LOW",
+        "reasons": [
+          "tags.drift_test: tags",
+          "tags.drift_test-2: tags"
+        ]
+      },
+      "type": "azurerm_resource_group"
+    }
+  ],
+  "run": {
+    "backend_key": "dev.tfstate",
+    "detection_outcome": "succeeded",
+    "environment": "dev",
+    "finished_at": "2026-10-11T03:40:55Z",
+    "git_commit": "4d89c940de59df53c43ea80cbde3a0dc9e2ab1b9",
+    "plan_exit_code": 2,
+    "run_id": "github-38109121618-1",
+    "show_exit_code": 0,
+    "started_at": "2026-10-11T03:40:37Z",
+    "terraform_version": "1.14.7",
+    "working_dir": "terraform/environments/dev"
+  },
+  "summary": {
+    "ambiguous_resources": 0,
+    "classification_counts": {
+      "external_drift": 1,
+      "in_sync": 4
+    },
+    "drifted_resources": 1,
+    "has_pending_output_changes": false,
+    "has_pending_resource_changes": true,
+    "highest_severity": "LOW",
+    "output_only_change": false,
+    "resources_total": 5,
+    "severity_counts": {
+      "INFO": 4,
+      "LOW": 1
+    }
+  }
+}

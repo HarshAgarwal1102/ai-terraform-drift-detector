@@ -7,17 +7,69 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+# Least privilege: only the authenticated job below is granted `id-token: write`.
 permissions:
-  id-token: write
   contents: read
 
 env:
   TERRAFORM_VERSION: "1.14.7"
 
 jobs:
+  # Runs for every event, pull requests included. No Azure login, no OIDC token,
+  # no repository secret and no Terraform state: the same offline checks as
+  # scripts/validate.sh (fmt, then init -backend=false and validate per root).
+  offline-validate:
+    name: "Terraform Offline Validation"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Wrapper disabled (Task 12.1A, E6): the real terraform binary, no echo of output.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check Terraform Formatting
+        run: terraform fmt -check -recursive
+
+      # Bootstrap intentionally uses LOCAL state, which is excluded from Git by
+      # .gitignore and therefore never present in CI. Planning here would compare
+      # against empty state and propose re-creating the already-deployed state
+      # infrastructure. CI is restricted to offline validation only — matching
+      # the pattern already used by scripts/validate.sh.
+      - name: Validate Bootstrap Configuration (offline, no state)
+        run: |
+          set -euo pipefail
+          terraform -chdir=terraform/bootstrap init -backend=false -input=false
+          terraform -chdir=terraform/bootstrap validate
+
+      # The remote AzureRM backend is not initialized here (-backend=false), so
+      # this needs no Azure credential and reads or changes no state.
+      - name: Validate Dev Environment Configuration (offline, no state)
+        run: |
+          set -euo pipefail
+          terraform -chdir=terraform/environments/dev init -backend=false -input=false
+          terraform -chdir=terraform/environments/dev validate
+
+  # Azure OIDC login and the read-only dev plan. Never on pull requests: the only
+  # federated credential trusts this repository's `main` branch, and pull request
+  # code is not given an Azure token. Push and manual runs keep the full check.
   validate-and-plan:
     name: "Terraform OIDC Auth & Plan Test"
+    if: github.event_name != 'pull_request'
+    needs: offline-validate
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout Code
@@ -68,20 +120,6 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
-
-      - name: Check Terraform Formatting
-        run: terraform fmt -check -recursive
-
-      # Bootstrap intentionally uses LOCAL state, which is excluded from Git by
-      # .gitignore and therefore never present in CI. Planning here would compare
-      # against empty state and propose re-creating the already-deployed state
-      # infrastructure. CI is restricted to offline validation only — matching
-      # the pattern already used by scripts/validate.sh.
-      - name: Validate Bootstrap Configuration (offline, no state)
-        run: |
-          set -euo pipefail
-          terraform -chdir=terraform/bootstrap init -backend=false -input=false
-          terraform -chdir=terraform/bootstrap validate
 
       # Dev uses the AzureRM remote backend. Authentication is OIDC end to end:
       #   ARM_USE_OIDC    - exchange the GitHub ID token for an Azure token

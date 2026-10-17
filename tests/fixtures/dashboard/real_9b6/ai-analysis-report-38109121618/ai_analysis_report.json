@@ -1,0 +1,646 @@
+{
+  "analysis": {
+    "configuration": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "LLM unavailable: AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "cost": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no cost-relevant changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "investigation": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "LLM unavailable: AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "risk": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "LLM unavailable: AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "root_cause": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "LLM unavailable: AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "security": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no security-relevant changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    }
+  },
+  "cost": {
+    "monetary_impact": "not_determinable_from_evidence",
+    "pricing_source": null
+  },
+  "investigation": {
+    "anchors": {
+      "accepted": 15,
+      "examined": 38,
+      "rejected": {
+        "report_invalid": 23
+      }
+    },
+    "completeness": {
+      "max_ingestion_delay_ms": 119689,
+      "not_before": "2026-10-11T03:50:55.000000Z",
+      "polls": 1,
+      "queried_at": "2026-10-11T03:50:55.000106Z",
+      "settled": true
+    },
+    "exposure": {
+      "caller_identity": "withheld",
+      "correlation_id": "withheld",
+      "event_id": "withheld",
+      "resource_id": "withheld",
+      "who_path": "local_only"
+    },
+    "failure": null,
+    "observation": {
+      "finished_at": "2026-10-11T03:40:55.000000Z",
+      "started_at": "2026-10-11T03:40:37.000000Z"
+    },
+    "rules": {
+      "automated_overlap_minutes": 5,
+      "deletion_rules_version": "2",
+      "lookback_days": 30,
+      "poll_cap_minutes": 20,
+      "poll_interval_minutes": 2,
+      "settle_margin_minutes": 10,
+      "skew_seconds": 60,
+      "table_version": "1"
+    },
+    "status": "complete"
+  },
+  "limitations": [
+    "Terraform evidence (drift_report.json) is the source of truth for WHAT changed; AI sections are inference.",
+    "The Azure Activity Log records operations, not property values: an operation is related to drift only by inference (property link inferred_not_provable); only a deletion can be property-confirmed.",
+    "Caller identities are withheld in public reports; WHO is available locally via drift-engine who.",
+    "Client application azure_cli also covers Terraform run locally with Azure CLI authentication.",
+    "Completeness-dependent statements cover only the Activity Log events available at the investigation's query time (queried_at); Microsoft publishes no ingestion SLA.",
+    "No pricing data: monetary impact is not determinable from this evidence (Phase 10).",
+    "Recommendations follow the deterministic recommendation policy v1; investigation verdicts and caller data never change them. Nothing has been executed; every option needs human approval (Phase 11).",
+    "HCL value fragments do not say where a value is defined (resource block, module input or tfvars).",
+    "AI analysis was not performed: LLM unavailable: AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)."
+  ],
+  "llm": {
+    "attempted": false,
+    "evidence_sent": [],
+    "investigation_sent": [],
+    "max_retries": null,
+    "model": null,
+    "provider": "none",
+    "reason": "LLM unavailable: AI_LLM_PROVIDER is explicitly none (LLM analysis disabled)",
+    "status": "not_attempted"
+  },
+  "provenance": {
+    "classification_version": "2",
+    "drift_report_sha256": "64ba26717406d8633d8d62d4bc94530b27127d9939f4f39acd0e285df9240f72",
+    "environment": "dev",
+    "investigation_sha256": "0c8aceba64cbfb24d87a0b617cf601dbab0da33cbfdce572226b8aa625f5db83",
+    "plan_timestamp": "2026-10-11T03:40:47Z",
+    "run_id": "github-38109121618-1",
+    "versions": {
+      "capable_operations_table": "1",
+      "deletion_rules": "2",
+      "investigation_public": "1",
+      "recommendation_policy": "1",
+      "remediation_catalogue": "1",
+      "report": "2",
+      "statements": "1"
+    }
+  },
+  "remediation": {
+    "approval_required": true,
+    "automatic_apply": false,
+    "catalogue_version": "1",
+    "options": [
+      {
+        "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+        "approval": {
+          "approver": null,
+          "decided_at": null,
+          "destructive_confirmation_required": false,
+          "required": true,
+          "status": "pending"
+        },
+        "commands": [
+          {
+            "command": "terraform -chdir=terraform/environments/dev plan -var-file=<var_file> -detailed-exitcode",
+            "mutates": "none",
+            "placeholders": [
+              "var_file"
+            ],
+            "read_only": true,
+            "template_id": "plan_review"
+          },
+          {
+            "command": "terraform -chdir=terraform/environments/dev plan -var-file=<var_file> -out=reviewed.tfplan",
+            "mutates": "none",
+            "placeholders": [
+              "var_file"
+            ],
+            "read_only": true,
+            "template_id": "plan_save"
+          },
+          {
+            "command": "terraform -chdir=terraform/environments/dev apply reviewed.tfplan",
+            "mutates": "infrastructure",
+            "placeholders": [],
+            "read_only": false,
+            "template_id": "apply_reviewed_plan"
+          }
+        ],
+        "data_not_restored": false,
+        "description": "Apply the reviewed plan: Terraform sets Azure back to the declared values.",
+        "destructive": false,
+        "direction": "apply_plan",
+        "evidence": [
+          {
+            "assessment": "configured",
+            "attribute_class": "drifted",
+            "origin": "outside_terraform",
+            "path": [
+              "tags",
+              "drift_test"
+            ],
+            "severity": "LOW"
+          },
+          {
+            "assessment": "configured",
+            "attribute_class": "drifted",
+            "origin": "outside_terraform",
+            "path": [
+              "tags",
+              "drift_test-2"
+            ],
+            "severity": "LOW"
+          }
+        ],
+        "execution": {
+          "allowed": false,
+          "automatic_apply": false,
+          "mode": "manual_after_approval"
+        },
+        "fragment_gaps": [],
+        "fragments": [],
+        "human_decision_required": false,
+        "kind": "restore_declared",
+        "mutates": "infrastructure",
+        "option_id": "module.resource_group.azurerm_resource_group.this[\"main\"]#1",
+        "plan_default": true,
+        "preconditions": [
+          "Re-run terraform plan and confirm its diff matches this report (drift_report_sha256).",
+          "Obtain the required human approval; nothing in this report is executed automatically."
+        ],
+        "terraform_plan_action": "update"
+      },
+      {
+        "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+        "approval": {
+          "approver": null,
+          "decided_at": null,
+          "destructive_confirmation_required": false,
+          "required": true,
+          "status": "pending"
+        },
+        "commands": [
+          {
+            "command": "terraform -chdir=terraform/environments/dev plan -var-file=<var_file> -detailed-exitcode",
+            "mutates": "none",
+            "placeholders": [
+              "var_file"
+            ],
+            "read_only": true,
+            "template_id": "plan_review"
+          }
+        ],
+        "data_not_restored": false,
+        "description": "Keep the value now in Azure: change the declared value to match it, then re-plan.",
+        "destructive": false,
+        "direction": "accept_remote",
+        "evidence": [
+          {
+            "assessment": "configured",
+            "attribute_class": "drifted",
+            "origin": "outside_terraform",
+            "path": [
+              "tags",
+              "drift_test"
+            ],
+            "severity": "LOW"
+          },
+          {
+            "assessment": "configured",
+            "attribute_class": "drifted",
+            "origin": "outside_terraform",
+            "path": [
+              "tags",
+              "drift_test-2"
+            ],
+            "severity": "LOW"
+          }
+        ],
+        "execution": {
+          "allowed": false,
+          "automatic_apply": false,
+          "mode": "manual_after_approval"
+        },
+        "fragment_gaps": [],
+        "fragments": [
+          {
+            "assignment_hcl": null,
+            "location": "not_determined",
+            "path": [
+              "tags",
+              "drift_test"
+            ],
+            "value_hcl": "\"primary-r2\"",
+            "value_source": "real_view"
+          },
+          {
+            "assignment_hcl": null,
+            "location": "not_determined",
+            "path": [
+              "tags",
+              "drift_test-2"
+            ],
+            "value_hcl": "\"control-a-r3\"",
+            "value_source": "real_view"
+          }
+        ],
+        "human_decision_required": false,
+        "kind": "accept_remote_value",
+        "mutates": "configuration",
+        "option_id": "module.resource_group.azurerm_resource_group.this[\"main\"]#2",
+        "plan_default": false,
+        "preconditions": [
+          "Re-run terraform plan and confirm its diff matches this report (drift_report_sha256).",
+          "Obtain the required human approval; nothing in this report is executed automatically."
+        ],
+        "terraform_plan_action": null
+      }
+    ],
+    "reason": null,
+    "recommendation_policy_version": "1"
+  },
+  "report_version": "2",
+  "resources": [
+    {
+      "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+      "analysis": {
+        "basis": "deterministic",
+        "narrative": [
+          {
+            "id": "what.terraform.v1",
+            "text": "Terraform reports external_drift on module.resource_group.azurerm_resource_group.this[\"main\"] (planned action update, deterministic severity LOW) with 2 changed attribute(s). Expected values are the declared configuration (desired); actual values are what Azure returned (real)."
+          },
+          {
+            "id": "when.not_confirmed.v1",
+            "text": "Event time of the change: not confirmed by available evidence."
+          },
+          {
+            "id": "when.detection.v1",
+            "text": "Detection time: Terraform observed Azure from 2026-10-11T03:40:37.000000Z to 2026-10-11T03:40:55.000000Z (plan timestamp 2026-10-11T03:40:47Z)."
+          },
+          {
+            "id": "when.last_in_sync.v1",
+            "text": "Last in-sync observation: drift run github-38104177960-1 saw this resource in sync from 2026-10-11T02:09:11.000000Z to 2026-10-11T02:09:32.000000Z; the correlation window starts at 2026-10-11T02:08:11.000000Z."
+          },
+          {
+            "id": "who.multiple.v1",
+            "text": "Recorded caller: not confirmed by available evidence (2 candidate operations, none decisive). Each operation's caller type and client application are listed with the recorded operations."
+          },
+          {
+            "id": "who.actor_not_confirmed.v1",
+            "text": "Actor attribution: not confirmed by available evidence. A recorded caller is never presented as the author of the drift."
+          },
+          {
+            "id": "operations.recorded.v1",
+            "text": "Azure recorded 2 operation group(s) on this resource (2 capable, 0 unclassified, 0 irrelevant, 0 after the observation)."
+          },
+          {
+            "id": "correlation.ambiguous.v1",
+            "text": "Verdict ambiguous (multiple_capable_operations): more than one recorded operation can explain the drift. No single operation is decisive."
+          },
+          {
+            "id": "link.inferred.v1",
+            "text": "Property link inferred_not_provable: the Activity Log records operations, not property values, so the link to the drifted attributes is not confirmed by available evidence."
+          },
+          {
+            "id": "correlation.completeness.v1",
+            "text": "Completeness: events available at 2026-10-11T03:50:55.000106Z after 1 poll(s); settled: yes."
+          },
+          {
+            "id": "recommendation.recommended.v1",
+            "text": "Recommended option (policy v1, rule R4, terraform_is_source_of_truth): restore_declared. Human approval is required; nothing is executed automatically."
+          },
+          {
+            "id": "recommendation.note.v1",
+            "text": "If the recorded Azure change was intended, choose accept_remote_value instead and update the configuration."
+          }
+        ]
+      },
+      "automated_events": [],
+      "correlation": {
+        "counts": {
+          "after_observation": 0,
+          "automated_signals": 0,
+          "candidates": 2,
+          "capable": 2,
+          "child": 0,
+          "irrelevant": 0,
+          "operations": 2,
+          "unclassified": 0
+        },
+        "deletion_rule": null,
+        "descendant_operations": {},
+        "property_link": "inferred_not_provable",
+        "property_link_reason": "no_property_values_in_activity_log",
+        "reason": "multiple_capable_operations",
+        "relevant_areas": [
+          "tags"
+        ],
+        "statements": [
+          {
+            "id": "operations.recorded.v1",
+            "text": "Azure recorded 2 operation group(s) on this resource (2 capable, 0 unclassified, 0 irrelevant, 0 after the observation)."
+          },
+          {
+            "id": "correlation.ambiguous.v1",
+            "text": "Verdict ambiguous (multiple_capable_operations): more than one recorded operation can explain the drift. No single operation is decisive."
+          },
+          {
+            "id": "link.inferred.v1",
+            "text": "Property link inferred_not_provable: the Activity Log records operations, not property values, so the link to the drifted attributes is not confirmed by available evidence."
+          },
+          {
+            "id": "correlation.completeness.v1",
+            "text": "Completeness: events available at 2026-10-11T03:50:55.000106Z after 1 poll(s); settled: yes."
+          }
+        ],
+        "status": "investigated",
+        "unreadable_events_in_scope": false,
+        "verdict": "ambiguous"
+      },
+      "investigation_scope": "drift",
+      "operations": [
+        {
+          "attached_events": 0,
+          "available_at": "2026-10-11T02:29:00.000000Z",
+          "basis": "activity_log_evidence",
+          "caller_identity": "withheld",
+          "caller_status": "recorded",
+          "caller_type": "user",
+          "capable_areas": [
+            "tags"
+          ],
+          "client_app": "azure_portal",
+          "end": "2026-10-11T02:27:03.028847Z",
+          "in_window": true,
+          "op_id": "op-1",
+          "operation_name": "Microsoft.Resources/tags/write",
+          "outcome": "successful",
+          "pipeline_identity": false,
+          "relations": [
+            "exact",
+            "extension"
+          ],
+          "role": "capable",
+          "start": "2026-10-11T02:27:00.310062Z",
+          "timing": "before_observation"
+        },
+        {
+          "attached_events": 0,
+          "available_at": "2026-10-11T03:36:07.000000Z",
+          "basis": "activity_log_evidence",
+          "caller_identity": "withheld",
+          "caller_status": "recorded",
+          "caller_type": "user",
+          "capable_areas": [
+            "tags"
+          ],
+          "client_app": "azure_portal",
+          "end": "2026-10-11T03:34:32.794486Z",
+          "in_window": true,
+          "op_id": "op-2",
+          "operation_name": "Microsoft.Resources/tags/write",
+          "outcome": "successful",
+          "pipeline_identity": false,
+          "relations": [
+            "exact",
+            "extension"
+          ],
+          "role": "capable",
+          "start": "2026-10-11T03:34:30.341314Z",
+          "timing": "before_observation"
+        }
+      ],
+      "remediation": {
+        "option_ids": [
+          "module.resource_group.azurerm_resource_group.this[\"main\"]#1",
+          "module.resource_group.azurerm_resource_group.this[\"main\"]#2"
+        ],
+        "recommendation": {
+          "address": "module.resource_group.azurerm_resource_group.this[\"main\"]",
+          "approval_required": true,
+          "automatic_apply": false,
+          "decision": "recommended",
+          "execution_allowed": false,
+          "kind": "restore_declared",
+          "notes": [
+            "If the recorded Azure change was intended, choose accept_remote_value instead and update the configuration."
+          ],
+          "option_id": "module.resource_group.azurerm_resource_group.this[\"main\"]#1",
+          "policy_rule": "R4",
+          "rationale": "terraform_is_source_of_truth",
+          "statements": [
+            {
+              "id": "recommendation.recommended.v1",
+              "text": "Recommended option (policy v1, rule R4, terraform_is_source_of_truth): restore_declared. Human approval is required; nothing is executed automatically."
+            },
+            {
+              "id": "recommendation.note.v1",
+              "text": "If the recorded Azure change was intended, choose accept_remote_value instead and update the configuration."
+            }
+          ]
+        }
+      },
+      "type": "azurerm_resource_group",
+      "what": {
+        "action": "update",
+        "basis": "terraform_evidence",
+        "changes": [
+          {
+            "assessment": "configured",
+            "attribute_class": "drifted",
+            "desired": {
+              "status": "absent"
+            },
+            "origin": "outside_terraform",
+            "path": [
+              "tags",
+              "drift_test"
+            ],
+            "real": {
+              "status": "value",
+              "value": "primary-r2"
+            },
+            "redacted": false,
+            "severity": "LOW",
+            "severity_rules": [
+              "tags"
+            ],
+            "state": {
+              "status": "absent"
+            }
+          },
+          {
+            "assessment": "configured",
+            "attribute_class": "drifted",
+            "desired": {
+              "status": "absent"
+            },
+            "origin": "outside_terraform",
+            "path": [
+              "tags",
+              "drift_test-2"
+            ],
+            "real": {
+              "status": "value",
+              "value": "control-a-r3"
+            },
+            "redacted": false,
+            "severity": "LOW",
+            "severity_rules": [
+              "tags"
+            ],
+            "state": {
+              "status": "absent"
+            }
+          }
+        ],
+        "classification": "external_drift",
+        "importing": false,
+        "moved": false,
+        "risk_factors": [
+          "apply_reverts_external_change"
+        ],
+        "severity": "LOW",
+        "severity_reasons": [
+          "tags.drift_test: tags",
+          "tags.drift_test-2: tags"
+        ],
+        "statements": [
+          {
+            "id": "what.terraform.v1",
+            "text": "Terraform reports external_drift on module.resource_group.azurerm_resource_group.this[\"main\"] (planned action update, deterministic severity LOW) with 2 changed attribute(s). Expected values are the declared configuration (desired); actual values are what Azure returned (real)."
+          }
+        ]
+      },
+      "when": {
+        "available_at": null,
+        "decisive_operation": null,
+        "event_end": null,
+        "event_start": null,
+        "gap_seconds": null,
+        "last_in_sync": {
+          "finished_at": "2026-10-11T02:09:32.000000Z",
+          "plan_timestamp": "2026-10-11T02:09:22Z",
+          "report_sha256": "aacce5024c756d851134d3e87ce44b8dc325cfc192de9e1aa47649a64c41f85e",
+          "run_id": "github-38104177960-1",
+          "started_at": "2026-10-11T02:09:11.000000Z"
+        },
+        "observation": {
+          "finished_at": "2026-10-11T03:40:55.000000Z",
+          "started_at": "2026-10-11T03:40:37.000000Z"
+        },
+        "plan_timestamp": "2026-10-11T03:40:47Z",
+        "statements": [
+          {
+            "id": "when.not_confirmed.v1",
+            "text": "Event time of the change: not confirmed by available evidence."
+          },
+          {
+            "id": "when.detection.v1",
+            "text": "Detection time: Terraform observed Azure from 2026-10-11T03:40:37.000000Z to 2026-10-11T03:40:55.000000Z (plan timestamp 2026-10-11T03:40:47Z)."
+          },
+          {
+            "id": "when.last_in_sync.v1",
+            "text": "Last in-sync observation: drift run github-38104177960-1 saw this resource in sync from 2026-10-11T02:09:11.000000Z to 2026-10-11T02:09:32.000000Z; the correlation window starts at 2026-10-11T02:08:11.000000Z."
+          }
+        ],
+        "status": "not_confirmed",
+        "window": {
+          "kind": "anchor",
+          "start": "2026-10-11T02:08:11.000000Z"
+        }
+      },
+      "who": {
+        "actor_attribution": {
+          "claim": null,
+          "rule": null,
+          "status": "not_confirmed_by_available_evidence"
+        },
+        "recorded_caller": {
+          "caller_type": null,
+          "candidate_operations": 2,
+          "client_app": null,
+          "identity": "withheld",
+          "operation": null,
+          "pipeline_identity": null,
+          "reason": null,
+          "status": "multiple_operations"
+        },
+        "statements": [
+          {
+            "id": "who.multiple.v1",
+            "text": "Recorded caller: not confirmed by available evidence (2 candidate operations, none decisive). Each operation's caller type and client application are listed with the recorded operations."
+          },
+          {
+            "id": "who.actor_not_confirmed.v1",
+            "text": "Actor attribution: not confirmed by available evidence. A recorded caller is never presented as the author of the drift."
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "classification_counts": {
+      "external_drift": 1,
+      "in_sync": 4
+    },
+    "drifted_resources": 1,
+    "failure": null,
+    "has_drift": true,
+    "highest_severity": "LOW",
+    "outcome": "succeeded",
+    "resources_total": 5
+  }
+}

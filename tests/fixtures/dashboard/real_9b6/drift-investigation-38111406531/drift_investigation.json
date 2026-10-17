@@ -1,0 +1,45 @@
+{
+  "anchors": {
+    "accepted": 0,
+    "examined": 0,
+    "rejected": {}
+  },
+  "binding": {
+    "drift_report_sha256": "e85719d37998315ea964e424e4eab4eda59be65086bd05f06dd21faf9d190ea0",
+    "evidence_outcome": "complete",
+    "observation": {
+      "finished_at": "2026-10-11T04:23:49.000000Z",
+      "started_at": "2026-10-11T04:23:33.000000Z"
+    },
+    "plan_timestamp": "2026-10-11T04:23:42Z",
+    "run_id": "github-38111406531-1"
+  },
+  "completeness": {
+    "max_ingestion_delay_ms": null,
+    "not_before": null,
+    "polls": 1,
+    "queried_at": "2026-10-11T04:23:59.525190Z",
+    "settled": false
+  },
+  "exposure": {
+    "caller_identity": "withheld",
+    "correlation_id": "withheld",
+    "event_id": "withheld",
+    "resource_id": "withheld",
+    "who_path": "local_only"
+  },
+  "failure": null,
+  "outcome": "complete",
+  "public_version": "1",
+  "resources": [],
+  "rules": {
+    "automated_overlap_minutes": 5,
+    "deletion_rules_version": "2",
+    "lookback_days": 30,
+    "poll_cap_minutes": 20,
+    "poll_interval_minutes": 2,
+    "settle_margin_minutes": 10,
+    "skew_seconds": 60,
+    "table_version": "1"
+  }
+}

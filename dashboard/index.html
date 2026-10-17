@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Drift Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="render.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Terraform Drift Dashboard</h1>
+    <div class="topbar-actions">
+      <button type="button" id="theme" aria-label="Toggle dark mode">Theme</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="signin" class="signin">
+      <h2>Sign in</h2>
+      <p>Enter your dashboard API token. It is kept in memory only; reloading the page signs you out.</p>
+      <form id="signin-form" autocomplete="off">
+        <label for="token">API token</label>
+        <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+        <button type="submit">Sign in</button>
+      </form>
+      <p id="signin-error" class="error" role="alert"></p>
+    </section>
+
+    <div id="app" hidden>
+      <div class="toolbar">
+        <p id="status" role="status" aria-live="polite"></p>
+        <label class="inline"><input type="checkbox" id="auto-refresh" checked> Auto-refresh (60 s)</label>
+        <button type="button" id="refresh">Refresh</button>
+        <button type="button" id="signout">Sign out</button>
+      </div>
+
+      <section id="cards" class="cards" aria-label="Overview"></section>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>Severity breakdown (latest runs)</h2>
+          <div id="severity-bars"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Run history</h2>
+            <span id="history-count" class="hint"></span>
+          </div>
+          <label class="search">Search runs
+            <input type="search" id="history-search" placeholder="Run id, date, environment or severity"
+                   autocomplete="off" spellcheck="false">
+          </label>
+          <div class="table-wrap history-scroll">
+            <table class="history">
+              <thead><tr><th>Finished</th><th>Environment</th><th>Run</th><th>Drifts</th><th>Highest</th>
+                <th>Unmanaged</th></tr></thead>
+              <tbody id="history"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel" id="unmanaged-panel">
+        <h2>Unmanaged resources</h2>
+        <div id="unmanaged"></div>
+      </section>
+
+      <section class="panel">
+        <h2>GitHub drift issues</h2>
+        <div id="issues"></div>
+      </section>
+
+      <section class="panel" id="drifts-panel">
+        <div class="panel-head">
+          <h2>Active drifts</h2>
+          <span id="drift-count" class="hint"></span>
+        </div>
+        <p id="drift-context" class="hint" role="status"></p>
+        <div class="filters">
+          <label>Run <select id="filter-run"></select></label>
+          <label>Severity <select id="filter-severity"></select></label>
+          <label>Resource type <select id="filter-type"></select></label>
+          <label>Environment <select id="filter-environment"></select></label>
+        </div>
+        <div class="table-wrap">
+          <table class="drifts">
+            <thead><tr><th>Resource</th><th>Environment</th><th>Severity</th><th>Changed property (expected → actual)</th>
+              <th>Operation time</th><th>Caller recorded by Azure</th><th>GitHub issue</th><th></th></tr></thead>
+            <tbody id="drift-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="modal" aria-label="Drift details">
+    <button type="button" id="modal-close" class="close" aria-label="Close">×</button>
+    <div id="modal-body"></div>
+  </dialog>
+</body>
+</html>

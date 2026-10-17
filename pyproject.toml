@@ -6,7 +6,7 @@
 #   python3 -m venv .venv
 #   source .venv/bin/activate
 #   pip install -r requirements.txt   # full dev setup, pinned by ci/*-constraints.txt (Task 12.1)
-#   pip install -e ".[dev,ai,azure]"  # the same extras with the unpinned pyproject.toml ranges
+#   pip install -e ".[dev,ai,azure,dashboard]"  # the same extras with the unpinned pyproject.toml ranges
 #   pip install -e ".[dev]"           # drift engine only; the AI engine and Azure SDK tests are skipped
 # -----------------------------------------------
 
@@ -33,6 +33,8 @@ dependencies = [
 drift-engine = "drift_engine.cli:main"
 # Task 9A.1: separate entry point, so drift-engine never needs the LLM stack (needs the ai extra).
 ai-analysis = "ai_engine.cli:main"
+# Task 13.1: dashboard data API on a loopback address (needs the dashboard extra).
+dashboard-api = "dashboard_api.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -53,6 +55,12 @@ azure = [
     "azure-mgmt-monitor>=7,<8",   # MonitorManagementClient.activity_logs (Activity Log API 2015-04-01)
     "azure-identity>=1.19,<2",    # AzureCliCredential (az login / azure/login OIDC session)
 ]
+# Dashboard data API (Phase 13, src/dashboard_api, `dashboard-api`). Opt-in: the drift and AI
+# workflows never install it. The caller lookup also needs the azure extra.
+dashboard = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -60,6 +68,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 drift_engine = ["py.typed"]
 ai_engine = ["py.typed"]
+dashboard_api = ["py.typed"]
 
 [tool.coverage.run]
 branch = true

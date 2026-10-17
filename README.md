@@ -1348,9 +1348,13 @@ registration holds zero credentials.
 5. **Verify** by running the `terraform-auth-test.yml` workflow. A green run proves the
    federated credential, the secrets, and the RBAC scopes are all correct together.
 
-> Only the `main` branch has a federated credential. The workflow also triggers on pull
-> requests, and those runs are expected to fail at Azure login until a pull-request
-> credential is added or that trigger is removed (an open decision).
+> Only the `main` branch has a federated credential, and pull requests are never given an
+> Azure token. On pull requests to `main` the workflow runs only its offline job,
+> `Terraform Offline Validation` (`terraform fmt -check`, then `init -backend=false` and
+> `validate` for `terraform/bootstrap` and `terraform/environments/dev`; `contents: read`, no
+> secret, no state); the authenticated job `Terraform OIDC Auth & Plan Test` is skipped. On
+> pushes to `main` and manual runs the offline job runs first, then the authenticated job
+> (`id-token: write`: Azure login, context check and the read-only dev plan).
 
 ---
 
