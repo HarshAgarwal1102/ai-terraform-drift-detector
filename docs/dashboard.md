@@ -202,6 +202,7 @@ goes to `/api/*` with the bearer token.
 - **Themes**: follows the system light/dark setting; the Dark mode rocker switch in the top bar overrides it for the session.
 - **Top bar**: the Dark mode switch and Sign out sit in the top bar; on phones (640 px and narrower) they move into an account menu behind the person key (Escape or a click outside closes it).
 - **Sign-in page**: on screens 900 px and wider, a brand panel (what the tool does) sits beside the sign-in card, with a CSS-only loop of the detection workflow above it and a radar sweep behind the card; the token field has a show/hide toggle. Phones show the card only.
+- **Sign-in and sign-out popups**: signing in opens a popup that verifies the token, then shows **Access granted** (and opens the dashboard) or **Access denied** on a 401, with Try again; other errors still appear in the status line. Sign out asks for confirmation first (Cancel is focused; Escape cancels).
 
 Component tests: `node --test dashboard/render.test.js` (also run by `tests/test_dashboard_ui.py`).
 

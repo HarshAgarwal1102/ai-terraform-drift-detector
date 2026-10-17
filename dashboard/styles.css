@@ -113,7 +113,7 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 
 @media (prefers-reduced-motion: reduce) {
   .switch-paddle, .key, .key-primary { transition: none; }
-  .logo-lg .drift, .logo-xl .drift, .flow-node, .radar-sweep, .radar-blip { animation: none; }
+  .logo-lg .drift, .logo-hero .drift, .flow-node, .radar-sweep, .radar-blip { animation: none; }
   .flow-pulse { display: none; }
   .key-refresh[aria-busy="true"] .key-icon svg { animation: none; }
 }
@@ -127,8 +127,20 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 .logo .drift .face-top { fill: var(--drift-top); } .logo .drift .face-left { fill: var(--drift-left); }
 .logo .drift .face-right { fill: var(--drift-right); }
 .logo .ghost { fill: none; stroke: var(--logo-ghost); stroke-width: 1.5; stroke-dasharray: 3 2.5; }
-.logo-xl { width: 76px; height: 76px; }
-.logo-lg .drift, .logo-xl .drift { animation: logo-drift 3.2s ease-in-out infinite; }
+.logo-lg .drift, .logo-hero .drift { animation: logo-drift 3.2s ease-in-out infinite; }
+
+/* Brand panel figure: the logo at 144 px with "declared" / "actual" call-outs (wide screens only). */
+.brand-figure { position: relative; width: 290px; height: 144px; }
+/* Offset right so the "declared" leader ends before the dashed slot instead of crossing it. */
+.logo-hero { display: block; width: 144px; height: 144px; margin-left: 84px; }
+.logo-hero .ghost { stroke-width: 1.2; }
+.figure-label { position: absolute; display: flex; align-items: center; gap: 6px;
+  font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.figure-label .leader { height: 1px; }
+.figure-label.declared { left: 0; top: 57px; color: var(--muted); }
+.figure-label.declared .leader { width: 28px; background: var(--logo-ghost); }
+.figure-label.actual { right: 0; top: 24px; color: var(--drift-text); }
+.figure-label.actual .leader { width: 24px; background: var(--drift-top); }
 @keyframes logo-drift { 50% { transform: translate(-3px, 2px); } }
 
 .signin { max-width: 420px; margin: 56px auto; padding: 32px; border-radius: 18px; border: 1px solid var(--sw-rim);
@@ -182,14 +194,15 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 @keyframes radar-spin { to { transform: rotate(360deg); } }
 .radar-blip { --blip: var(--accent); position: absolute; width: 8px; height: 8px; border-radius: 50%;
   background: var(--blip); opacity: 0.4; animation: radar-blip 4s ease-out infinite; }
-.radar-blip.is-drift { --blip: var(--drift-top); width: 10px; height: 10px; left: 344px; top: 62px;
-  animation-delay: 0.444s; }                                                  /* 40° */
+/* The drift blip sits right of the card (x > 385): the card's width is fixed, its height grows with errors. */
+.radar-blip.is-drift { --blip: var(--drift-top); --rest: 0.7; width: 12px; height: 12px; left: 406px; top: 124px;
+  animation-delay: 0.722s; }                                                  /* 65°, r 212 */
 .radar-blip:nth-child(5) { left: 413px; top: 251px; animation-delay: 1.111s; } /* 100° */
 .radar-blip:nth-child(6) { left: 148px; top: 404px; animation-delay: 2.222s; } /* 200° */
 .radar-blip:nth-child(7) { left: 19px; top: 181px; animation-delay: 3.111s; }  /* 280° */
 @keyframes radar-blip {
   0% { opacity: 1; transform: scale(1.7); box-shadow: 0 0 12px 3px color-mix(in srgb, var(--blip) 65%, transparent); }
-  35%, 100% { opacity: 0.4; transform: scale(1); box-shadow: none; }
+  35%, 100% { opacity: var(--rest, 0.4); transform: scale(1); box-shadow: none; }
 }
 
 /* Wide sign-in page: brand panel left; workflow + card right on a blueprint grid. Phones keep the card only. */
@@ -348,6 +361,70 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .facts dd { margin: 0; }
 .hcl { background: var(--code); padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre; }
 .narrative li { margin-bottom: 4px; }
+
+/* Sign-in and sign-out popups (native <dialog>: focus trap, Escape and backdrop come from the browser). */
+dialog.popup { width: min(320px, calc(100vw - 32px)); padding: 28px 24px 22px; border-radius: 18px;
+  border: 1px solid var(--sw-rim); background: linear-gradient(160deg, var(--card-hi), var(--card-lo));
+  box-shadow: 0 24px 50px var(--sw-drop); text-align: center; }
+dialog.popup[open] { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+dialog.popup::backdrop { background: rgba(5, 7, 10, 0.6); }
+.popup h2 { margin: 0; font-size: 1.1rem; }
+.popup-text { margin: 0; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+.popup-wide { width: 100%; height: 42px; padding: 0; justify-content: center; }
+
+.auth-ring { position: relative; width: 84px; height: 84px; border-radius: 50%; background: var(--sw-bezel);
+  border: 2px solid var(--sw-rim); box-shadow: inset 0 3px 8px var(--sw-inset);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease; }
+.auth-sweep { position: absolute; inset: 6px; border-radius: 50%; transition: opacity 0.3s ease;
+  background: conic-gradient(from 0deg, transparent 0deg 270deg, color-mix(in srgb, var(--accent) 55%, transparent) 360deg);
+  animation: radar-spin 1s linear infinite; }
+.auth-mark { position: absolute; left: 23px; top: 23px; width: 34px; height: 34px; display: none; fill: none;
+  stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 30; stroke-dashoffset: 30; }
+.auth-check { stroke: var(--ok); }
+.auth-cross { stroke: var(--error); }
+.auth-bar { width: 100%; height: 4px; border-radius: 2px; background: var(--sw-bezel); overflow: hidden; }
+.auth-bar span { display: block; width: 0; height: 100%; border-radius: 2px; background: var(--accent); }
+.popup[data-state="granted"] .auth-sweep, .popup[data-state="denied"] .auth-sweep { opacity: 0; }
+.popup[data-state="granted"] .auth-ring { border-color: var(--ok); box-shadow: inset 0 3px 8px var(--sw-inset),
+  0 0 0 6px color-mix(in srgb, var(--ok) 14%, transparent), 0 0 24px color-mix(in srgb, var(--ok) 35%, transparent); }
+.popup[data-state="denied"] .auth-ring { border-color: var(--error); box-shadow: inset 0 3px 8px var(--sw-inset),
+  0 0 0 6px color-mix(in srgb, var(--error) 14%, transparent), 0 0 24px color-mix(in srgb, var(--error) 35%, transparent); }
+.popup[data-state="granted"] .auth-check, .popup[data-state="denied"] .auth-cross { display: block;
+  animation: auth-draw 0.45s ease-out 0.1s forwards; }
+@keyframes auth-draw { to { stroke-dashoffset: 0; } }
+.popup[data-state="granted"] #auth-title { color: var(--ok); }
+.popup[data-state="denied"] #auth-title { color: var(--error); }
+.popup[data-state="granted"] .auth-bar span { animation: auth-fill 0.9s ease-out forwards; }
+@keyframes auth-fill { to { width: 100%; } }
+.popup[data-state="denied"] .auth-bar { display: none; }
+.popup[data-state="denied"] { animation: auth-shake 0.45s ease-out 0.1s; }
+@keyframes auth-shake {
+  20% { transform: translateX(-8px); } 40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); } 80% { transform: translateX(3px); }
+}
+
+.popup-icon { width: 60px; height: 60px; border-radius: 16px; display: flex; align-items: center;
+  justify-content: center; color: var(--drift-top); background: var(--sw-bezel); border: 1px solid var(--sw-rim);
+  box-shadow: inset 0 3px 8px var(--sw-inset); animation: power-glow 2.4s ease-in-out infinite; }
+.popup-icon svg { width: 24px; height: 24px; }
+@keyframes power-glow { 50% { box-shadow: inset 0 3px 8px var(--sw-inset),
+  0 0 0 6px color-mix(in srgb, var(--drift-top) 12%, transparent),
+  0 0 22px color-mix(in srgb, var(--drift-top) 40%, transparent); } }
+.popup-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  margin-top: 8px; }
+.popup-actions .key { height: 42px; padding: 0; justify-content: center; }
+.key-danger { height: 42px; border-radius: 11px; border: 1px solid #ffb27f; color: #1a0f08; font-weight: 600;
+  background: linear-gradient(135deg, #ffa86e, #f0803f);
+  box-shadow: 0 3px 0 #a3521f, 0 6px 12px var(--sw-drop), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform 0.08s ease, box-shadow 0.08s ease; }
+.key-danger:active { transform: translateY(2px);
+  box-shadow: 0 1px 0 #a3521f, 0 2px 4px var(--sw-drop), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+@media (prefers-reduced-motion: reduce) {
+  .auth-sweep, .popup-icon, .popup[data-state="denied"], .key-danger { animation: none; transition: none; }
+  .popup[data-state="granted"] .auth-check, .popup[data-state="denied"] .auth-cross { animation: none;
+    stroke-dashoffset: 0; }
+  .popup[data-state="granted"] .auth-bar span { animation: none; width: 100%; }
+}
 
 @media (max-width: 640px) {
   main { padding: 12px 16px; }

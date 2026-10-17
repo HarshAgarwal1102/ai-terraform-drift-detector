@@ -13,7 +13,7 @@
   const REFRESH_MS = 60000;
   const state = { token: null, summary: null, drifts: [], remediations: [], unmanaged: null, callerAccess: true, run: "",
     historyQuery: "",
-    filters: { severity: "", type: "", environment: "" }, timer: null, loads: 0 };
+    filters: { severity: "", type: "", environment: "" }, timer: null, loads: 0, signingIn: false };
   const $ = (id) => document.getElementById(id);
 
   class ApiError extends Error {
@@ -65,6 +65,7 @@
     }
   }
 
+  // Resolves to "ok", "denied" (401: the token was rejected) or "error" (anything else, shown in the status line).
   async function load() {
     const loadId = ++state.loads;  // a retried load() owns the busy flag until it finishes
     setStatus("Loading…");
@@ -79,10 +80,15 @@
       render();
       setStatus("Updated " + new Date().toLocaleTimeString() + " from " + summary.reports_total + " run(s)" +
         (state.callerAccess ? "" : " — caller identity hidden for this user"));
+      return "ok";
     } catch (err) {
-      if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
+      if (err.status === 401) {  // while signing in the popup says "Access denied"; no second message
+        signOut(state.signingIn ? "" : "Sign-in failed: the token was not accepted.");
+        return "denied";
+      }
       if (err.status === 404 && state.run) { state.run = ""; return load(); }  // the run is gone
       setStatus(R.errorMessage(err.code, window.location.origin), true);
+      return "error";
     } finally {
       if (loadId === state.loads) $("refresh").removeAttribute("aria-busy");
     }
@@ -142,6 +148,46 @@
     state.timer = $("auto-refresh").checked && state.token ? setInterval(load, REFRESH_MS) : null;
   }
 
+  // Sign-in popup: verifying -> granted (then the dashboard) or denied (Try again).
+  const AUTH_TEXT = {
+    verifying: ["Verifying token…", "Checking access with the dashboard API"],
+    granted: ["Access granted", "Loading your drift data…"],
+    denied: ["Access denied", "That token wasn’t accepted. Check it and try again."],
+  };
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function setAuthState(name) {
+    const dialog = $("auth-dialog");
+    dialog.dataset.state = name;
+    dialog.setAttribute("role", name === "denied" ? "alertdialog" : "dialog");
+    $("auth-title").textContent = AUTH_TEXT[name][0];
+    $("auth-message").textContent = AUTH_TEXT[name][1];
+    $("auth-retry").hidden = name !== "denied";
+  }
+
+  async function signIn(token) {
+    state.token = token;
+    setAuthState("verifying");
+    $("auth-dialog").showModal();
+    state.signingIn = true;
+    const [result] = await Promise.all([load(), wait(900)]);  // the verify step stays readable on a fast API
+    state.signingIn = false;
+    if (result === "denied") {
+      setAuthState("denied");
+      $("auth-retry").focus();
+      return;
+    }
+    if (result === "ok") {
+      setAuthState("granted");
+      await wait(1000);
+    }
+    $("auth-dialog").close();  // "error" too: the dashboard's status line explains it, as before
+    $("signin").hidden = true;
+    $("app").hidden = false;
+    $("signout").hidden = false;
+    schedule();
+  }
+
   // Eye toggle on the token field: show or mask what was typed (never stored either way).
   function setTokenVisible(show) {
     $("token").type = show ? "text" : "password";
@@ -179,17 +225,25 @@
       const token = $("token").value.trim();
       $("token").value = "";
       setTokenVisible(false);
-      if (!token) return;
-      state.token = token;
-      $("signin").hidden = true;
-      $("app").hidden = false;
-      $("signout").hidden = false;
-      load().then(schedule);
+      if (token) signIn(token);
     });
+    $("auth-dialog").addEventListener("cancel", (event) => {
+      if ($("auth-dialog").dataset.state !== "denied") event.preventDefault();  // no Escape mid-verification
+    });
+    $("auth-dialog").addEventListener("close", () => {
+      if ($("auth-dialog").dataset.state === "denied") $("token").focus();
+    });
+    $("auth-retry").addEventListener("click", () => $("auth-dialog").close());
     $("token-toggle").addEventListener("click", () => setTokenVisible($("token").type === "password"));
     $("refresh").addEventListener("click", load);
     $("auto-refresh").addEventListener("change", schedule);
-    $("signout").addEventListener("click", () => { setMenu(false); signOut(""); });
+    $("signout").addEventListener("click", () => { setMenu(false); $("signout-dialog").showModal(); });
+    $("signout-cancel").addEventListener("click", () => $("signout-dialog").close());
+    $("signout-confirm").addEventListener("click", () => {
+      $("signout-dialog").close();
+      signOut("");
+      $("token").focus();
+    });
     $("account-toggle").addEventListener("click", () => {
       const open = $("account-toggle").getAttribute("aria-expanded") !== "true";
       setMenu(open);
