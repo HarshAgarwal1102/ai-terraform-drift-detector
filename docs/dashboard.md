@@ -199,7 +199,9 @@ goes to `/api/*` with the bearer token.
 - **Security**: a strict Content-Security-Policy (`default-src 'none'`; scripts, styles and
   `connect-src` limited to the same origin; no inline code; no framing). Every value from the API
   is HTML-escaped before it is rendered.
-- **Themes**: follows the system light/dark setting; the Theme button switches for the session.
+- **Themes**: follows the system light/dark setting; the Dark mode rocker switch in the top bar overrides it for the session.
+- **Top bar**: the Dark mode switch and Sign out sit in the top bar; on phones (640 px and narrower) they move into an account menu behind the person key (Escape or a click outside closes it).
+- **Sign-in page**: on screens 900 px and wider, a brand panel (what the tool does) sits beside the sign-in card, with a CSS-only loop of the detection workflow above it and a radar sweep behind the card; the token field has a show/hide toggle. Phones show the card only.
 
 Component tests: `node --test dashboard/render.test.js` (also run by `tests/test_dashboard_ui.py`).
 

@@ -11,30 +11,158 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Terraform Drift Dashboard</h1>
+    <div class="brand">
+      <svg class="logo logo-sm" viewBox="0 0 64 64" aria-hidden="true">
+        <g><polygon class="face-top" points="32,36 52,46 32,56 12,46"/><polygon class="face-left" points="12,46 32,56 32,60 12,50"/><polygon class="face-right" points="32,56 52,46 52,50 32,60"/></g>
+        <g><polygon class="face-top" points="32,27 52,37 32,47 12,37"/><polygon class="face-left" points="12,37 32,47 32,51 12,41"/><polygon class="face-right" points="32,47 52,37 52,41 32,51"/></g>
+        <polygon class="ghost" points="32,18 52,28 32,38 12,28"/>
+        <g class="drift"><polygon class="face-top" points="41,12 61,22 41,32 21,22"/><polygon class="face-left" points="21,22 41,32 41,36 21,26"/><polygon class="face-right" points="41,32 61,22 61,26 41,36"/></g>
+      </svg>
+      <h1>Terraform Drift Dashboard</h1>
+    </div>
     <div class="topbar-actions">
-      <button type="button" id="theme" aria-label="Toggle dark mode">Theme</button>
+      <!-- Phone: this key opens the account menu. Wider screens show the menu inline instead. -->
+      <button type="button" id="account-toggle" class="key account-toggle" aria-label="Account menu"
+        aria-expanded="false" aria-controls="account-menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+          stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      </button>
+      <div id="account-menu" class="account-menu">
+        <div class="menu-row">
+          <span class="theme-caption" id="theme-caption">Dark mode</span>
+          <button type="button" id="theme" class="theme-switch" role="switch" aria-checked="false"
+            aria-labelledby="theme-caption">
+            <span class="switch-paddle" aria-hidden="true">
+              <span class="switch-label" id="theme-state">OFF</span>
+              <span class="switch-led"></span>
+            </span>
+          </button>
+        </div>
+        <button type="button" id="signout" class="key key-signout" hidden>
+          <span class="key-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+              stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/></svg>
+          </span>Sign out
+        </button>
+      </div>
     </div>
   </header>
 
   <main>
-    <section id="signin" class="signin">
-      <h2>Sign in</h2>
-      <p>Enter your dashboard API token. It is kept in memory only; reloading the page signs you out.</p>
-      <form id="signin-form" autocomplete="off">
-        <label for="token">API token</label>
-        <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
-        <button type="submit">Sign in</button>
-      </form>
-      <p id="signin-error" class="error" role="alert"></p>
+    <!-- Sign-in page. Wide screens: brand panel (left) + workflow and card (right). Phones: the card only. -->
+    <section id="signin" class="signin-page">
+      <div class="brand-panel">
+        <svg class="logo logo-xl" viewBox="0 0 64 64" role="img"
+          aria-label="Drift Detector logo: stacked infrastructure blocks, the top one drifted out of place">
+          <g><polygon class="face-top" points="32,36 52,46 32,56 12,46"/><polygon class="face-left" points="12,46 32,56 32,60 12,50"/><polygon class="face-right" points="32,56 52,46 52,50 32,60"/></g>
+          <g><polygon class="face-top" points="32,27 52,37 32,47 12,37"/><polygon class="face-left" points="12,37 32,47 32,51 12,41"/><polygon class="face-right" points="32,47 52,37 52,41 32,51"/></g>
+          <polygon class="ghost" points="32,18 52,28 32,38 12,28"/>
+          <g class="drift"><polygon class="face-top" points="41,12 61,22 41,32 21,22"/><polygon class="face-left" points="21,22 41,32 41,36 21,26"/><polygon class="face-right" points="41,32 61,22 61,26 41,36"/></g>
+        </svg>
+        <p class="eyebrow">Terraform Drift Detector</p>
+        <h2 class="brand-tagline">Catch the <span class="drift-word">drift</span> before it catches you.</h2>
+        <p class="brand-sub">Every resource, exactly as declared in Terraform.</p>
+        <ul class="features">
+          <li>
+            <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>
+            <span><strong>Scheduled detection</strong>GitHub Actions runs, one Issue per drifted resource</span>
+          </li>
+          <li>
+            <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span>
+            <span><strong>Who, when, what</strong>Activity Log investigation of each change</span>
+          </li>
+          <li>
+            <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg></span>
+            <span><strong>AI analysis</strong>Severity, explanation and security findings</span>
+          </li>
+          <li>
+            <span class="feature-icon cost" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M16 7.5c-.8-1.2-2.3-2-4-2-2.2 0-4 1.2-4 3s1.8 2.6 4 3 4 1.2 4 3-1.8 3-4 3c-1.8 0-3.4-.8-4.2-2.2"/></svg></span>
+            <span><strong>Cost impact</strong>Infracost estimate and unmanaged resources</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="signin-side">
+        <!-- Pure-CSS loop: a pulse travels the pipeline and lights each step as it arrives. -->
+        <figure class="flow" role="img"
+          aria-label="How a drift is caught: scheduled Terraform plan, drift found, who, when and what from the Activity Log, AI analysis, then a GitHub Issue">
+          <figcaption class="flow-caption" aria-hidden="true">How a drift is caught</figcaption>
+          <div class="flow-track" aria-hidden="true">
+            <span class="flow-line"></span>
+            <span class="flow-pulse"></span>
+            <ol class="flow-steps">
+              <li><span class="flow-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>Plan</li>
+              <li class="is-drift"><span class="flow-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="11" height="11" rx="2" stroke-dasharray="2.5 2"/><rect x="10" y="4" width="11" height="11" rx="2"/></svg></span>Drift</li>
+              <li><span class="flow-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span>Who · when</li>
+              <li><span class="flow-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg></span>AI analysis</li>
+              <li><span class="flow-node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg></span>Issue</li>
+            </ol>
+          </div>
+        </figure>
+
+        <div class="radar-stage">
+          <!-- Pure-CSS radar behind the card: in-sync resources blink blue, the drifted one orange. -->
+          <div class="radar" aria-hidden="true">
+            <span class="radar-ring"></span>
+            <span class="radar-ring inner"></span>
+            <span class="radar-sweep"></span>
+            <span class="radar-blip is-drift"></span>
+            <span class="radar-blip"></span>
+            <span class="radar-blip"></span>
+            <span class="radar-blip"></span>
+          </div>
+          <div class="signin">
+            <div class="signin-brand">
+              <div class="logo-well">
+                <svg class="logo logo-lg" viewBox="0 0 64 64" role="img"
+                  aria-label="Drift Detector logo: stacked infrastructure blocks, the top one drifted out of place">
+                  <g><polygon class="face-top" points="32,36 52,46 32,56 12,46"/><polygon class="face-left" points="12,46 32,56 32,60 12,50"/><polygon class="face-right" points="32,56 52,46 52,50 32,60"/></g>
+                  <g><polygon class="face-top" points="32,27 52,37 32,47 12,37"/><polygon class="face-left" points="12,37 32,47 32,51 12,41"/><polygon class="face-right" points="32,47 52,37 52,41 32,51"/></g>
+                  <polygon class="ghost" points="32,18 52,28 32,38 12,28"/>
+                  <g class="drift"><polygon class="face-top" points="41,12 61,22 41,32 21,22"/><polygon class="face-left" points="21,22 41,32 41,36 21,26"/><polygon class="face-right" points="41,32 61,22 61,26 41,36"/></g>
+                </svg>
+              </div>
+              <h2>Terraform Drift Detector</h2>
+              <p class="signin-tagline">Catch the <span class="drift-word">drift</span> before it catches you.</p>
+              <p class="signin-sub">Every resource, exactly as declared in Terraform.</p>
+            </div>
+            <p class="secure-eyebrow">Secure access</p>
+            <h2 class="signin-title">Sign in</h2>
+            <form id="signin-form" autocomplete="off">
+              <label for="token">API token</label>
+              <div class="token-field">
+                <input id="token" name="token" type="password" placeholder="Paste your token" autocomplete="off"
+                  spellcheck="false" aria-describedby="token-help" required>
+                <button type="button" id="token-toggle" class="token-toggle" aria-label="Show token" aria-pressed="false">
+                  <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.8 9.8 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+                </button>
+              </div>
+              <p id="token-help" class="token-help">Held in memory for this tab only. Reload to sign out.</p>
+              <button type="submit" class="key-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+                  stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+                Sign in securely
+              </button>
+            </form>
+            <p id="signin-error" class="error" role="alert"></p>
+          </div>
+        </div>
+      </div>
     </section>
 
     <div id="app" hidden>
       <div class="toolbar">
         <p id="status" role="status" aria-live="polite"></p>
         <label class="inline"><input type="checkbox" id="auto-refresh" checked> Auto-refresh (60 s)</label>
-        <button type="button" id="refresh">Refresh</button>
-        <button type="button" id="signout">Sign out</button>
+        <button type="button" id="refresh" class="key key-refresh">
+          <span class="key-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+              stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+          </span>Refresh
+        </button>
       </div>
 
       <section id="cards" class="cards" aria-label="Overview"></section>

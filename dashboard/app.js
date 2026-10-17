@@ -13,7 +13,7 @@
   const REFRESH_MS = 60000;
   const state = { token: null, summary: null, drifts: [], remediations: [], unmanaged: null, callerAccess: true, run: "",
     historyQuery: "",
-    filters: { severity: "", type: "", environment: "" }, timer: null };
+    filters: { severity: "", type: "", environment: "" }, timer: null, loads: 0 };
   const $ = (id) => document.getElementById(id);
 
   class ApiError extends Error {
@@ -66,7 +66,9 @@
   }
 
   async function load() {
+    const loadId = ++state.loads;  // a retried load() owns the busy flag until it finishes
     setStatus("Loading…");
+    $("refresh").setAttribute("aria-busy", "true");
     try {
       const [summary, drifts, remediations, unmanaged] = await Promise.all([api("/api/summary"), loadDrifts(),
         api("/api/remediations" + runQuery("?")), api("/api/unmanaged" + runQuery("?"))]);
@@ -81,6 +83,8 @@
       if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
       if (err.status === 404 && state.run) { state.run = ""; return load(); }  // the run is gone
       setStatus(R.errorMessage(err.code, window.location.origin), true);
+    } finally {
+      if (loadId === state.loads) $("refresh").removeAttribute("aria-busy");
     }
   }
 
@@ -138,6 +142,19 @@
     state.timer = $("auto-refresh").checked && state.token ? setInterval(load, REFRESH_MS) : null;
   }
 
+  // Eye toggle on the token field: show or mask what was typed (never stored either way).
+  function setTokenVisible(show) {
+    $("token").type = show ? "text" : "password";
+    $("token-toggle").setAttribute("aria-pressed", String(show));
+    $("token-toggle").setAttribute("aria-label", show ? "Hide token" : "Show token");
+  }
+
+  // Phone-only account menu (on wide screens it is always shown inline and this is a no-op visually).
+  function setMenu(open) {
+    document.querySelector(".topbar").dataset.menu = open ? "open" : "";
+    $("account-toggle").setAttribute("aria-expanded", String(open));
+  }
+
   function signOut(message) {
     state.token = null;
     state.summary = null;
@@ -149,6 +166,7 @@
     state.historyQuery = "";
     $("history-search").value = "";
     clearInterval(state.timer);
+    $("signout").hidden = true;
     $("app").hidden = true;
     $("signin").hidden = false;
     $("signin-error").textContent = message || "";
@@ -160,15 +178,32 @@
       event.preventDefault();
       const token = $("token").value.trim();
       $("token").value = "";
+      setTokenVisible(false);
       if (!token) return;
       state.token = token;
       $("signin").hidden = true;
       $("app").hidden = false;
+      $("signout").hidden = false;
       load().then(schedule);
     });
+    $("token-toggle").addEventListener("click", () => setTokenVisible($("token").type === "password"));
     $("refresh").addEventListener("click", load);
     $("auto-refresh").addEventListener("change", schedule);
-    $("signout").addEventListener("click", () => signOut(""));
+    $("signout").addEventListener("click", () => { setMenu(false); signOut(""); });
+    $("account-toggle").addEventListener("click", () => {
+      const open = $("account-toggle").getAttribute("aria-expanded") !== "true";
+      setMenu(open);
+      if (open) $("theme").focus();
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".topbar-actions")) setMenu(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && $("account-toggle").getAttribute("aria-expanded") === "true") {
+        setMenu(false);
+        $("account-toggle").focus();
+      }
+    });
     ["severity", "type", "environment"].forEach((key) => {
       $("filter-" + key).addEventListener("change", (event) => { state.filters[key] = event.target.value; render(); });
     });
@@ -194,11 +229,21 @@
     });
     $("modal-close").addEventListener("click", () => $("modal").close());
     $("modal").addEventListener("click", (event) => { if (event.target === $("modal")) $("modal").close(); });
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+    const isDark = () => {
+      const chosen = document.documentElement.dataset.theme;
+      return chosen ? chosen === "dark" : systemDark.matches;
+    };
+    const syncThemeSwitch = () => {
+      const dark = isDark();
+      $("theme").setAttribute("aria-checked", String(dark));
+      $("theme-state").textContent = dark ? "ON" : "OFF";
+    };
     $("theme").addEventListener("click", () => {
-      const root = document.documentElement;
-      const dark = root.dataset.theme ? root.dataset.theme === "dark"
-        : window.matchMedia("(prefers-color-scheme: dark)").matches;
-      root.dataset.theme = dark ? "light" : "dark";
+      document.documentElement.dataset.theme = isDark() ? "light" : "dark";
+      syncThemeSwitch();
     });
+    systemDark.addEventListener("change", syncThemeSwitch);
+    syncThemeSwitch();
   });
 })();
