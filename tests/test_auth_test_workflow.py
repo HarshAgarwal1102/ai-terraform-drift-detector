@@ -502,10 +502,43 @@ def _run_blocks(wf: dict):
                 yield f"{job_name} / {step['name']}", step["run"]
 
 
-def test_auth_test_triggers_and_permissions_unchanged(auth_wf):
+def test_auth_test_triggers_and_permissions(auth_wf):
     assert auth_wf[True] == {"push": {"branches": ["main", "master"]},
                              "pull_request": {"branches": ["main", "master"]}, "workflow_dispatch": None}
-    assert auth_wf["permissions"] == {"id-token": "write", "contents": "read"}
+    assert auth_wf["permissions"] == {"contents": "read"}  # only the authenticated job gets an OIDC token
+    assert set(auth_wf["jobs"]) == {"offline-validate", "validate-and-plan"}
+    assert "pull_request_target" not in AUTH_WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_pull_requests_get_offline_validation_without_azure(auth_wf):
+    """PR runs: fmt and backend-less validate of both roots; no OIDC token, secret, login or state."""
+    job = auth_wf["jobs"]["offline-validate"]
+    assert "if" not in job and job["permissions"] == {"contents": "read"}
+    text = yaml.safe_dump(job)
+    for forbidden in ("secrets.", "id-token", "azure/login", "ARM_", "az ", "auth_test_plan"):
+        assert forbidden not in text, forbidden
+    steps = _steps(job)
+    assert steps["Checkout Code"]["with"] == {"persist-credentials": False}
+    assert steps["Setup Terraform"]["with"]["terraform_wrapper"] is False
+    assert steps["Check Terraform Formatting"]["run"].strip() == "terraform fmt -check -recursive"
+    for name, root in (("Validate Bootstrap Configuration (offline, no state)", "terraform/bootstrap"),
+                       ("Validate Dev Environment Configuration (offline, no state)", "terraform/environments/dev")):
+        assert steps[name]["run"].split("\n")[1:3] == [
+            f"terraform -chdir={root} init -backend=false -input=false", f"terraform -chdir={root} validate"]
+    for _, run in _run_blocks({"jobs": {"offline-validate": job}}):
+        assert " plan" not in run and " apply" not in run
+
+
+def test_azure_login_only_on_trusted_events_after_offline_checks(auth_wf):
+    job = auth_wf["jobs"]["validate-and-plan"]
+    assert job["if"] == "github.event_name != 'pull_request'"
+    assert job["needs"] == "offline-validate"
+    assert job["permissions"] == {"id-token": "write", "contents": "read"}
+    assert [s["name"] for s in job["steps"]] == ["Checkout Code", "Azure OIDC Login", "Verify Azure OIDC Authentication",
+                                                 "Setup Terraform", "Validate Dev Environment Configuration"]
+    for name, other in auth_wf["jobs"].items():
+        if name != "validate-and-plan":
+            assert "azure/login" not in yaml.safe_dump(other) and "secrets." not in yaml.safe_dump(other), name
 
 
 def test_auth_test_uses_the_real_terraform_binary_and_the_script(auth_wf):
