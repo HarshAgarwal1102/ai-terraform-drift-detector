@@ -4,9 +4,9 @@
 
 This platform detects, analyzes, and remediates **infrastructure drift** — the gap between what Terraform expects and what actually exists in Azure. The final product will combine Terraform, Python, LangGraph/LLM analysis, GitHub automation, and a professional dashboard.
 
-**Current Status (2026-10-11):** Phases 1–10 are complete, and so are the lettered phases 5A, 9A and 9B. `PROJECT_PLAN.md`'s "Phases Completed: 10 of 14" counts only the numbered phases. Phase 9 (DevSecOps) completed with Task 9.1 TFLint, Task 9.2 Trivy config and Task 9.3 TruffleHog; Task 9.4 Super-Linter was deferred to Phase 12. Phase 10 (FinOps) completed on 2026-10-11 when Tasks 10.3 (AI cost impact) and 10.4 (unmanaged resource detection and list-price estimate) passed real Azure/CI verification (drift-detection run #44, AI analysis run #27). Phase 11 (human-approved remediation) is next and not started; it begins with the Task 11.1 design review. No write access is granted for it today (see "Future / conditional only" below). [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security and CI-access design.
+**Current Status (2026-10-18, Level 1 closeout):** this repository is **Level 1**, released as the stable baseline tag `level1-v1.0.0` (commit `daa95f8`). Phases 1–10 are complete, and so are the lettered phases 5A, 9A and 9B (`PROJECT_PLAN.md`'s "Phases Completed: 10 of 14" counts only the numbered phases). Phase 12's tasks are complete (12.1A, 12.1, 12.2, 12.3), with its deferred scope still open. Phase 13's dashboard is built, merged and tested by the owner; Tasks 13.3–13.5 keep a few open validation items. Phase 11 (human-approved remediation) is on hold since 2026-10-13: its Task 11.1 safeguards specification ([`remediation-safeguards.md`](remediation-safeguards.md), revision 9) is paused under review, nothing is built, and no write access is granted (see "Future / conditional only" below). Phase 14 has not started. A separate Level 2 application is developed in another repository (see [Section 8](#8-level-1-and-the-separate-level-2-repository)). [`PROJECT_PLAN.md`](../PROJECT_PLAN.md) is the single source of truth for status; this document covers the infrastructure, security, CI-access and application design.
 
-*(Status history: on 2026-10-04 this section recorded Phases 1–9 complete and Phase 9A next.)*
+*(Status history: on 2026-10-04 this section recorded Phases 1–9 complete and Phase 9A next; on 2026-10-11, Phases 1–10 complete.)*
 
 ---
 
@@ -27,7 +27,10 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 | **9A** | **AI Analysis Integration** | `ai-analysis` CLI and the no-LLM `ai-analysis.yml` workflow (no Azure access) | ✅ Complete |
 | **9B** | **Drift Investigation (WHO / WHEN / WHAT)** | Read-only Activity Log investigation in `drift-detection.yml`; public projections of the drift report and the investigation | ✅ Complete |
 | **10** | **FinOps / Cost Analysis** | Infracost plan estimate (10.1), cost delta (10.2), AI cost impact (10.3); read-only unmanaged-resource inventory with an Azure Retail Prices API list-price estimate (10.4), separate from drift and from Infracost | ✅ Complete |
-| 11–14 | Human-approved remediation (next), hardening, dashboard, final docs | See `PROJECT_PLAN.md` | ⬜ Planned |
+| 11 | Human-Approved Remediation | Task 11.1 safeguards specification only ([`remediation-safeguards.md`](remediation-safeguards.md)); no workflow, environment or write permission | 🔴 On hold (since 2026-10-13) |
+| **12** | **Testing & Security Hardening** | Test tiers and `tests.yml` (12.1), plan/log exposure hardening (12.1A), 135-case scenario matrix (12.2), least-privilege and secret audit (12.3) | 🟡 Tasks complete; deferred scope (e.g. Super-Linter 9.4) open |
+| **13** | **Professional Dashboard** | `src/dashboard_api` + `dashboard/` over the real CI artifacts; caller attribution; on-demand GitHub fetch (see [Section 7](#7-level-1-application-architecture)) | 🟡 Built, merged and user-tested; open validation items in 13.3 and 13.5 |
+| 14 | Final Documentation, Demo & Portfolio | See `PROJECT_PLAN.md` | ⬜ Not started |
 
 ---
 
@@ -155,13 +158,16 @@ pipeline.
 
 | Workflow | Trigger | Azure access | GitHub permissions |
 |---|---|---|---|
-| `terraform-auth-test.yml` (Phase 2) | push / PR to `main` (or `master`), manual | OIDC; `terraform fmt`, `validate`, read-only `plan` | `id-token: write`, `contents: read` |
+| `terraform-auth-test.yml` (Phase 2; Task 12.1A) | push / PR to `main` (or `master`), manual | Job `offline-validate` (every event): **none**, `terraform fmt` and `init -backend=false` + `validate`. Job `validate-and-plan` (not on pull requests): OIDC, read-only `plan`; only the exit code and change counts are printed (Task 12.1A) | `offline-validate`: `contents: read`; `validate-and-plan`: `id-token: write`, `contents: read` |
+| `tests.yml` (Phase 12) | push to `main`, every PR, manual | **None** (no login, no OIDC, no secrets) | `contents: read` only |
 | `drift-detection.yml` (Phases 5, 8, 9B, 10) | daily 02:00 UTC, manual; `main` only | OIDC in the plan job only (Terraform plan, read-only Activity Log queries for the drift investigation and read-only ARM resource listing of the Terraform-managed resource groups for the unmanaged inventory, Task 10.4); never `apply`, import or any write | `plan-and-analyze`: `id-token: write`, `contents: read`, `actions: read` (anchor fetch); `issues`: `contents: read`, `issues: write`; `cost`, `investigation` and `unmanaged`: `contents: read`; none of these four has Azure access (`unmanaged` calls only the public Azure Retail Prices API, without credentials) |
 | `ai-analysis.yml` (Phases 9A, 9B, 10) | after each completed drift-detection run on `main` (`workflow_run`) | **None** | `contents: read`, `actions: read`; only `github.token`, to download the source run's public drift report, investigation, Infracost report (Task 10.3) and unmanaged-resources report (Task 10.4) |
 | `security-scan.yml` (Phase 9) | push / PR to `main`, manual | **None** (no login, no OIDC; TruffleHog uses `--no-verification`, so no candidate secret is sent anywhere) | `contents: read` only; no token |
 
-Only the `main` branch has a federated credential, so `terraform-auth-test.yml` runs on pull
-requests fail at Azure login (`AADSTS700213`); this is known, existing behaviour.
+Only the `main` branch has a federated credential. Pull requests therefore run only the offline
+validation job of `terraform-auth-test.yml`; the Azure login and `plan` job runs on trusted events
+(push to `main`, manual dispatch). The dashboard (Section 7) is not a workflow: it runs on the
+owner's machine and has no Azure write access either.
 
 > **Future / conditional only — not current access.** Should a later phase introduce
 > automated remediation, any write capability (for example a narrowly scoped
@@ -209,3 +215,47 @@ flowchart LR
 | `aitdd-dev-main-vnet` | Main dev virtual network (10.10.0.0/16) |
 | `aitdd-dev-main-app-snet` | Application subnet (10.10.1.0/24) |
 | `aitdd-dev-main-app-nsg` | Application Network Security Group |
+
+---
+
+## 7. Level 1 Application Architecture
+
+How the parts fit together in Level 1 (tag `level1-v1.0.0`). Details: [`drift-detection-spec.md`](drift-detection-spec.md) for the detection rules, [`dashboard.md`](dashboard.md) for the dashboard, `README.md` for commands.
+
+```text
+Azure (dev)  <-- read-only OIDC --  GitHub Actions: drift-detection.yml (daily + manual)
+                                      plan evidence -> drift-engine analyze -> public drift report
+                                      Activity Log investigation (who / when / what)
+                                      Infracost estimate; unmanaged-resource inventory + list prices
+                                      drift issues (create / update / close)
+                                           |
+                                           v  run artifacts
+                                    ai-analysis.yml (no Azure access): AI report v4, no LLM in CI
+                                           |
+           owner's machine                 v
+           scripts/fetch_dashboard_data.py (read-only GitHub token, on demand)
+                 -> .artifacts/dashboard (ignored, 0700)
+                 -> dashboard-api (loopback only, local sign-in token, roles)
+                 -> browser UI (dashboard/)
+```
+
+| Layer | Implemented in | Verified by |
+|---|---|---|
+| Terraform evidence and integrity gate | `scripts/generate_plan_json.sh`, `drift-detection.yml` | Real Azure drift tests (Tasks 3.6–3.7, 9B.6); CI runs |
+| Deterministic drift engine | `src/drift_engine/` (`drift-engine analyze`, public projection) | Unit and scenario tests (Phase 12; 135-case matrix) |
+| Investigation, attribution | `src/drift_engine/activity_logs.py`, `attribution.py`, `investigation.py`, `who.py` | Real Azure cycle 2 (Task 9B.6) |
+| Cost and unmanaged resources | `scripts/infracost_analysis.sh`, `src/drift_engine/cost.py`, `inventory.py`, `unmanaged_cost.py` | Real Azure/CI run #44 (Tasks 10.3, 10.4) |
+| AI analysis | `src/ai_engine/`, `ai-analysis.yml` (no LLM in CI) | Real CI run (Task 9A.1), run #27 |
+| Drift issues | `scripts/github_automation.py` | Tasks 8.1, 8.3 |
+| Dashboard | `src/dashboard_api/` (FastAPI, loopback), `dashboard/` (browser UI), `scripts/run_dashboard.sh`, `scripts/fetch_dashboard_data.py` | Automated tests (API, UI, launcher, fetch); owner's own testing on 2026-10-18; open items listed in `PROJECT_PLAN.md` (Tasks 13.3, 13.5) |
+
+**What Level 1 does not do:** no `terraform apply`, import or any Azure write from CI or the dashboard; no remediation (Phase 11 on hold); the AI engine never decides whether drift exists; the dashboard never runs Terraform or a scan and reads only artifacts already produced by CI.
+
+---
+
+## 8. Level 1 and the Separate Level 2 Repository
+
+- **Level 1** is this repository, frozen as the release tag `level1-v1.0.0` (annotated tag `fe07743` → commit `daa95f8`, the merge of PR #14 after PR #13). It stays the stable, reproducible baseline.
+- **Level 2** is a separate, more user-friendly, local-first application in the private repository `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command `aitdd`). It has its own plan, dependencies, tests, CI/CD, access control and releases.
+- **What Level 2 took from Level 1:** only the nine drift-engine modules (`parser`, `classifier`, `comparator`, `severity`, `models`, `report_public`, `investigation_public`, `formatters`, `logs`) and the public report schema, copied once from the tag with two recorded renames, plus 16 test fixtures. It records their provenance and tests that it produces the same public reports and exit codes as Level 1.
+- **What Level 2 never does:** install, import or depend on Level 1, or change this repository. Level 2's roadmap is kept in the Level 2 repository, not in this one.

@@ -11,7 +11,13 @@ Working today:
 - **static Terraform security scanning** (TFLint and Trivy) and secret scanning in CI;
 - **cost analysis**: an Infracost estimate of each run's Terraform plan, and a separate,
   read-only detection of Azure resources that Terraform doesn't manage, with an Azure Retail
-  Prices API list-price estimate.
+  Prices API list-price estimate;
+- a local **dashboard** (loopback API and browser UI) over the real CI artifacts, which can fetch
+  new runs from GitHub on demand.
+
+This repository is **Level 1**, released as the stable baseline tag `level1-v1.0.0`. A separate,
+more user-friendly Level 2 is developed in another repository (see
+[Level 1 and Level 2](#level-1-and-level-2)).
 
 The AI engine has a CLI and a no-LLM CI workflow (Task 9A.1, validated in a real CI run).
 Remediation is planned, not built (Phase 11). See
@@ -21,7 +27,9 @@ Remediation is planned, not built (Phase 11). See
 
 ## 📌 Current Status
 
-**Phases 1–10 are complete**, and so are the lettered phases 5A, 9A and 9B.
+**Phases 1–10 are complete**, and so are the lettered phases 5A, 9A and 9B. Phase 12's tasks are
+complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-v1.0.0` on
+2026-10-18 (see below).
 
 `PROJECT_PLAN.md` reports **"Phases Completed: 10 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
@@ -52,7 +60,8 @@ Remediation is planned, not built (Phase 11). See
     and its AI analysis run #27. That run found 5 resources in `aitdd-dev-main-rg` created
     outside Terraform (a VM made in the Azure Portal for the test), with a list-price estimate
     of $44.85/month. The test VM has since been deleted.
-- **In progress: Phase 12 — Testing & Security Hardening.** Task 12.1A (Terraform plan and
+- **Phase 12 — Testing & Security Hardening: all tasks complete**, with the scope deferred into
+  it (e.g. Super-Linter, Task 9.4) still open. Task 12.1A (Terraform plan and
   diagnostic log exposure hardening) is complete: commit `6d1aa86` on `main`, verified by a real
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
   Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is complete:
@@ -62,11 +71,30 @@ Remediation is planned, not built (Phase 11). See
   repository has no hardcoded secrets, the OIDC trust is limited to this repository's `main` branch,
   and the CI identity has only its two documented roles and no client secret (verified 2026-10-16).
   The detailed audit report is kept private.
+- **Phase 13 — Professional Dashboard: built and released in Level 1.** A loopback-only data API
+  (`dashboard-api`) and browser UI over the real CI artifacts: drift, investigation (with the
+  Azure caller for the `caller_reader` role), AI report, cost and unmanaged resources, and
+  **Check GitHub for new runs** with a GitHub token connected from the dashboard (held in server
+  memory only). Merged through PRs #10–#14; automated tests pass and the owner tested it on their
+  own system. Open validation items (Tasks 13.3 and 13.5 in `PROJECT_PLAN.md`): a browser check of
+  the issue column on the fetched issue snapshot, a real-Chrome password-prompt check, and a
+  recorded check against real GitHub with good, invalid and Issues-less tokens. See
+  [docs/dashboard.md](docs/dashboard.md).
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
-  the Task 11.1 safeguards specification (draft under review; not yet in the repository). No
-  remediation workflow, approval environment or write permission exists. The dashboard (Phase 13)
-  is not being designed or built yet.
+  [docs/remediation-safeguards.md](docs/remediation-safeguards.md) (revision 9). No remediation
+  workflow, approval environment or write permission exists.
+- **Not started: Phase 14** — final documentation, demo and portfolio assets.
+
+#### Level 1 and Level 2
+
+- **Level 1** (this repository) is frozen as tag `level1-v1.0.0` (commit `daa95f8`): the stable,
+  reproducible baseline.
+- **Level 2** is a separate, more user-friendly, local-first application in the private repository
+  `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command `aitdd`). It
+  copied only the drift-engine modules and the public report schema from `level1-v1.0.0`, records
+  their provenance, tests that it produces the same reports, and never installs or imports
+  Level 1. Its plan and releases live in that repository.
 
 | Phase | Status |
 |---|---|
@@ -84,7 +112,9 @@ Remediation is planned, not built (Phase 11). See
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 In progress (12.1A log-exposure hardening complete; 12.1 complete (tests.yml run #2 passed); 12.2 complete (tests.yml run #4 passed); 12.3 complete (least-privilege and secret audit)) |
+| 12 — Testing & security hardening | 🟡 All tasks complete (12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit); deferred scope open |
+| 13 — Professional dashboard | 🟡 Built, merged and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 |
+| 14 — Final documentation, demo & portfolio | ⬜ Not started |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -171,9 +201,10 @@ These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
   and no apply triggered by a merge.
-- Testing and security hardening (Phase 12), which now also holds the deferred Super-Linter
-  code-quality enforcement (Task 9.4), GitHub Actions linting and action SHA pinning;
-  dashboard (Phase 13); final documentation and demo (Phase 14).
+- The scope deferred into Phase 12: Super-Linter code-quality enforcement (Task 9.4) and the
+  other items listed under Phase 12 in `PROJECT_PLAN.md`.
+- Final documentation, demo and portfolio assets (Phase 14).
+- The open dashboard validation items of Tasks 13.3 and 13.5.
 
 ### Core principles
 
@@ -326,6 +357,8 @@ scripts/
 ├── run_tflint.sh                 # TFLint over terraform/ (local and CI; Task 9.1)
 ├── run_trivy_config.sh           # Trivy config security scan + risk-acceptance gate (local and CI; Task 9.2)
 ├── run_trufflehog.sh             # TruffleHog secret scan of the full Git history (local and CI; Task 9.3)
+├── fetch_dashboard_data.py       # Download CI artifacts + issue snapshot for the dashboard (Tasks 13.3–13.5)
+├── run_dashboard.sh              # Dashboard launcher; `Start Dashboard.command` wraps it for Finder (Phase 13)
 └── validate.sh                   # terraform fmt -check + validate (no Azure auth)
 
 src/drift_engine/                 # Python drift engine (Phase 4)
@@ -350,6 +383,9 @@ src/ai_engine/                    # LangGraph AI analysis engine (Phase 6; ai-an
 ├── evidence.py, verify.py        # Evidence views and evidence-vs-inference checks (6.7)
 └── nodes/                        # parse, security, cost/config, root cause, remediation, report nodes
 
+src/dashboard_api/                # Dashboard data API: loopback FastAPI, roles, caller lookup, GitHub fetch job (Phase 13)
+dashboard/                        # Dashboard browser UI (HTML/CSS/JS, node --test component tests) (Phase 13)
+
 schemas/
 ├── drift_report.schema.json      # Report contract (JSON Schema 2020-12)
 └── examples/drift_report.json    # Sample report from a real fixture
@@ -368,7 +404,9 @@ tests/
 docs/
 ├── drift-detection-spec.md       # Detection contract (Phases 3–4; publication rules of Phases 5, 8, 9A and 10.1)
 ├── MASTER_PROJECT_GUIDE.md       # Project walkthrough
-└── architecture.md               # Infrastructure, security and CI access design
+├── architecture.md               # Infrastructure, security, CI access and application design
+├── dashboard.md                  # Dashboard: start, sign-in, GitHub fetch, endpoints (Phase 13)
+└── remediation-safeguards.md     # Phase 11 Task 11.1 safeguards specification (on hold, under review)
 
 pyproject.toml / requirements.txt # Python package and dev environment
 .tflint.hcl                       # TFLint configuration with exact version pins (Task 9.1)
@@ -1398,9 +1436,9 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 In progress: Task 12.1A log-exposure hardening complete (verified on auth-test run #68); 12.1 complete (tests.yml run #2 passed); 12.2 complete (tests.yml run #4 passed); 12.3 complete (least-privilege and secret audit) |
-| 13 | Professional dashboard | ⬜ Planned |
-| 14 | Final documentation / demo | ⬜ Planned |
+| 12 | Testing and hardening | 🟡 All tasks complete: 12.1A log-exposure hardening (verified on auth-test run #68); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope open |
+| 13 | Professional dashboard | 🟡 Built, merged (PRs #10–#14) and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 |
+| 14 | Final documentation / demo | ⬜ Not started |
 
 ### Known limitations (current state)
 

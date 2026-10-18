@@ -9,10 +9,14 @@
 >   Phase 3). That commit is *not* the current project HEAD.
 > - **Updated** against commit `39bbdbc` plus the 2026-10-04 Task 9.4 deferral (Phase 9
 >   complete with Tasks 9.1–9.3; Task 9.4 deferred to Phase 12; Task 9A.1 next).
-> - **Last updated** against commit `8ef89b6` (2026-10-11): Phases 9A, 9B and 10 complete
->   (Task 10.4 verified on real Azure in drift-detection run #44); Phase 11 next, not started.
->   Statuses, roadmap, the architecture overview, security, testing and the status summary
->   reflect that state. Section 18 keeps its earlier status column.
+> - **Updated** against commit `8ef89b6` (2026-10-11): Phases 9A, 9B and 10 complete
+>   (Task 10.4 verified on real Azure in drift-detection run #44).
+> - **Last updated** for the Level 1 closeout (2026-10-18), against tag `level1-v1.0.0`
+>   (commit `daa95f8`): Phase 11 on hold, Phase 12 tasks complete, Phase 13 dashboard built and
+>   released in Level 1, Phase 14 not started, and Level 2 moved to a separate repository (see
+>   [Level 1 and Level 2](#level-1-and-level-2)). The roadmap tables, status labels and the status
+>   summary reflect that state; the explanatory sections were not rewritten. Section 18 keeps its
+>   earlier status column.
 > - Sections 5–11 still explain Phases 1–3 the way they were designed, with their final
 >   status. Phases 4–10 are summarized in [Section 4](#what-phases-410-delivered).
 > - For anything newer, `PROJECT_PLAN.md` wins.
@@ -127,8 +131,8 @@ According to `PROJECT_PLAN.md` (Phases 1–14), the finished platform should:
 5. **Find who/what made the change** from Azure Activity Logs. *(Phase 7 tooling, done; run in CI by the Phase 9B drift investigation, done)*
 6. **Open GitHub Issues** automatically and close them on evidence. *(Phase 8, done. Remediation PRs moved to Phase 11)*
 7. Add **security scanning** *(Phase 9, done: TFLint, Trivy config, TruffleHog; Super-Linter deferred to Phase 12)* and **cost analysis** *(Phase 10, done: Infracost estimate of the Terraform plan, cost delta, AI cost impact, and a separate list-price estimate of Azure resources Terraform doesn't manage)*.
-8. **Fix drift only with human approval.** *(Phase 11, next; not started)*
-9. Show everything on a **dashboard** with real data. *(Phase 13, future; not being designed yet)*
+8. **Fix drift only with human approval.** *(Phase 11, on hold since 2026-10-13: the Task 11.1 safeguards specification, [remediation-safeguards.md](remediation-safeguards.md), revision 9, is paused under review; nothing is built)*
+9. Show everything on a **dashboard** with real data. *(Phase 13: built and released in Level 1: a loopback API and browser UI over the real CI artifacts, with an on-demand GitHub fetch; see [dashboard.md](dashboard.md). A few validation items stay open)*
 
 ### Big-picture diagram
 
@@ -144,8 +148,8 @@ flowchart TD
     RES --> AI["AI analysis<br/>Phase 6 + CI in 9A"]
     RES --> COST["Cost estimate<br/>Phase 10"]
     AZ --> UNM["Unmanaged-resource inventory<br/>Task 10.4 - not drift"]
-    RES -.-> FIX["Human-approved remediation<br/>Phase 11 - future"]
-    RES -.-> DASH["Dashboard<br/>Phase 13 - future"]
+    RES -.-> FIX["Human-approved remediation<br/>Phase 11 - on hold"]
+    RES --> DASH["Dashboard<br/>Phase 13 - built"]
 ```
 
 Solid lines = **built today**. Dotted lines = **future**.
@@ -314,7 +318,7 @@ flowchart TD
         AI["AI analysis - Phase 6 library + Phase 9A CLI/CI - DONE<br/>report v4"]
         LOG["Drift investigation - Phases 7 + 9B - DONE<br/>read-only Activity Log in CI"]
         COST["Infracost plan estimate + cost delta - Phase 10 - DONE"]
-        FIX["Human-approved remediation - Phase 11 - NEXT"]
+        FIX["Human-approved remediation - Phase 11 - ON HOLD"]
     end
 
     UNM["Unmanaged-resource inventory - Task 10.4 - DONE<br/>read-only ARM listing + Azure Retail Prices estimate<br/>separate finding, never drift"]
@@ -363,7 +367,10 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 | Infracost plan estimate + cost delta + AI cost impact | 🟢 CURRENT (Tasks 10.1–10.3) | `scripts/infracost_analysis.sh`, `src/drift_engine/cost.py`, `src/ai_engine/nodes/cost_analysis.py` |
 | Unmanaged-resource inventory + Azure Retail Prices estimate | 🟢 CURRENT (Task 10.4; verified on real Azure, run #44) | `src/drift_engine/inventory.py`, `unmanaged_cost.py`, `scripts/inventory_analysis.sh` |
 | Super-Linter code-quality enforcement | ⬜ FUTURE (Task 9.4, deferred to Phase 12) | — |
-| Remediation, hardening, dashboard, final docs | ⬜ FUTURE (Phases 11–14; Phase 11 next) | — |
+| Dashboard API + UI over real CI artifacts, on-demand GitHub fetch | 🟢 CURRENT (Phase 13, Level 1; Tasks 13.3–13.5 have open validation items) | `src/dashboard_api/`, `dashboard/`, `scripts/run_dashboard.sh` |
+| Test tiers, scenario matrix, log-exposure hardening, least-privilege audit | 🟢 CURRENT (Phase 12 tasks; its deferred scope is still open) | `tests/`, `.github/workflows/tests.yml` |
+| Human-approved remediation | ⏸️ ON HOLD (Phase 11; specification only, nothing built) | `docs/remediation-safeguards.md` |
+| Final docs, demo, portfolio | ⬜ FUTURE (Phase 14, not started) | — |
 | Remediation PRs (old Task 8.2) | ⬜ FUTURE (moved to Phase 11) | — |
 | Application Storage Account, Key Vault | ⏸️ DEFERRED | Not in the codebase |
 
@@ -395,12 +402,12 @@ That figure counts the numbered phases 1–14. The lettered phases are planned s
 | 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | 🟢 COMPLETED |
 | 9B | Drift Investigation (WHO / WHEN / WHAT) | Read-only Activity Log investigation in CI, proven on real Azure | 🟢 COMPLETED |
 | 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation; separate list-price estimate of resources Terraform doesn't manage (10.4) | 🟢 COMPLETED (2026-10-11) |
-| 11 | Human-Approved Remediation | Apply fixes only after human approval | ⬜ NOT STARTED (next: Task 11.1 design review) |
-| 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | ⬜ NOT STARTED |
-| 13 | Professional Dashboard | API + UI showing real drift data | ⬜ NOT STARTED |
+| 11 | Human-Approved Remediation | Apply fixes only after human approval | 🔴 ON HOLD (2026-10-13; Task 11.1 specification paused under review; nothing built) |
+| 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | 🟡 IN PROGRESS (all tasks 🟢: 12.1A, 12.1, 12.2, 12.3; deferred scope still open) |
+| 13 | Professional Dashboard | API + UI showing real drift data | 🟡 IN PROGRESS (13.1–13.2 🟢; 13.3–13.5 built, merged and user-tested, with open validation items; released in `level1-v1.0.0`) |
 | 14 | Final Documentation, Demo & Portfolio Assets | Final docs, demo script, portfolio summary | ⬜ NOT STARTED |
 
-> **About Phases 11–14 and Task 9.4:** each has a drafted task list in
+> **About Phases 11 and 14 and Task 9.4:** each has a drafted task list in
 > `PROJECT_PLAN.md`. They are **future scope, not yet finalized**: every task gets its own
 > design review before implementation, and reviews have changed tasks before. For example,
 > tfsec was replaced by Trivy in 9.2, and the remediation PRs of 8.2 moved to Phase 11.
@@ -1376,13 +1383,28 @@ unmanaged resources (10.4).)*
 | **Phase 9A** | 🟢 | `ai-analysis` CLI + no-LLM `ai-analysis.yml` | — |
 | **Phase 9B** | 🟢 | Drift investigation (WHO / WHEN / WHAT), proven on real Azure (9B.6) | — |
 | **Phase 10** | 🟢 | Infracost estimate (10.1), cost delta (10.2), AI cost impact (10.3), unmanaged resources + Azure Retail Prices estimate (10.4; real Azure run #44) | — |
-| Phases 11–14 | ⬜ | Task lists drafted in `PROJECT_PLAN.md` | **Task 11.1 (design review)** next; each task after its design review; dashboard (Phase 13) not yet |
+| **Phase 11** | 🔴 | Task 11.1 safeguards specification (revision 9), paused under review; nothing built | On hold (user decision 2026-10-13) |
+| **Phase 12** | 🟡 | Test tiers and `tests.yml` (12.1), log-exposure hardening (12.1A), scenario matrix (12.2), least-privilege audit (12.3) | Deferred scope (e.g. Super-Linter 9.4) still open |
+| **Phase 13** | 🟡 | Dashboard API + UI over real CI artifacts (13.1–13.2), live data and caller attribution (13.3), GitHub fetch from the dashboard (13.4–13.5); released in `level1-v1.0.0` | Open validation items in Tasks 13.3 and 13.5 |
+| **Phase 14** | ⬜ | Task list drafted | Not started |
 | Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7, 9B.6) | — |
 | Detection running in CI? | ✅ Yes | Daily scheduled + manual runs | — |
 | Resources outside Terraform detected? | ✅ Yes | A portal-created VM in `aitdd-dev-main-rg`: 5 unmanaged resources, $44.85/month list price (run #44); VM deleted afterwards | Next scheduled inventory shows whether anything remains |
 
-**Current phase:** Phase 11 — Human-Approved Remediation (⬜ not started)
-**Current active task:** Task 11.1 — Safe Remediation Architecture & Controls (⬜ not started; dedicated design review required before implementation)
+**Current phase:** none in Level 1. Level 1 was released as the stable baseline on 2026-10-18
+(tag `level1-v1.0.0`, commit `daa95f8`).
+**Current active task:** none in Level 1 (see `PROJECT_PLAN.md`, Master Project Overview).
+
+### Level 1 and Level 2
+
+- **Level 1** is this repository: everything above, released as tag `level1-v1.0.0`. It is the
+  stable baseline: Terraform evidence, the deterministic engine, CI detection, issues, AI
+  analysis, investigation, cost, security scanning and the dashboard.
+- **Level 2** is a separate, more user-friendly, local-first application in the private
+  repository `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command
+  `aitdd`). It copied only the nine drift-engine modules and the public report schema from
+  `level1-v1.0.0`, records where they came from, and tests that it produces the same reports. It
+  never installs or imports Level 1, and its plan lives in that repository, not here.
 
 ---
 
