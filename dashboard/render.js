@@ -32,6 +32,7 @@
     activity_log_not_settled: "Activity Log evidence had not settled (10-minute margin); not looked up",
     azure_sign_in_unavailable: "Azure sign-in unavailable on the dashboard host (run az login)",
     azure_access_denied: "the signed-in Azure identity may not read the Activity Log",
+    lookup_failed: "the caller lookup request failed; use Refresh to retry",
   };
   const CALLER_NOTE = "The identity Azure recorded for this operation; not proof of which person made the change.";
 
@@ -62,6 +63,254 @@
     return "Could not load data (" + code + ").";
   }
 
+  /* "Check GitHub for new runs" (Task 13.4): plain-language state of the GitHub fetch job, from
+     GET /api/fetch/status or a refused POST /api/fetch. Returns {visible, disabled, text, tone}. */
+  const FETCH_FAILURES = {
+    timeout: "it took longer than 10 minutes and was stopped",
+    artifacts_listing_failed_httperror: "GitHub refused the artifact list (check the token's Actions: Read access)",
+    artifacts_listing_failed_urlerror: "GitHub could not be reached",
+    artifacts_listing_failed_timeouterror: "GitHub did not answer in time",
+    artifacts_listing_failed: "GitHub's artifact list could not be read",
+    artifacts_write_failed: "the downloaded files could not be saved",
+    usage: "the fetch was not configured correctly",
+    start_failed: "the fetch could not start",
+    shutdown: "the dashboard was shutting down",
+    internal_error: "an internal error stopped it",
+    unexpected_output: "the fetch ended unexpectedly",
+    unexpected_exit: "the fetch ended unexpectedly",
+  };
+  const FETCH_REFUSALS = {
+    fetch_in_progress: "A check is already running.",
+    fetch_access_denied: "Your sign-in may not check GitHub (needs the data_refresher role).",
+    fetch_unavailable: "Checking GitHub is unavailable right now.",
+    local_only: "Checking GitHub is local-only and refused here.",
+    disabled: "GitHub access is turned off for this dashboard (started with --no-github).",
+  };
+  // Why no check can run (status.unavailable_reason, fixed codes from the server; no paths or values).
+  const FETCH_UNAVAILABLE = {
+    disabled: "GitHub access is turned off for this dashboard (started with --no-github). Saved reports still work.",
+    not_connected: "GitHub is not connected. Use Connect GitHub to add a read-only GitHub token; saved reports still work.",
+    local_only: "Checking GitHub is local-only and not available here.",
+    no_data_dir: "Checking GitHub is unavailable: the dashboard has no data folder configured.",
+    fetch_script_missing: "Checking GitHub is unavailable: the fetch script was not found with this dashboard installation.",
+    shutting_down: "Checking GitHub is unavailable: the dashboard is shutting down.",
+  };
+  // Client-side end states of watching a check (the server's job may still be fine).
+  const FETCH_NOTICES = {
+    poll_failed: "Lost contact with the dashboard server while checking GitHub. Use Refresh to see the latest saved data.",
+    watch_limit: "The GitHub check is still running after 11 minutes; stopped watching it. Use Refresh later.",
+  };
+
+  function fetchCount(counts, key) {
+    return (counts && Number.isInteger(counts[key])) ? counts[key] : 0;
+  }
+
+
+  /* Task 13.5: sanitized, category-based explanations (fixed codes from the server; never a raw
+     GitHub response). An unknown category yields null so callers fall back to the older texts. */
+  function githubProblem(category, httpStatus, need) {
+    const http = Number.isInteger(httpStatus) ? " (HTTP " + httpStatus + ")" : "";
+    const permission = need === "issues" ? "Issues: Read" : need === "actions" ? "Actions: Read"
+      : "Actions: Read and Issues: Read";
+    switch (category) {
+      case "invalid_token":
+        return "GitHub did not accept the token" + http + ": it is invalid, expired or revoked.";
+      case "insufficient_permissions":
+        return "The token is accepted but lacks a repository permission" + http + ". Grant " + permission +
+          " on this repository.";
+      case "sso_required":  // GitHub's X-GitHub-SSO header
+        return "The token is accepted but must be authorized for the organization's SAML single sign-on" + http +
+          ". Authorize it in GitHub's token settings.";
+      case "repository_not_accessible":
+        return "The repository could not be accessed" + http + ". The token may not include this repository " +
+          "(this is not necessarily a wrong token).";
+      case "rate_limited":
+        return "GitHub has temporarily rate-limited requests" + http + ". Wait a few minutes, then retry.";
+      case "network_error":
+        return "GitHub could not be reached (network error or timeout). Check the connection, then retry.";
+      case "api_error":
+        return "GitHub answered with an unexpected error" + http + ". Retry later.";
+      case "artifacts_listing_failed":
+        return "The list of workflow artifacts could not be read" + http + ".";
+      case "issues_listing_failed":
+        return "The drift issue list could not be read" + http + ".";
+      case "write_failed":
+        return "The downloaded files could not be saved in the local data folder.";
+      case "invalid_token_format":
+        return "That does not look like a GitHub token (one line, no spaces, at most 1024 characters).";
+      case "internal_error":
+      case "unexpected_output":
+        return "The dashboard could not run the GitHub request.";
+      default:
+        return null;
+    }
+  }
+
+  const FETCH_STAGES = [
+    ["connecting", "Connecting to GitHub"],
+    ["listing", "Listing artifacts"],
+    ["downloading", "Downloading new reports"],
+    ["issues", "Updating drift issue state"],
+    ["refreshing", "Refreshing dashboard data"],
+  ];
+  const FETCH_LABELS = { idle: "Idle", running: "Running", new_artifacts: "Completed", no_new_artifacts: "Completed",
+    partial: "Completed with a warning", failed: "Failed" };
+
+  function duration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "–";
+    const whole = Math.floor(seconds);
+    return whole < 60 ? whole + " s" : Math.floor(whole / 60) + " min " + String(whole % 60).padStart(2, "0") + " s";
+  }
+
+  function elapsedSeconds(status, nowMs) {
+    if (status.status === "running" && status.started_at && Number.isFinite(nowMs)) {
+      const started = Date.parse(status.started_at);
+      if (Number.isFinite(started)) return Math.max(0, (nowMs - started) / 1000);
+    }
+    return Number.isInteger(status.elapsed_seconds) ? status.elapsed_seconds : null;
+  }
+
+  /* The connection line of the status window and the toolbar chip: {label, tone, connected}. A refused
+     token (`invalid_token`) is kept apart from missing permissions; an Issues-only refusal is a warning. */
+  function connectionView(status) {
+    const c = status && status.connection;
+    if (!c || !c.connected) return { label: "Not connected", tone: "muted", connected: false };
+    const e = c.last_error;
+    if (e) {
+      const labels = {
+        invalid_token: "Connected, but GitHub rejected the token (invalid, expired or revoked)",
+        insufficient_permissions: "Connected, but the token lacks " + (e.need === "issues" ? "Issues: Read" : "Actions: Read"),
+        repository_not_accessible: "Connected, but the token cannot access the repository",
+        sso_required: "Connected, but the token needs SSO authorization",
+      };
+      return { label: labels[e.category] || "Connected, but the last check had a token problem", tone: "error",
+        connected: true };
+    }
+    if (c.verified && c.warning) {
+      return { label: "Connected (verified; lacks Issues: Read, so issue states are not updated)", tone: "warn",
+        connected: true };
+    }
+    return c.verified ? { label: "Connected (token verified)", tone: "ok", connected: true }
+      : { label: "Connected (token not verified yet)", tone: "muted", connected: true };
+  }
+
+  /* Stage list of the status window: [{label, state: done|active|failed|pending}]. Truthful: a stage is
+     "active" only while the server (or the reload) reports it; no percentage is ever shown. */
+  function stageRows(status, refreshing) {
+    const order = FETCH_STAGES.map((s) => s[0]);
+    let current = status.stage && order.includes(status.stage) ? order.indexOf(status.stage) : -1;
+    const finished = status.status === "new_artifacts" || status.status === "no_new_artifacts" || status.status === "partial";
+    if (finished) current = order.indexOf("refreshing") + (refreshing ? 0 : 1);
+    return FETCH_STAGES.map((stage, i) => {
+      let state = "pending";
+      if (status.status === "failed" || status.status === "idle") {
+        if (status.status === "failed" && current >= 0) state = i < current ? "done" : i === current ? "failed" : "pending";
+      } else if (i < current) state = "done";
+      else if (i === current) state = "active";
+      if (finished && stage[0] === "issues" && status.status === "partial") state = "failed";
+      return { label: stage[1], state: state };
+    });
+  }
+
+  /* The status window's body (HTML). `options`: {now (ms), refreshing (reloading local data)}. */
+  function fetchWindow(status, options) {
+    const opts = options || {};
+    if (!status) return '<p class="fw-note">No status yet.</p>';
+    const conn = connectionView(status);
+    const counts = status.counts || {};
+    const skippedOther = Object.keys(counts).filter((k) => /^skipped_/.test(k) && k !== "skipped_download_failed")
+      .reduce((sum, k) => sum + (Number.isInteger(counts[k]) ? counts[k] : 0), 0);
+    const label = FETCH_LABELS[status.status] || "Idle";
+    const tone = status.status === "failed" ? "error" : status.status === "partial" ? "warn"
+      : status.status === "running" ? "busy" : status.status === "idle" ? "muted" : "ok";
+    const rows = [
+      ["GitHub connection", '<span class="fw-' + conn.tone + '">' + esc(conn.label) + "</span>"],
+      ["Started", status.started_at ? esc(formatTime(status.started_at)) : "–"],
+      ["Elapsed", esc(duration(elapsedSeconds(status, opts.now)))],
+      ["New artifacts downloaded", String(fetchCount(counts, "fetched"))],
+      ["Skipped (already saved)", String(fetchCount(counts, "already_present"))],
+    ];
+    if (skippedOther) rows.push(["Skipped (not eligible)", String(skippedOther)]);
+    if (fetchCount(counts, "skipped_download_failed")) {
+      rows.push(["Could not be downloaded", String(fetchCount(counts, "skipped_download_failed"))]);
+    }
+    let html = '<p class="fw-state" data-tone="' + tone + '"><span class="badge fw-badge">' + esc(label) + "</span></p>" +
+      '<dl class="fw-facts">' + rows.map((r) => "<dt>" + esc(r[0]) + "</dt><dd>" + r[1] + "</dd>").join("") + "</dl>";
+    if (status.status !== "idle") {
+      html += '<ol class="fw-stages">' + stageRows(status, Boolean(opts.refreshing)).map((r) =>
+        '<li data-state="' + r.state + '"><span class="fw-mark" aria-hidden="true"></span>' + esc(r.label) +
+        (r.state === "active" ? " …" : "") + "</li>").join("") + "</ol>";
+    }
+    if (status.status === "failed" || status.status === "partial") {
+      const text = githubProblem(status.category, status.http_status, status.need) ||
+        FETCH_FAILURES[status.code] || FETCH_FAILURES[String(status.code || "").replace(/_[a-z0-9]+$/, "")] ||
+        "unknown error";
+      const prefix = status.status === "partial" ? "Reports were downloaded, but drift issue states were not updated. " : "";
+      html += '<p class="fw-error" role="alert">' + esc(prefix + text) +
+        (status.code ? ' <span class="fw-code">[' + esc(status.category || status.code) + "]</span>" : "") + "</p>";
+    } else if (status.connection && status.connection.warning && !status.connection.last_error) {
+      html += '<p class="fw-note">' + esc(githubProblem(status.connection.warning.category,
+        status.connection.warning.http_status, status.connection.warning.need) || "") + "</p>";
+    } else if (status.connection && status.connection.last_error) {
+      html += '<p class="fw-error" role="alert">' + esc(githubProblem(status.connection.last_error.category,
+        status.connection.last_error.http_status, status.connection.last_error.need) || "") + "</p>";
+    }
+    if (!status.available && status.unavailable_reason) {
+      html += '<p class="fw-note">' + esc(FETCH_UNAVAILABLE[status.unavailable_reason] || "") + "</p>";
+    } else if (status.retry_after_seconds && status.status !== "running") {
+      html += '<p class="fw-note">Next check possible in ' + esc(String(status.retry_after_seconds)) + " s.</p>";
+    }
+    html += '<p class="fw-note">Closing this window does not stop the check. Saved reports stay available.</p>';
+    return html;
+  }
+
+  function fetchView(status, refusal, notice) {
+    if (notice && FETCH_NOTICES[notice]) {
+      return { visible: true, disabled: false, text: FETCH_NOTICES[notice], tone: "error" };
+    }
+    if (refusal) {
+      const text = refusal.code === "fetch_cooldown"
+        ? "Checked recently: try again in " + (refusal.retryAfter || "a few") + " s."
+        : (FETCH_REFUSALS[refusal.code] || "GitHub check refused (" + refusal.code + ").");
+      return { visible: true, disabled: refusal.code !== "fetch_cooldown" && refusal.code !== "fetch_in_progress",
+        text: text, tone: "warn" };
+    }
+    if (!status || !status.allowed) return { visible: false, disabled: true, text: "", tone: "" };
+    if (!status.available) {
+      const connect = status.unavailable_reason === "not_connected";
+      return { visible: true, disabled: !connect, tone: "muted", connect: connect,
+        text: FETCH_UNAVAILABLE[status.unavailable_reason] || FETCH_REFUSALS.fetch_unavailable };
+    }
+    const at = status.finished_at ? " (" + formatTime(status.finished_at) + ")" : "";
+    const fetched = fetchCount(status.counts, "fetched");
+    const local = " The dashboard keeps showing the reports already saved locally.";
+    switch (status.status) {
+      case "running":
+        return { visible: true, disabled: true, tone: "busy",
+          text: "Checking GitHub for new runs… started " + formatTime(status.started_at) + "." };
+      case "new_artifacts":
+        return { visible: true, disabled: false, tone: "ok",
+          text: "Downloaded " + fetched + " new artifact(s) from GitHub" + at + "; the dashboard was reloaded." };
+      case "no_new_artifacts":
+        return { visible: true, disabled: false, tone: "ok", text: "No new runs on GitHub" + at + "." };
+      case "partial": {
+        const issues = /http_403$/.test(status.code || "")
+          ? "drift issue states were not updated: the token needs Issues: Read"
+          : "drift issue states could not be updated";
+        return { visible: true, disabled: false, tone: "warn",
+          text: "Downloaded " + fetched + " new artifact(s)" + at + ", but " + issues + "." };
+      }
+      case "failed":
+        return { visible: true, disabled: false, tone: "error",
+          text: "Checking GitHub failed" + at + ": " + (githubProblem(status.category, status.http_status, status.need) ||
+            ((FETCH_FAILURES[status.code] ||
+              FETCH_FAILURES[String(status.code || "").replace(/_[a-z0-9]+$/, "")] || "unknown error") + ".")) +
+            local };
+      default:
+        return { visible: true, disabled: false, tone: "", text: "" };
+    }
+  }
+
   function severityClass(level) {
     return SEVERITY_ORDER.includes(level) ? "sev-" + level.toLowerCase() : "sev-unknown";
   }
@@ -90,6 +339,9 @@
     if (!caller) {
       return '<span class="caller caller-denied" data-caller-status="not_authorized">' +
         "Not available (needs the caller_reader role)</span>";
+    }
+    if (caller.status === "loading") {  // drift rows are shown before the Activity Log lookup returns
+      return '<span class="caller caller-loading" data-caller-status="loading" aria-busy="true">Looking up…</span>';
     }
     if (caller.status === "no_decisive_operation" && Array.isArray(caller.operations) && caller.operations.length) {
       return '<div class="caller caller-operations" data-caller-status="no_decisive_operation">' +
@@ -419,7 +671,7 @@
   }
 
   const api = {
-    esc, apiErrorCode, errorMessage, unmanagedPanel, filterHistory, driftContext, formatValue, formatTime, callerField, issueField, remediationPrField, issuesPanel, overviewCards, severityBreakdown, historyRows, filterOptions,
+    esc, apiErrorCode, errorMessage, fetchView, fetchWindow, githubProblem, connectionView, stageRows, duration, unmanagedPanel, filterHistory, driftContext, formatValue, formatTime, callerField, issueField, remediationPrField, issuesPanel, overviewCards, severityBreakdown, historyRows, filterOptions,
     filterDrifts, optionTags, runOptions, driftRows, hclDiff, detailModal, UNKNOWN_REASONS,
   };
   root.DashboardRender = api;

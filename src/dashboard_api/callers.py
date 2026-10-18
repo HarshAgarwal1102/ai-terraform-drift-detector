@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from drift_engine import activity_logs as al
@@ -43,6 +44,9 @@ logger = logging.getLogger(__name__)
 
 UNKNOWN = "Unknown"
 LABEL = "Caller recorded by Azure"
+# Independent Activity Log queries of one response run concurrently (each takes about a second on real
+# Azure); bounded so a run with many operations never floods the API.
+MAX_PARALLEL_LOOKUPS = 4
 
 
 def _result(status: str, value: str = UNKNOWN, caller_type: str = "unknown") -> dict:
@@ -116,10 +120,13 @@ def recorded_caller(investigation: pub.PublicInvestigation | None, address: str,
         return _operation_caller(address, op, target, source, now)
     result = _result("no_decisive_operation")
     if resource.operations:
+        ops = resource.operations
+        with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_LOOKUPS, len(ops))) as pool:
+            found = list(pool.map(lambda o: _operation_caller(address, o, target, source, now), ops))  # in order
         result["operations"] = [
             {"op_id": o.op_id, "operation_name": o.operation_name, "start": o.start, "end": o.end, "role": o.role,
-             **{k: v for k, v in _operation_caller(address, o, target, source, now).items() if k != "label"}}
-            for o in resource.operations]
+             **{k: v for k, v in caller.items() if k != "label"}}
+            for o, caller in zip(ops, found)]
     return result
 
 

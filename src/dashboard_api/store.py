@@ -19,6 +19,11 @@ to a report only when they are bound to it:
 Two different documents for one run make that slot ambiguous: neither is used.
 Problems are fixed codes, never file content or paths. A `github_issues.json` snapshot
 at the top of the data directory (Task 13.3, `issues.py`) is loaded alongside.
+
+Task 13.4: a drift report must validate as the public drift report (`report_public`
+`PublicDriftReport`, the model of the `drift-report-<id>` artifact), not just have its
+shape. Hidden folders (`.fetch-*` staging of an interrupted or running fetch) are never
+indexed.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from pydantic import ValidationError
 
 from drift_engine import investigation_public as pub
 from drift_engine import unmanaged_public
+from drift_engine.report_public import validate_public
 from drift_engine.logs import log_event
 
 from dashboard_api import issues as issue_states
@@ -108,7 +114,8 @@ def _files(root: str) -> list[tuple[str, str]]:
     for directory, subdirs, names in os.walk(root, followlinks=False):
         if directory.count(os.sep) - base >= MAX_DEPTH:
             subdirs[:] = []
-        subdirs[:] = sorted(d for d in subdirs if not os.path.islink(os.path.join(directory, d)))
+        subdirs[:] = sorted(d for d in subdirs  # hidden: a fetch's staging folder, never data
+                            if not d.startswith(".") and not os.path.islink(os.path.join(directory, d)))
         for name in sorted(names):
             path = os.path.join(directory, name)
             if name in FILES and not os.path.islink(path):
@@ -136,8 +143,14 @@ def _json(data: bytes) -> Any:
 
 def _is_report(doc: Any) -> bool:
     run = doc.get("run") if isinstance(doc, dict) else None
-    return (isinstance(run, dict) and isinstance(run.get("run_id"), str) and bool(RUN_ID.match(run["run_id"]))
-            and isinstance(doc.get("summary"), dict) and isinstance(doc.get("resources"), list))
+    if not (isinstance(run, dict) and isinstance(run.get("run_id"), str) and bool(RUN_ID.match(run["run_id"]))
+            and isinstance(doc.get("summary"), dict) and isinstance(doc.get("resources"), list)):
+        return False
+    try:
+        validate_public(doc)  # the public drift report model (Task 13.4 hardening)
+    except (ValidationError, ValueError, TypeError, RecursionError):
+        return False
+    return True
 
 
 def _single(candidates: dict[str, Any], slot: str, problems: list[str]) -> Any:
