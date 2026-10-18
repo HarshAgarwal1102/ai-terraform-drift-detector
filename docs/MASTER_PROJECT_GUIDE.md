@@ -1397,7 +1397,8 @@ unmanaged resources (10.4).)*
 
 ### Level 1 and Level 2
 
-- **Level 1** is this repository: everything above, released as tag `level1-v1.0.0`. It is the
+- **Level 1** is this repository: everything above, released as tag `level1-v1.0.0`. It is
+  **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2. It is the
   stable baseline: Terraform evidence, the deterministic engine, CI detection, issues, AI
   analysis, investigation, cost, security scanning and the dashboard.
 - **Level 2** is a separate, more user-friendly, local-first application in the private
