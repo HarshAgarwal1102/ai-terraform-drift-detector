@@ -265,17 +265,40 @@
          to type="password" elsewhere); password managers are asked to ignore it. Enter still submits. -->
     <div id="github-form" class="github-form" role="group" aria-labelledby="github-token-label">
       <label id="github-token-label" for="github-token">GitHub personal access token</label>
-      <input id="github-token" type="text" class="masked" placeholder="github_pat_…" autocomplete="off"
-        autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="1024" data-1p-ignore="true"
-        data-lpignore="true" data-bwignore="true" data-form-type="other" aria-describedby="github-help github-error">
+      <!-- While verifying, the field is locked and shows mask dots as a placeholder: the real token has already
+           left the page (its value is emptied before the request). -->
+      <div class="github-token-field">
+        <input id="github-token" type="text" class="masked" placeholder="github_pat_…" autocomplete="off"
+          autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="1024" data-1p-ignore="true"
+          data-lpignore="true" data-bwignore="true" data-form-type="other" aria-describedby="github-help github-error">
+        <svg class="github-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      </div>
       <p id="github-help" class="token-help">Checked with GitHub, then held in this dashboard server’s memory only:
         never saved to disk, never shown again. Restarting the dashboard forgets it. Don’t let your browser save it.</p>
+      <p id="github-checking" class="token-help" hidden>Checking the token with GitHub…</p>
       <p id="github-error" class="error" role="alert"></p>
       <div class="popup-actions github-actions">
         <button type="button" id="github-cancel" class="key">Cancel</button>
-        <button type="button" id="github-submit" class="key-primary"><span id="github-submit-label">Verify and connect</span></button>
+        <button type="button" id="github-submit" class="key-primary"><span class="btn-spinner" aria-hidden="true"></span><span id="github-submit-label">Verify and connect</span></button>
       </div>
       <button type="button" id="github-disconnect" class="key-danger popup-wide" hidden>Disconnect GitHub</button>
+    </div>
+  </dialog>
+
+  <!-- "Check GitHub for new runs" while GitHub is not connected: explain first, then offer Connect GitHub. -->
+  <dialog id="github-first-dialog" class="popup" role="alertdialog" aria-labelledby="github-first-title"
+    aria-describedby="github-first-message">
+    <span class="popup-icon info" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+        stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/></svg>
+    </span>
+    <h2 id="github-first-title">Connect GitHub first</h2>
+    <p id="github-first-message" class="popup-text">GitHub is not connected. Use Connect GitHub to add a read-only
+      GitHub token; saved reports still work.</p>
+    <div class="popup-actions">
+      <button type="button" id="github-first-later" class="key">Not now</button>
+      <button type="button" id="github-first-connect" class="key-primary">Connect GitHub</button>
     </div>
   </dialog>
 
@@ -291,7 +314,6 @@
     <div class="fw-actions">
       <button type="button" id="fetch-retry" class="key" hidden>Retry</button>
       <button type="button" id="fetch-replace" class="key" hidden>Replace GitHub token</button>
-      <button type="button" id="fetch-close" class="key">Hide</button>
     </div>
   </dialog>
 

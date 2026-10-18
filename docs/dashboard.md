@@ -46,7 +46,10 @@ drift scan or a new workflow run.
    treats the sign-in token as a GitHub token.
 4. **Verify and connect** checks the token with three read-only requests to
    `HarshAgarwal1102/ai-terraform-drift-detector`: the repository, its Actions artifacts and its
-   issues. On success the dialog closes and the toolbar shows **GitHub: connected**.
+   issues. While it checks, the field is locked and shows mask dots (the token itself has already
+   left the page: the field's value is emptied before the request is sent). On success the dialog
+   closes and the toolbar shows **GitHub: connected**; on failure the field is unlocked, empty and
+   focused, with the reason in red.
    A token that can read the artifacts but not the issues (no **Issues: Read**) is accepted with a warning:
    reports are downloaded, only the drift issue states stay as they were. The chip then says
    "verified; lacks Issues: Read".
@@ -123,7 +126,9 @@ are never displayed or logged. The category is kept in the fetch status (`catego
 ### The fetch status window
 
 - **Check GitHub for new runs** starts the fetch (`POST /api/fetch`) and opens the **GitHub fetch
-  status** window. If GitHub is not connected, the button opens the connection dialog instead.
+  status** window. If GitHub is not connected, the button opens a **Connect GitHub first** popup
+  instead (with **Not now** and **Connect GitHub**, which opens the connection dialog); the
+  "not connected" explanation lives in that popup, not on the page.
 - The window is **non-modal**: you can keep browsing runs, drifts and reports behind it, and the
   latest local data is always shown. It lists the connection state, the fetch status (Idle, Running,
   Completed, Completed with a warning, Failed), the start time, the elapsed time, how many artifacts
@@ -131,9 +136,10 @@ are never displayed or logged. The category is kept in the fetch status (`catego
   (Connecting to GitHub, Listing artifacts, Downloading new reports, Updating drift issue state,
   Refreshing dashboard data) and, after a problem, the category and HTTP status. There is no
   percentage: the fetch cannot measure one, so only the stage it is truly in is marked.
-- **Hide** (or the **–** button, or Escape while the window has focus) only hides the window: the fetch keeps running in the
+- The **–** button (or Escape while the window has focus) only minimises the window: the fetch keeps running in the
   background and its status is kept. **Fetch status** (toolbar) reopens it, also after a completed or
-  failed check. Nothing here cancels a fetch (cancellation is not offered).
+  failed check. Nothing here cancels a fetch (cancellation is not offered). After **Disconnect GitHub**
+  the window closes and the **Fetch status** button is removed until GitHub is connected again.
 - **Retry** appears after a failure; **Replace GitHub token** after a token or permission problem.
 - When a fetch ends, the dashboard discards its request cache and reloads the local reports
   ("Refreshing dashboard data").
