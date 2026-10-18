@@ -245,7 +245,9 @@
     button.disabled = view.disabled;
     if (running) button.setAttribute("aria-busy", "true");
     else button.removeAttribute("aria-busy");
-    const text = state.fetch.flash && !running && !state.fetch.refusal ? state.fetch.flash : view.text;
+    // "Not connected" is explained in the Connect GitHub first popup, not on the page.
+    const text = state.fetch.flash && !running && !state.fetch.refusal ? state.fetch.flash
+      : (view.connect ? "" : view.text);
     $("github-fetch-status").hidden = !text;
     $("github-fetch-status").textContent = text;
     $("github-fetch-status").dataset.tone = state.fetch.flash && !running && !state.fetch.refusal ? "ok" : view.tone;
@@ -255,7 +257,7 @@
     $("github-connect").hidden = !usable;
     $("github-connect-label").textContent = conn.connected ? "GitHub: connected" : "Connect GitHub";
     $("github-connect").dataset.tone = conn.tone;
-    $("fetch-details").hidden = !(status && status.allowed && status.status !== "idle");
+    $("fetch-details").hidden = !(status && status.allowed && status.status !== "idle" && conn.connected);
     renderFetchWindow();
   }
 
@@ -306,9 +308,15 @@
     $("github-token").focus();
   }
 
-  function setConnecting(busy) {
+  // While verifying the field is locked and shows one mask dot per character as its placeholder; its value
+  // is already empty, so the real token is not on the page. Afterwards it is unlocked (and still empty).
+  function setConnecting(busy, maskLength) {
     state.fetch.connecting = busy;
     $("github-dialog").dataset.state = busy ? "verifying" : "idle";
+    $("github-token").disabled = busy;
+    $("github-token").placeholder = busy ? "•".repeat(Math.min(Math.max(maskLength || 0, 8), 40)) : "github_pat_…";
+    $("github-help").hidden = busy;
+    $("github-checking").hidden = !busy;
     $("github-submit").disabled = busy;
     $("github-cancel").disabled = busy;
     $("github-disconnect").disabled = busy;
@@ -322,7 +330,7 @@
     if (!token) { $("github-error").textContent = "Paste a GitHub token first."; return; }
     const session = state.session;
     $("github-error").textContent = "";
-    setConnecting(true);
+    setConnecting(true, token.length);
     try {
       const doc = await request("/api/github/connect", "POST", { token });
       if (session !== state.session) return;
@@ -356,6 +364,7 @@
         local_only: "Connecting GitHub is local-only and refused here.",
         disabled: "GitHub access is turned off for this dashboard (started with --no-github).",
       }[err.code] || "The token could not be verified (" + err.code + ").";
+      $("github-token").focus();
     }
   }
 
@@ -369,6 +378,7 @@
       state.fetch.flash = "GitHub disconnected: the token was forgotten.";
       setConnecting(false);
       $("github-dialog").close();
+      hideFetchWindow();  // and renderFetch() hides the Fetch status button until GitHub is connected again
       renderFetch();
     } catch (err) {
       if (session !== state.session) return;
@@ -450,7 +460,10 @@
 
   async function startFetch() {
     const status = state.fetch.status;
-    if (status && !status.available && status.unavailable_reason === "not_connected") { openConnect(); return; }
+    if (status && !status.available && status.unavailable_reason === "not_connected") {
+      $("github-first-dialog").showModal();  // explain first; its Connect GitHub button opens the token dialog
+      return;
+    }
     const session = state.session;
     state.fetch.refusal = null;
     state.fetch.notice = null;
@@ -562,7 +575,7 @@
     clearInterval(state.fetch.ticker);
     state.fetch = newFetchState();
     $("github-token").value = "";  // a half-typed GitHub token does not outlive the session
-    ["github-dialog", "fetch-dialog"].forEach((id) => { if ($(id).open) $(id).close(); });
+    ["github-dialog", "github-first-dialog", "fetch-dialog"].forEach((id) => { if ($(id).open) $(id).close(); });
     renderFetch();
     state.historyQuery = "";
     $("history-search").value = "";
@@ -609,7 +622,8 @@
     $("github-dialog").addEventListener("close", () => { $("github-token").value = ""; });
     $("fetch-details").addEventListener("click", openFetchWindow);
     $("fetch-hide").addEventListener("click", hideFetchWindow);
-    $("fetch-close").addEventListener("click", hideFetchWindow);
+    $("github-first-later").addEventListener("click", () => $("github-first-dialog").close());
+    $("github-first-connect").addEventListener("click", () => { $("github-first-dialog").close(); openConnect(); });
     $("fetch-dialog").addEventListener("close", () => { state.fetch.windowOpen = false; });
     // A non-modal <dialog> does not close on Escape by itself: hide it (the check keeps running).
     $("fetch-dialog").addEventListener("keydown", (event) => {

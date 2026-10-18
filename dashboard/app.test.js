@@ -357,10 +357,16 @@ test("Check GitHub: refusals and failures are explained; the local data stays", 
 test("Check GitHub: not enabled without a server token; sign-out stops polling", async () => {
   const off = await signedIn(fetchStatus("idle", { available: false, unavailable_reason: "not_connected" }));
   assert.equal(off.$("github-fetch").hidden, false);
-  assert.equal(off.$("github-fetch").disabled, false);  // opens the Connect GitHub dialog
+  assert.equal(off.$("github-fetch").disabled, false);  // opens the "Connect GitHub first" popup
   assert.equal(off.$("github-connect").hidden, false);
   assert.match(off.$("github-connect-label").textContent, /Connect GitHub/);
-  assert.match(off.$("github-fetch-status").textContent, /GitHub is not connected/);
+  assert.equal(off.$("github-fetch-status").hidden, true);  // "not connected" is explained in the popup instead
+  off.$("github-fetch").fire("click");
+  assert.equal(off.$("github-first-dialog").open, true);
+  assert.equal(off.$("github-dialog").open, false);
+  assert.equal(off.sent("/api/fetch"), 0);
+  off.$("github-first-later").fire("click");
+  assert.equal(off.$("github-first-dialog").open, false);
   const h = await signedIn(fetchStatus("running"));
   h.$("signout-confirm").fire("click");
   await h.flush();
@@ -448,11 +454,18 @@ test("Connect GitHub: the token is sent once in a POST body, emptied at once and
   const h = await signedIn(disconnected());
   assert.equal(h.$("github-connect").hidden, false);
   assert.match(h.$("github-connect-label").textContent, /Connect GitHub/);
-  h.$("github-fetch").fire("click");  // not connected: the check button opens the connection dialog
+  h.$("github-fetch").fire("click");  // not connected: "Connect GitHub first", whose button opens the dialog
+  assert.equal(h.$("github-first-dialog").open, true);
+  h.$("github-first-connect").fire("click");
+  assert.equal(h.$("github-first-dialog").open, false);
   assert.equal(h.$("github-dialog").open, true);
   assert.equal(h.sent("/api/fetch"), 0);
   await submitToken(h, GH_SECRET);
   assert.equal(h.$("github-token").value, "");  // emptied before the response arrives
+  // Locked while verifying: mask dots as the placeholder stand in for the token, which is no longer on the page.
+  assert.equal(h.$("github-token").disabled, true);
+  assert.match(h.$("github-token").placeholder, /^•+$/);
+  assert.ok(!h.$("github-token").placeholder.includes(GH_SECRET));
   const [call] = connectCalls(h);
   assert.equal(call.method, "POST");
   assert.ok(call.auth && !call.auth.includes(GH_SECRET));  // the dashboard token is a different credential
@@ -480,6 +493,8 @@ test("Connect GitHub: an invalid token is explained, and a corrected one works w
   assert.match(h.$("github-error").textContent, /HTTP 401/);
   assert.equal(h.$("github-submit").disabled, false);
   assert.equal(h.$("github-token").value, "");
+  assert.equal(h.$("github-token").disabled, false);  // unlocked again, empty, for the corrected token
+  assert.equal(h.$("github-token").placeholder, "github_pat_…");
   await submitToken(h, "right-token");
   assert.equal(connectCalls(h).length, 2);
   h.answer("/api/github/connect", 200, Object.assign(fetchStatus("idle", { connection: conn() }),
@@ -518,6 +533,20 @@ test("Disconnect GitHub forgets the token through the server", async () => {
   assert.equal(h.$("github-dialog").open, false);
 });
 
+test("Disconnect GitHub removes the Fetch status button and closes the status window", async () => {
+  const h = await signedIn(fetchStatus("no_new_artifacts", { connection: conn() }));
+  assert.equal(h.$("fetch-details").hidden, false);
+  h.$("fetch-details").fire("click");
+  assert.equal(h.$("fetch-dialog").open, true);
+  h.$("github-connect").fire("click");
+  h.$("github-disconnect").fire("click");
+  await h.flush();
+  h.answer("/api/github/disconnect", 200, Object.assign(disconnected(), { status: "no_new_artifacts" }));
+  await h.flush();
+  assert.equal(h.$("fetch-details").hidden, true);
+  assert.equal(h.$("fetch-dialog").open, false);
+});
+
 test("Status window: opens on start, hiding it never stops the check, it can be reopened and shows the result", async () => {
   const h = await signedIn(fetchStatus("idle", { connection: conn() }));
   h.$("github-fetch").fire("click");
@@ -550,7 +579,7 @@ test("Status window: opens on start, hiding it never stops the check, it can be 
   assert.match(body, /Skipped \(already saved\)<\/dt><dd>77</);
   assert.match(body, /Skipped \(not eligible\)<\/dt><dd>2</);
   assert.match(body, /14 s/);
-  h.$("fetch-close").fire("click");  // after completion the result can still be reviewed
+  h.$("fetch-hide").fire("click");  // minimise (the only close control); the result can still be reviewed
   h.$("fetch-details").fire("click");
   assert.match(h.$("fetch-body").innerHTML, /Completed/);
 });
