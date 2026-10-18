@@ -109,6 +109,14 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 .key-signout .key-icon { color: var(--high); }
 .key-signout .key-icon svg { filter: drop-shadow(0 0 3px var(--glow-power)); }
 .key-refresh[aria-busy="true"] .key-icon svg { animation: key-spin 0.8s linear infinite; }
+.key-github .key-icon { color: var(--ok); }
+.key:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+.key-github[aria-busy="true"] .key-icon svg { animation: key-bob 1s ease-in-out infinite; }
+@keyframes key-bob { 50% { transform: translateY(2px); } }
+.fetch-status { flex-basis: 100%; margin: 0; font-size: 0.85rem; color: var(--muted); text-align: right; }
+.fetch-status[data-tone="ok"] { color: var(--ok); }
+.fetch-status[data-tone="warn"] { color: var(--medium); }
+.fetch-status[data-tone="error"] { color: var(--error); }
 @keyframes key-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -116,6 +124,7 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
   .logo-lg .drift, .logo-hero .drift, .flow-node, .radar-sweep, .radar-blip { animation: none; }
   .flow-pulse { display: none; }
   .key-refresh[aria-busy="true"] .key-icon svg { animation: none; }
+  .key-github[aria-busy="true"] .key-icon svg { animation: none; }
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 
@@ -334,6 +343,7 @@ th { color: var(--muted); font-size: 0.8rem; font-weight: 600; }
 .caller-value { font-weight: 600; overflow-wrap: anywhere; }
 .caller-type, .caller-reason { display: block; color: var(--muted); font-size: 0.8rem; }
 .caller-denied { color: var(--muted); font-size: 0.85rem; }
+.caller-loading { color: var(--muted); font-size: 0.85rem; font-style: italic; }
 .caller-ops { list-style: none; margin: 0.25rem 0 0; padding: 0; }
 .caller-ops li + li { margin-top: 0.35rem; }
 .op-ref { display: block; color: var(--muted); font-size: 0.8rem; }
@@ -443,3 +453,55 @@ dialog.popup::backdrop { background: rgba(5, 7, 10, 0.6); }
   .account-menu .key-signout:active { transform: none; background: var(--code); }
   .toolbar #refresh { margin-left: auto; }
 }
+
+/* GitHub connection dialog and the fetch status window (Task 13.5). */
+dialog.github-popup { width: min(420px, calc(100vw - 32px)); align-items: stretch; text-align: left; }
+.github-popup h2 { text-align: center; }
+.github-form { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.github-form label { font-size: 0.85rem; font-weight: 600; }
+.github-form input { width: 100%; box-sizing: border-box; }
+.github-form input.masked { -webkit-text-security: disc; }
+.github-form .error { min-height: 1.2em; margin: 0; font-size: 0.85rem; }
+.github-popup[data-state="verifying"] #github-submit { opacity: 0.8; cursor: progress; }
+.github-actions .key-primary { margin-top: 0; height: 42px; }
+.key-github-connect .key-icon { color: var(--accent); }
+.key-github-connect[data-tone="ok"] .key-icon { color: var(--ok); }
+.key-github-connect[data-tone="warn"] .key-icon { color: var(--medium); }
+.key-github-connect[data-tone="error"] .key-icon { color: var(--error); }
+
+dialog.fetch-window { position: fixed; inset: auto 16px 16px auto; margin: 0; width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px); overflow: auto; padding: 14px 18px 16px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  box-shadow: 0 12px 36px var(--sw-drop); z-index: 100; }
+.fw-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fw-bar h2 { margin: 0; font-size: 1rem; }
+.fw-bar .close { float: none; }
+.fw-state { margin: 10px 0 6px; }
+.fw-badge { font-size: 0.8rem; }
+.fw-state[data-tone="ok"] .fw-badge { color: var(--ok); }
+.fw-state[data-tone="warn"] .fw-badge { color: var(--medium); }
+.fw-state[data-tone="error"] .fw-badge { color: var(--error); }
+.fw-state[data-tone="busy"] .fw-badge { color: var(--accent); }
+.fw-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 6px 0 10px; font-size: 0.85rem; }
+.fw-facts dt { color: var(--muted); }
+.fw-facts dd { margin: 0; text-align: right; }
+.fw-ok { color: var(--ok); } .fw-error { color: var(--error); } .fw-muted { color: var(--muted); }
+.fw-warn { color: var(--medium); }
+p.fw-error { margin: 8px 0; font-size: 0.85rem; }
+.fw-code { color: var(--muted); font-size: 0.75rem; }
+.fw-stages { list-style: none; margin: 8px 0; padding: 0; font-size: 0.85rem; }
+.fw-stages li { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--muted); }
+.fw-mark { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border); flex: none; }
+.fw-stages li[data-state="done"] { color: var(--text); }
+.fw-stages li[data-state="done"] .fw-mark { background: var(--ok); border-color: var(--ok); }
+.fw-stages li[data-state="active"] { color: var(--text); font-weight: 600; }
+.fw-stages li[data-state="active"] .fw-mark { border-color: var(--accent); border-top-color: transparent;
+  animation: fw-spin 0.9s linear infinite; }
+.fw-stages li[data-state="failed"] { color: var(--error); }
+.fw-stages li[data-state="failed"] .fw-mark { background: var(--error); border-color: var(--error); }
+.fw-note { margin: 6px 0; color: var(--muted); font-size: 0.8rem; }
+.fw-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+.fw-actions .key { height: 36px; }
+@keyframes fw-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fw-stages li[data-state="active"] .fw-mark { animation: none; } }
+@media (max-width: 480px) { dialog.fetch-window { inset: auto 8px 8px auto; width: calc(100vw - 16px); } }

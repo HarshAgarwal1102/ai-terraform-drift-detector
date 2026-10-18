@@ -7,6 +7,7 @@
   <title>Drift Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <script src="render.js" defer></script>
+  <script src="loader.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -168,6 +169,22 @@
               stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
           </span>Refresh
         </button>
+        <!-- Task 13.4: asks the server to download new GitHub Actions runs; shown only to data_refresher users. -->
+        <button type="button" id="github-fetch" class="key key-github" hidden>
+          <span class="key-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+              stroke-linejoin="round"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+          </span>Check GitHub for new runs
+        </button>
+        <!-- Task 13.5: GitHub connection (token entered here, verified by the server, kept in its memory only). -->
+        <button type="button" id="github-connect" class="key key-github-connect" hidden>
+          <span class="key-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+              stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/></svg>
+          </span><span id="github-connect-label">Connect GitHub</span>
+        </button>
+        <button type="button" id="fetch-details" class="key" hidden>Fetch status</button>
+        <p id="github-fetch-status" class="fetch-status" role="status" aria-live="polite" hidden></p>
       </div>
 
       <section id="cards" class="cards" aria-label="Overview"></section>
@@ -232,6 +249,50 @@
   <dialog id="modal" aria-label="Drift details">
     <button type="button" id="modal-close" class="close" aria-label="Close">×</button>
     <div id="modal-body"></div>
+  </dialog>
+
+  <!-- GitHub connection (Task 13.5). The GitHub token here is NOT the dashboard sign-in token. -->
+  <dialog id="github-dialog" class="popup github-popup" data-state="idle" aria-labelledby="github-title"
+    aria-describedby="github-intro">
+    <h2 id="github-title">Connect GitHub</h2>
+    <p id="github-intro" class="popup-text">Paste a <strong>GitHub personal access token</strong> to download new
+      workflow-run reports from <strong>HarshAgarwal1102/ai-terraform-drift-detector</strong>. This is
+      <strong>not</strong> the token you used to sign in to this dashboard.</p>
+    <p class="popup-text">Read-only permissions on that repository: <strong>Actions: Read</strong>,
+      <strong>Issues: Read</strong> (and Metadata: Read).</p>
+    <!-- Not a <form> and not a password field (Task 13.5 review, finding 1): browsers offer to save what is typed
+         into a submitted password form. The field is masked by CSS where the browser supports it (app.js falls back
+         to type="password" elsewhere); password managers are asked to ignore it. Enter still submits. -->
+    <div id="github-form" class="github-form" role="group" aria-labelledby="github-token-label">
+      <label id="github-token-label" for="github-token">GitHub personal access token</label>
+      <input id="github-token" type="text" class="masked" placeholder="github_pat_…" autocomplete="off"
+        autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="1024" data-1p-ignore="true"
+        data-lpignore="true" data-bwignore="true" data-form-type="other" aria-describedby="github-help github-error">
+      <p id="github-help" class="token-help">Checked with GitHub, then held in this dashboard server’s memory only:
+        never saved to disk, never shown again. Restarting the dashboard forgets it. Don’t let your browser save it.</p>
+      <p id="github-error" class="error" role="alert"></p>
+      <div class="popup-actions github-actions">
+        <button type="button" id="github-cancel" class="key">Cancel</button>
+        <button type="button" id="github-submit" class="key-primary"><span id="github-submit-label">Verify and connect</span></button>
+      </div>
+      <button type="button" id="github-disconnect" class="key-danger popup-wide" hidden>Disconnect GitHub</button>
+    </div>
+  </dialog>
+
+  <!-- GitHub fetch status window (Task 13.5): non-modal, so the dashboard behind it stays usable. Hiding it
+       never cancels the check. -->
+  <dialog id="fetch-dialog" class="fetch-window" aria-labelledby="fetch-title">
+    <div class="fw-bar">
+      <h2 id="fetch-title">GitHub fetch status</h2>
+      <button type="button" id="fetch-hide" class="close" aria-label="Hide (the check keeps running)">–</button>
+    </div>
+    <div id="fetch-body" aria-live="polite"></div>
+    <p id="fetch-refusal" class="fw-note" role="status" hidden></p>
+    <div class="fw-actions">
+      <button type="button" id="fetch-retry" class="key" hidden>Retry</button>
+      <button type="button" id="fetch-replace" class="key" hidden>Replace GitHub token</button>
+      <button type="button" id="fetch-close" class="key">Hide</button>
+    </div>
   </dialog>
 
   <!-- Sign-in popup: data-state is "verifying", then "granted" (closes onto the dashboard) or "denied". -->

@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -75,15 +76,13 @@ class FakeGitHub:
         self.api, self.artifacts, self.archives, self.issue_items = API, artifacts, archives, issue_items
         self.downloads: list[str] = []
 
-    def json(self, path: str, query: dict) -> dict:
-        assert path == f"/repos/{REPO}/actions/artifacts"
-        return {"artifacts": self.artifacts}
-
     def download(self, url: str) -> bytes:
         self.downloads.append(url)
         return self.archives[url]
 
     def _open(self, url: str, authorized: bool, follow: bool):
+        if url.startswith(f"{API}/repos/{REPO}/actions/artifacts?"):
+            return contextlib.closing(io.BytesIO(json.dumps({"artifacts": self.artifacts}).encode()))
         assert url.startswith(f"{API}/repos/{REPO}/issues?state=all&labels=drift-detected")
         return contextlib.closing(io.BytesIO(json.dumps(self.issue_items).encode()))
 
@@ -173,11 +172,15 @@ def test_main_needs_a_token_and_never_prints_it(tmp_path, monkeypatch, capsys):
 
 
 def test_listing_failure_is_reported_without_details(tmp_path, capsys):
+    import urllib.error
+
     class Failing(FakeGitHub):
-        def json(self, path, query):
-            raise fdd.fpr.ListingError("HTTPError")
+        def _open(self, url, authorized, follow):
+            raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
     assert fdd.run_once(Failing([], {}, []), REPO, str(tmp_path), 30) == 1
-    assert capsys.readouterr().out.strip() == "dashboard_fetch=failed step=artifacts reason=listing_failed detail=HTTPError"
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out[-1] == "dashboard_fetch=failed step=artifacts reason=listing_failed detail=http_401"
+    assert out[:-1] == ["dashboard_stage=listing"]
 
 
 def test_issue_step_failure_keeps_artifacts_and_names_the_status(tmp_path, capsys, fake):
@@ -186,11 +189,13 @@ def test_issue_step_failure_keeps_artifacts_and_names_the_status(tmp_path, capsy
 
     class NoIssues(type(fake)):
         def _open(self, url, authorized, follow):
-            raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+            if "/issues?" in url:
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+            return super()._open(url, authorized, follow)
 
     github = NoIssues(fake.artifacts, fake.archives, [])
     assert fdd.run_once(github, REPO, str(tmp_path), 30) == 1
-    out = capsys.readouterr().out.strip()
+    out = capsys.readouterr().out.strip().splitlines()[-1]
     assert out.startswith("dashboard_fetch=partial step=issues reason=listing_failed detail=http_403 ")
     assert "fetched=4" in out and TOKEN not in out and "http" + "s://" not in out
     assert (tmp_path / "drift-report-101" / "drift_report.json").is_file()
@@ -289,3 +294,276 @@ def test_api_rows_carry_issue_and_pr_state(tmp_path):
     (data / "github_issues.json").unlink()
     row = client.get("/api/drifts?report_id=github-38105671846-1", headers=headers).json()["drifts"][0]
     assert row["issue"]["status"] == "no_snapshot"
+
+
+# --------------------------------------------------------------------------- Task 13.4: token on stdin, staging
+
+
+def test_token_stdin_wins_over_the_environment_and_is_validated(tmp_path, monkeypatch, capsys):
+    seen = []
+
+    class Recorder:
+        def __init__(self, api, token, sleep=None):
+            seen.append(token)
+
+    monkeypatch.setattr(fdd.fpr, "GitHub", Recorder)
+    monkeypatch.setattr(fdd, "run_once", lambda github, repo, data_dir, days: 0)
+    monkeypatch.setenv("GH_TOKEN", "environment-token")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(TOKEN + "\n"))
+    assert fdd.main(["--token-stdin", "--repository", REPO, "--data-dir", str(tmp_path / "d")]) == 0
+    assert seen == [TOKEN]
+    for bad in ("", "two words\n", "x" * 2000 + "\n", "tok\x01en\n"):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(bad))
+        assert fdd.main(["--token-stdin", "--repository", REPO, "--data-dir", str(tmp_path / "d")]) == 2, repr(bad)
+    out = capsys.readouterr()
+    assert TOKEN not in out.out + out.err
+
+
+def test_stale_staging_is_removed_and_fresh_staging_kept(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.json").write_text("{}")
+    old = time.time() - fdd.STALE_STAGING_SECONDS - 60
+    (data / ".fetch-old").mkdir()
+    (data / ".fetch-old" / "drift_report.json").write_text("{")
+    (data / ".fetch-new").mkdir()
+    (data / ".issues-old").write_text("{")
+    (data / ".fetch-link").symlink_to(outside)
+    (data / "drift-report-1").mkdir()
+    for path in (data / ".fetch-old", data / ".fetch-old" / "drift_report.json", data / ".issues-old",
+                 data / "drift-report-1"):
+        os.utime(path, (old, old))
+    os.utime(data / ".fetch-link", (old, old), follow_symlinks=False)
+    assert fdd.remove_stale_staging(str(data), time.time()) == 3
+    assert sorted(p.name for p in data.iterdir()) == [".fetch-new", "drift-report-1"]
+    assert (outside / "keep.json").exists()  # a link is removed, never followed
+
+
+def test_a_fetch_reports_removed_staging(tmp_path, fake, capsys):
+    old = time.time() - fdd.STALE_STAGING_SECONDS - 60
+    (tmp_path / ".fetch-old").mkdir()
+    os.utime(tmp_path / ".fetch-old", (old, old))
+    assert fdd.run_once(fake, REPO, str(tmp_path), 30) == 0
+    assert "stale_staging_removed=1" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- SIGTERM cleanup, hidden manual input
+
+
+def test_an_interrupted_artifact_write_leaves_no_staging(tmp_path, monkeypatch):
+    def interrupted(src, dst):
+        raise SystemExit(143)  # what the SIGTERM handler raises
+    monkeypatch.setattr(fdd.os, "rename", interrupted)
+    with pytest.raises(SystemExit):
+        fdd._write_new_dir(str(tmp_path), "drift-report-1", "drift_report.json", b"{}")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_interrupted_issue_snapshot_leaves_no_staging(tmp_path, fake, monkeypatch):
+    def interrupted(src, dst):
+        raise SystemExit(143)
+    monkeypatch.setattr(fdd.os, "replace", interrupted)
+    with pytest.raises(SystemExit):
+        fdd.fetch_issues(fake, REPO, str(tmp_path), NOW)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_main_installs_the_sigterm_handler(tmp_path, monkeypatch):
+    import signal
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        monkeypatch.setattr(fdd, "run_once", lambda github, repo, data_dir, days: 0)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(TOKEN + "\n"))
+        assert fdd.main(["--token-stdin", "--repository", REPO, "--data-dir", str(tmp_path / "d")]) == 0
+        assert signal.getsignal(signal.SIGTERM) is fdd._on_sigterm
+        with pytest.raises(SystemExit) as stopped:
+            fdd._on_sigterm(signal.SIGTERM, None)
+        assert stopped.value.code == 143
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def test_token_stdin_from_a_terminal_is_read_without_echo(tmp_path, monkeypatch):
+    seen, prompts = [], []
+
+    class Recorder:
+        def __init__(self, api, token, sleep=None):
+            seen.append(token)
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+        def readline(self, *args):
+            raise AssertionError("a terminal token must not be read with echo")
+
+    monkeypatch.setattr(fdd.fpr, "GitHub", Recorder)
+    monkeypatch.setattr(fdd, "run_once", lambda github, repo, data_dir, days: 0)
+    monkeypatch.setattr(fdd.getpass, "getpass", lambda prompt: prompts.append(prompt) or TOKEN)
+    monkeypatch.setattr(sys, "stdin", Terminal())
+    assert fdd.main(["--token-stdin", "--repository", REPO, "--data-dir", str(tmp_path / "d")]) == 0
+    assert seen == [TOKEN] and prompts == ["GitHub token (hidden): "]
+
+
+# ----------------------------------------------------------------------------- Task 13.5: verification and categories
+
+import urllib.error  # noqa: E402
+
+
+class Scripted(FakeGitHub):
+    """Answers each URL with a body, or raises the error (an exception, or an HTTPError with headers)."""
+
+    def __init__(self, plan: dict) -> None:
+        super().__init__([], {}, [])
+        self.plan, self.seen = plan, []
+
+    def _open(self, url, authorized, follow):
+        self.seen.append(url)
+        for fragment, outcome in self.plan.items():
+            if fragment in url:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return contextlib.closing(io.BytesIO(json.dumps(outcome).encode()))
+        raise AssertionError(url)
+
+
+def http_error(url: str, code: int, **headers) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(url, code, "x", headers, io.BytesIO(b"sentinel-body"))
+
+
+OKS = {f"/repos/{REPO}/actions/artifacts?": {"artifacts": []}, "/issues?": []}
+
+
+def verify(plan: dict, capsys) -> tuple[int, str, Scripted]:
+    github = Scripted(plan)
+    code = fdd.verify_token(github, REPO)
+    return code, capsys.readouterr().out.strip(), github
+
+
+def test_verify_reaches_the_repository_actions_and_issues_with_three_reads(capsys):
+    code, out, github = verify({f"/repos/{REPO}?": None, **OKS} if False else {**OKS, f"{API}/repos/{REPO}": {}}, capsys)
+    assert (code, out) == (0, "dashboard_verify=ok")
+    assert [u.split(f"{REPO}")[1].split("?")[0] for u in github.seen] == ["", "/actions/artifacts", "/issues"]
+    assert all(u.startswith(API) for u in github.seen)  # fixed host: the token goes nowhere else
+
+
+@pytest.mark.parametrize("fails, error, expected", [
+    (f"{API}/repos/{REPO}", lambda u: http_error(u, 401), "dashboard_verify=failed reason=invalid_token http=401"),
+    (f"{API}/repos/{REPO}", lambda u: http_error(u, 404), "dashboard_verify=failed reason=repository_not_accessible http=404"),
+    ("/actions/artifacts?", lambda u: http_error(u, 403),
+     "dashboard_verify=failed reason=insufficient_permissions http=403 need=actions"),
+    ("/actions/artifacts?", lambda u: http_error(u, 403, **{"X-RateLimit-Remaining": "0"}),
+     "dashboard_verify=failed reason=rate_limited"),
+    ("/actions/artifacts?", lambda u: http_error(u, 403, **{"Retry-After": "60"}),
+     "dashboard_verify=failed reason=rate_limited"),
+    ("/issues?", lambda u: http_error(u, 429), "dashboard_verify=failed reason=rate_limited"),
+    ("/actions/artifacts?", lambda u: urllib.error.URLError("dns failure for sentinel-host"),
+     "dashboard_verify=failed reason=network_error"),
+    ("/issues?", lambda u: TimeoutError("timed out"), "dashboard_verify=failed reason=network_error"),
+    ("/actions/artifacts?", lambda u: http_error(u, 502), "dashboard_verify=failed reason=api_error http=502"),
+])
+def test_verify_failures_have_fixed_categories_and_no_details(capsys, fails, error, expected):
+    plan = {f"{API}/repos/{REPO}": {}, **OKS}
+    plan = {fails: error(f"{API}/repos/{REPO}/x"), **{k: v for k, v in plan.items() if k != fails}}
+    code, out, _ = verify(plan, capsys)
+    assert (code, out) == (1, expected)
+    assert "sentinel" not in out and TOKEN not in out and "http" + "s://" not in out
+
+
+def test_a_non_json_answer_is_not_a_verified_token(capsys):
+    class Garbage(Scripted):
+        def _open(self, url, authorized, follow):
+            return contextlib.closing(io.BytesIO(b"<html>not json</html>"))
+    github = Garbage({})
+    assert fdd.verify_token(github, REPO) == 1
+    assert capsys.readouterr().out.strip() == "dashboard_verify=failed reason=api_error"
+
+
+def test_the_fetch_reports_rate_limits_and_network_failures_with_fixed_details(tmp_path, capsys):
+    for error, detail in ((http_error(f"{API}/x", 403, **{"X-RateLimit-Remaining": "0"}), "rate_limited"),
+                          (http_error(f"{API}/x", 404), "http_404"),
+                          (urllib.error.URLError("sentinel"), "network")):
+        class Failing(FakeGitHub):
+            def _open(self, url, authorized, follow, _e=error):
+                raise _e
+        assert fdd.run_once(Failing([], {}, []), REPO, str(tmp_path), 30) == 1
+        out = capsys.readouterr().out.strip().splitlines()[-1]
+        assert out == f"dashboard_fetch=failed step=artifacts reason=listing_failed detail={detail}"
+
+
+def test_the_fetch_prints_its_stages_before_the_result(tmp_path, capsys, fake):
+    assert fdd.run_once(fake, REPO, str(tmp_path), 30) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[:3] == ["dashboard_stage=listing", "dashboard_stage=downloading", "dashboard_stage=issues"]
+    assert lines[3].startswith("dashboard_fetch=ok ")
+
+
+def test_verify_only_needs_no_data_dir_and_reads_the_token_from_stdin(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(fdd, "verify_token", lambda github, repo: calls.append((github.token, repo)) or 0)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(TOKEN + "\n"))
+    assert fdd.main(["--verify-only", "--token-stdin", "--repository", REPO]) == 0
+    assert calls == [(TOKEN, REPO)]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(TOKEN + "\n"))
+    assert fdd.main(["--token-stdin", "--repository", REPO]) == 2  # a fetch still needs --data-dir
+    assert TOKEN not in capsys.readouterr().out
+
+
+def test_verify_accepts_a_token_without_issues_read_with_a_warning(capsys):
+    """Review finding 2: the required access (the repository and its Actions artifacts) works; only the issue
+    listing is refused, so reports can still be fetched. Accepted, with a fixed warning."""
+    plan = {"/issues?": http_error(f"{API}/repos/{REPO}/issues", 403),  # matched in order: specific URLs first
+            f"/repos/{REPO}/actions/artifacts?": {"artifacts": []}, f"{API}/repos/{REPO}": {}}
+    code, out, _ = verify(plan, capsys)
+    assert (code, out) == (0, "dashboard_verify=ok warning=insufficient_permissions http=403 need=issues")
+    plan["/issues?"] = http_error(f"{API}/repos/{REPO}/issues", 401)  # a refused token is still a failure
+    code, out, _ = verify(plan, capsys)
+    assert (code, out) == (1, "dashboard_verify=failed reason=invalid_token http=401")
+
+
+# ----------------------------------------------------------------------------- review, low findings 4 and 5
+
+
+def http_error_body(url: str, code: int, body: bytes, **headers) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(url, code, "x", headers, io.BytesIO(body))
+
+
+@pytest.mark.parametrize("error, expected", [
+    (lambda u: http_error_body(u, 403, b'{"message": "Resource protected by organization SAML enforcement."}',
+                               **{"X-GitHub-SSO": "required; url=https://example.invalid/sso"}),
+     "dashboard_verify=failed reason=sso_required http=403"),
+    (lambda u: http_error_body(u, 403, b'{"message": "You have exceeded a secondary rate limit. sentinel"}'),
+     "dashboard_verify=failed reason=rate_limited"),
+    (lambda u: http_error_body(u, 403, b'{"message": "Resource not accessible by personal access token"}'),
+     "dashboard_verify=failed reason=insufficient_permissions http=403 need=actions"),
+    (lambda u: http_error_body(u, 403, b"<html>not json sentinel</html>"),
+     "dashboard_verify=failed reason=insufficient_permissions http=403 need=actions"),
+])
+def test_forbidden_answers_are_told_apart_without_showing_the_body(capsys, error, expected):
+    plan = {"/actions/artifacts?": error(f"{API}/repos/{REPO}/actions/artifacts"), "/issues?": [],
+            f"{API}/repos/{REPO}": {}}
+    code, out, _ = verify(plan, capsys)
+    assert (code, out) == (1, expected)
+    assert "sentinel" not in out and "SAML" not in out and "example.invalid" not in out
+
+
+def test_the_fetch_reports_sso_and_secondary_rate_limits_with_fixed_details(tmp_path, capsys):
+    for error, detail in ((http_error_body(f"{API}/x", 403, b"{}", **{"X-GitHub-SSO": "required"}), "sso_required"),
+                          (http_error_body(f"{API}/x", 403, b'{"message": "secondary rate limit"}'), "rate_limited")):
+        class Failing(FakeGitHub):
+            def _open(self, url, authorized, follow, _e=error):
+                raise _e
+        assert fdd.run_once(Failing([], {}, []), REPO, str(tmp_path), 30) == 1
+        assert capsys.readouterr().out.strip().splitlines()[-1] == (
+            f"dashboard_fetch=failed step=artifacts reason=listing_failed detail={detail}")
+
+
+def test_verify_only_turns_off_request_retries(monkeypatch):
+    monkeypatch.setattr(fdd.fpr, "RETRIES", 3)  # restored after the test
+    seen = {}
+    monkeypatch.setattr(fdd, "verify_token", lambda github, repo: seen.update(retries=fdd.fpr.RETRIES) or 0)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(TOKEN + "\n"))
+    assert fdd.main(["--verify-only", "--token-stdin", "--repository", REPO]) == 0
+    assert seen["retries"] == 0

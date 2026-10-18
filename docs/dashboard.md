@@ -26,6 +26,167 @@ local `terraform show -json` state: `scripts/run_dashboard.sh --terraform-json P
 `.artifacts/dashboard-local/terraform-state.json`). Other options: `--port N`, `--no-browser`,
 `--help`. Everything it writes stays in the ignored `.venv/` and `.artifacts/`.
 
+To check GitHub for new runs, connect a GitHub token from inside the dashboard
+(**Connect GitHub**, see "Connect GitHub and check for new runs" below): no startup flag is needed.
+
+## Connect GitHub and check for new runs (Tasks 13.4 and 13.5)
+
+The dashboard reads only the local `.artifacts/dashboard` folder, and works fully offline. New
+GitHub Actions runs (the daily drift detection and its AI analysis) reach it through
+`scripts/fetch_dashboard_data.py`. The **Check GitHub for new runs** button runs that same script on
+request; it is not a second implementation, and it never triggers a Terraform plan or apply, a new
+drift scan or a new workflow run.
+
+### Normal startup and connecting GitHub
+
+1. `scripts/run_dashboard.sh` (no flag). The dashboard is fully usable without any GitHub token.
+2. Sign in with the **dashboard sign-in token** printed once by the launcher.
+3. Click **Connect GitHub** (toolbar) and paste a **GitHub personal access token**. This is a
+   different credential from the dashboard sign-in token; the dialog says so. The dashboard never
+   treats the sign-in token as a GitHub token.
+4. **Verify and connect** checks the token with three read-only requests to
+   `HarshAgarwal1102/ai-terraform-drift-detector`: the repository, its Actions artifacts and its
+   issues. On success the dialog closes and the toolbar shows **GitHub: connected**.
+   A token that can read the artifacts but not the issues (no **Issues: Read**) is accepted with a warning:
+   reports are downloaded, only the drift issue states stay as they were. The chip then says
+   "verified; lacks Issues: Read".
+5. To replace a token (for example after a failure), click **GitHub: connected**, paste the new one
+   and choose **Verify and replace**; to forget it, **Disconnect GitHub**. Neither needs a restart.
+   A token that fails verification is discarded and an earlier working one stays in use.
+
+**Required permissions** (read-only, on that repository only): a fine-grained token with
+**Actions: Read**, **Issues: Read** and Metadata: Read (granted automatically); a classic token needs
+the `repo` scope (broader than needed; prefer a fine-grained token). Never grant write access.
+
+### Token handling
+
+- **Session-only, in memory**: the token travels once, in the body of `POST /api/github/connect`
+  (`Content-Type: application/json`, over the loopback connection, with your dashboard sign-in
+  token), and is kept in the dashboard server's memory only. A restart of `dashboard-api` forgets it
+  and you connect again. **It is never persisted**: no file, no keychain, no browser storage, no
+  cookie, no URL, no command-line argument, no environment variable, no log line, no report. Saving
+  it would create a plaintext secret at rest, and the project has no OS-credential-store layer; a
+  future opt-in option would need one and its own review.
+- **Browser password managers**: the GitHub token field is not a password field inside a submitted form
+  (the pattern browsers offer to save). It is a text field masked by CSS (`-webkit-text-security`; where a
+  browser lacks that, it falls back to a password field so the token is never shown in clear), outside any
+  `<form>`, with `autocomplete="off"`, spell checking off and the ignore hints of common password managers
+  (`data-1p-ignore`, `data-lpignore`, `data-bwignore`). Enter and the button still submit it. This makes a
+  save prompt unlikely but cannot guarantee that no browser or extension ever offers one: if one appears,
+  decline it. Trade-offs of a masked text field: a screen reader may speak the typed characters (it treats
+  it as text, not as a password), and the text can be selected and copied. The dashboard sign-in field is
+  unchanged: saving the sign-in token in a password manager is
+  what the launcher recommends.
+- **The page never keeps it**: the field is emptied before the request leaves, the response never
+  contains it, and signing out clears a half-typed one. The server hands it to the fetch script only
+  on its standard input; it goes to `https://api.github.com` and nowhere else.
+- **Limits**: Python cannot wipe a string from memory. Dropping a variable only removes one name for it;
+  other copies (the parsed request body, pipe buffers) live until they are garbage-collected, and the
+  memory is only certainly released when the dashboard process stops.
+  Anyone who can already run code as you on this machine can read the server's memory.
+- **Browser protections**: the connection endpoints need the `data_refresher` role, refuse a request
+  whose `Origin` is not the dashboard's own, and accept only `application/json`. Authentication is a
+  bearer header that a browser never attaches by itself, so there is no cookie to forge.
+- **Turning GitHub off**: `scripts/run_dashboard.sh --no-github` (or `DASHBOARD_NO_GITHUB=1`) starts the
+  dashboard with GitHub access off (`dashboard-api --no-github`): Connect GitHub and Check GitHub are
+  refused (`disabled`), nothing is downloaded at startup, and `users.json` is not touched, so a
+  `data_refresher` role you removed stays removed. It cannot be combined with `--fetch` or
+  `--enable-github-fetch`.
+- **`users.json` problems never stop the launcher**: if the file is not valid JSON, not UTF-8, not the
+  expected shape, unreadable, a link or not a regular file, the launcher prints one warning, never rewrites
+  or regenerates its content (a regular file still gets mode 0600, as before, where that is allowed) and starts; the dashboard then refuses every sign-in (503
+  `auth_unavailable`) until you fix it or run `--new-token`. Nothing is granted on a failed check.
+- **`--enable-github-fetch` (Task 13.4) is deprecated but still works**: it asks for a token in the
+  terminal and preloads it over a pipe (`--github-token-fd 3`); such a token is shown as "not
+  verified yet" until a fetch succeeds or you connect again. Prefer **Connect GitHub**. The launcher
+  now always gives `local-admin` the `data_refresher` role (the sign-in token is unchanged).
+
+### What a failed verification or fetch says
+
+| Shown | Meaning (from GitHub's actual answer) |
+| --- | --- |
+| invalid, expired or revoked (HTTP 401) | GitHub did not accept the token. GitHub does not say which of the three it is. |
+| lacks a required repository permission (HTTP 403) | The token works but needs **Actions: Read** or **Issues: Read**; the message names the one that failed. |
+| must be authorized for SAML single sign-on (HTTP 403) | GitHub sent `X-GitHub-SSO`: authorize the token for the organization. |
+| repository could not be accessed (HTTP 404) | GitHub hides repositories a token cannot see: the token may not include this repository. Not necessarily a wrong token. |
+| rate-limited | GitHub is temporarily limiting requests (HTTP 429; or 403 with `X-RateLimit-Remaining: 0`, `Retry-After`, or a "rate limit" message, the secondary limits). Wait, then retry. Verification never retries on its own. |
+| could not be reached | Network error or timeout. Retry. |
+| unexpected error (HTTP 5xx) | GitHub failed; retry later. |
+
+A failed check names the problem separately from the token: `invalid_token`, a refused Actions access,
+`repository_not_accessible` and `sso_required` mark the token unverified (each with its own message); an
+Issues-only refusal is only a warning; rate limits, network and write failures leave the token state alone. Only these fixed
+categories and the HTTP status are shown (to tell a secondary rate limit from a missing permission the
+script reads at most 4 KB of a 403 answer and looks only for the words "rate limit"); GitHub's response text, URLs and the token
+are never displayed or logged. The category is kept in the fetch status (`category`, `http_status`).
+
+### The fetch status window
+
+- **Check GitHub for new runs** starts the fetch (`POST /api/fetch`) and opens the **GitHub fetch
+  status** window. If GitHub is not connected, the button opens the connection dialog instead.
+- The window is **non-modal**: you can keep browsing runs, drifts and reports behind it, and the
+  latest local data is always shown. It lists the connection state, the fetch status (Idle, Running,
+  Completed, Completed with a warning, Failed), the start time, the elapsed time, how many artifacts
+  were downloaded and how many were skipped because they were already saved, the stages
+  (Connecting to GitHub, Listing artifacts, Downloading new reports, Updating drift issue state,
+  Refreshing dashboard data) and, after a problem, the category and HTTP status. There is no
+  percentage: the fetch cannot measure one, so only the stage it is truly in is marked.
+- **Hide** (or the **–** button, or Escape while the window has focus) only hides the window: the fetch keeps running in the
+  background and its status is kept. **Fetch status** (toolbar) reopens it, also after a completed or
+  failed check. Nothing here cancels a fetch (cancellation is not offered).
+- **Retry** appears after a failure; **Replace GitHub token** after a token or permission problem.
+- When a fetch ends, the dashboard discards its request cache and reloads the local reports
+  ("Refreshing dashboard data").
+
+### Local Refresh versus GitHub
+
+**Refresh** and the 60-second auto-refresh only re-read the local folder: they never contact GitHub or
+start a fetch, work offline and are independent of the connection. Only **Check GitHub for new runs**
+talks to GitHub. A failed check never removes or changes saved reports.
+
+### Troubleshooting
+
+- *Invalid, expired or revoked*: create a new token, then **GitHub: connected** (or **Connect GitHub**)
+  and paste it. Check that you pasted the GitHub token, not the dashboard sign-in token.
+- *Lacks permission*: edit the token to add Actions: Read and Issues: Read for this repository.
+- *Repository could not be accessed*: the fine-grained token must list this repository (or all your
+  repositories) as a resource; for an organization repository the organization must allow the token.
+- *Rate-limited*: wait the time GitHub asks (usually minutes), then retry.
+- *The button is disabled*: the status window or the line next to the button gives the reason
+  (not connected, local-only inside GitHub Actions, no data folder, fetch script missing, shutting down).
+
+### How it works
+
+- **Who sees it**: only users with the `data_refresher` role (`POST /api/fetch` and
+  `/api/github/*` refuse others with 403 `fetch_access_denied`).
+- **What happens on a click**: the server starts the fetch as one background job (the token on the
+  script's standard input, `--token-stdin`; a fixed command and a minimal environment), and the page
+  polls `GET /api/fetch/status` every 2 seconds. The script prints `dashboard_stage=` markers while it
+  works and one fixed result line at the end; only those lines are read.
+- **Limits**: one fetch at a time (409 `fetch_in_progress`), a 2-minute cooldown between starts
+  (429 `fetch_cooldown` with `Retry-After`), a 10-minute overall timeout; one verification at a time
+  (409 `verification_in_progress`) and at least 2 seconds between verifications (429 `verify_too_soon`).
+  A token cannot be replaced or removed while a fetch runs. The connect body must declare its length and
+  be at most 4 KB (411 `length_required`, 413 `request_too_large`), checked before it is read.
+- **Stopping**: on the timeout, or when the dashboard stops (Ctrl+C), the fetch gets SIGTERM,
+  removes its own staging files and exits; if it does not exit within 5 seconds it is killed.
+  A job never stays "running". (If the dashboard process itself is killed with SIGKILL, a running
+  fetch is not stopped; it ends on its own and its writes stay atomic.)
+- **Watching a running check**: the page polls every 2 seconds; after a failed poll it backs off
+  (4, 8, 16, up to 30 seconds), and after 5 failed polls in a row it stops and says it lost contact
+  with the dashboard server. It also stops watching after 11 minutes. Hiding the window does not
+  stop the polling.
+- **Network settings**: only `HTTPS_PROXY`/`https_proxy`, `NO_PROXY`/`no_proxy`, `SSL_CERT_FILE`
+  and `SSL_CERT_DIR` are passed from the dashboard's environment to the fetch. Nothing else is (in
+  particular never `GITHUB_API_URL` or `GH_TOKEN`).
+- **Manual use of the script**: `scripts/fetch_dashboard_data.py --token-stdin` asks for the token
+  without echoing it in a terminal; `--verify-only` makes the three read-only checks and prints one
+  `dashboard_verify=` line.
+- **Downloads**: the script's existing rules apply (eligible artifacts of `main` runs only, already
+  present ones skipped, bounded sizes, atomic writes). Interrupted downloads leave only hidden
+  `.fetch-*` / `.issues-*` staging entries, which the dashboard never reads and the next fetch
+  removes after an hour; drift reports must validate as the public drift report model.
+
 ## What it serves
 
 A read-only API over the **real artifacts** of the drift detection and AI analysis workflows. It
@@ -91,6 +252,10 @@ All are `GET` and need `Authorization: Bearer <token>` of a user with the `viewe
 | `/api/reports/{report_id}` | One run: summary, drift rows, remediation options and the bound artifacts themselves. |
 | `/api/unmanaged` | Resources in the Terraform-managed resource groups that Terraform does not manage, for the latest run per environment or `report_id`: inventory outcome, counts, scopes and resources, with each resource's list-price estimate. |
 | `/api/remediations` | Remediation options of the AI report with approval status and execution state (`allowed: false`, `manual_after_approval`). The approver identity is never returned. |
+| `/api/fetch/status` | The "Check GitHub for new runs" job: `status` (idle, running, new_artifacts, no_new_artifacts, partial, failed), fixed `code`, counts, start and finish times, whether it is `available` (if not, `unavailable_reason`: `disabled`, `not_connected`, `local_only`, `no_data_dir`, `fetch_script_missing` or `shutting_down`), the cooldown and seconds left (`retry_after_seconds`), whether this user is `allowed` to start it, the current `stage` (`connecting`, `listing`, `downloading`, `issues`), `elapsed_seconds`, the failure `category` / `http_status` / `need` (`actions` or `issues`) and the token's `connection` state (`connected`, `source`, `verified`, `last_error`, `warning`, `last_attempt`; never the token). Read-only. |
+| `POST /api/fetch` | Starts the job (needs `data_refresher`; 202). It accepts no parameters. |
+| `POST /api/github/connect` | Task 13.5: body `{"token": "<GitHub token>"}` (`application/json` only). Verifies it with read-only GitHub requests and keeps it in memory when accepted. Answers `verification` (`ok`, `category`, `http_status`, `need`) plus the fetch state; never the token. Needs `data_refresher`. |
+| `POST /api/github/disconnect` | Task 13.5: forgets the token (409 while a fetch runs). Needs `data_refresher`. |
 
 `include_caller=true` on `/api/drifts` and `/api/reports/{report_id}` adds the
 `Caller recorded by Azure` field to every drift row (see below).
@@ -118,7 +283,9 @@ Design (Task 13.1 design review; no new Azure resource, role or GitHub setting):
   fails closed (503). It is re-read on every request, so removing a user takes effect at once.
   Tokens are compared in constant time and never logged.
 - **Roles**: `viewer` reads every endpoint without caller identity; `caller_reader` may also
-  request `include_caller=true` (403 otherwise; a refused request never queries Azure).
+  request `include_caller=true` (403 otherwise; a refused request never queries Azure);
+  `data_refresher` may also connect GitHub and start "Check GitHub for new runs" (`POST /api/github/connect`,
+  `/api/github/disconnect`, `POST /api/fetch`).
 - **Network**: `dashboard-api` binds only to a loopback address (default `127.0.0.1:8000`).
   Serving it to other machines needs TLS and a separate, user-approved design.
 - **Azure credential**: the caller lookup uses the operator's own read-only `az login`
@@ -148,7 +315,7 @@ DASHBOARD_DATA_DIR=.artifacts/dashboard DASHBOARD_USERS_FILE=~/.config/aitdd/das
 ## The UI
 
 `dashboard-api` also serves the UI at `http://127.0.0.1:8000/`, from the same origin as the API:
-exactly `index.html`, `app.js`, `render.js` and `styles.css` from `dashboard/` (override with
+exactly `index.html`, `app.js`, `render.js`, `loader.js` and `styles.css` from `dashboard/` (override with
 `DASHBOARD_UI_DIR`). The page itself holds no data and needs no sign-in; every data request
 goes to `/api/*` with the bearer token.
 
@@ -196,6 +363,16 @@ goes to `/api/*` with the bearer token.
   and execution status.
 - **Refresh**: on demand and every 60 s (can be switched off). Each refresh with callers
   queries the Activity Log again.
+- **Opening a run** (Run History row, Enter, or the Run filter): the drift, remediation and
+  unmanaged requests start together, and each panel renders as soon as its own response
+  arrives. The drift rows come first, from the artifacts (tens of milliseconds); the
+  `Caller recorded by Azure` values need a live Activity Log query per operation (about a second
+  each on real Azure, the queries of one response run concurrently, at most 4 at a time), so a
+  `caller_reader` sees "Looking up…" in that field until they arrive. A response for a run the
+  user has already left is ignored. A response younger than 60 s is reused (`dashboard/loader.js`,
+  in page memory only): clicking the same run again sends nothing new, and going back to a recent
+  run is instant. Refresh, auto-refresh, sign-out and a reload discard it; failed requests are
+  never kept, so the next click or Refresh retries.
 - **Security**: a strict Content-Security-Policy (`default-src 'none'`; scripts, styles and
   `connect-src` limited to the same origin; no inline code; no framing). Every value from the API
   is HTML-escaped before it is rendered.
@@ -249,7 +426,9 @@ Component tests: `node --test dashboard/render.test.js` (also run by `tests/test
   inside GitHub Actions, G12).
 - **Not stored**: the value exists only in the HTTP response, sent with `Cache-Control: no-store`.
   The application has no database, cache or output file, and its logs carry fixed codes and
-  counts only. Azure keeps its own Activity Log records under its retention policy; not storing
+  counts only. The browser keeps the responses it shows in page memory for at most 60 s so
+  that reopening a run needs no new Activity Log query; never in browser storage or cookies,
+  and discarded on Refresh, sign-out or reload. Azure keeps its own Activity Log records under its retention policy; not storing
   them here does not remove them from Azure.
 - **Public artifacts are unchanged**: workflow artifacts and drift reports still say
   `caller_identity: withheld`.

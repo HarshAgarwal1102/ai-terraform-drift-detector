@@ -297,3 +297,121 @@ test("Active drifts says why it is empty: an in-sync run is not a filter miss", 
   assert.match(R.driftRows([], [], inSync.empty), /found no drift: all 5 managed resource\(s\) were in sync/);
   assert.ok(!R.driftRows([], [], "<b>x</b>").includes("<b>"));
 });
+
+
+test("fetchView: every Check GitHub state in plain words", () => {
+  const base = { allowed: true, available: true, started_at: "2026-10-18T06:30:00Z", finished_at: "2026-10-18T06:31:00Z",
+    counts: {} };
+  const view = (extra, refusal) => R.fetchView(Object.assign({}, base, extra), refusal);
+  assert.deepEqual(R.fetchView(null), { visible: false, disabled: true, text: "", tone: "" });
+  assert.equal(view({ allowed: false, status: "idle" }).visible, false);
+  assert.match(view({ available: false, unavailable_reason: "not_connected", status: "idle" }).text, /GitHub is not connected/);
+  for (const [reason, pattern] of [["local_only", /local-only/], ["no_data_dir", /no data folder/],
+    ["fetch_script_missing", /fetch script was not found/], ["shutting_down", /shutting down/]]) {
+    const v = view({ available: false, unavailable_reason: reason, status: "idle" });
+    assert.match(v.text, pattern, reason);
+    assert.doesNotMatch(v.text, /GitHub is not connected/, reason);  // only "not_connected" points at Connect GitHub
+    assert.equal(v.disabled, true, reason);
+  }
+  assert.match(view({ available: false, status: "idle" }).text, /unavailable right now/);  // unknown reason
+  assert.equal(view({ available: false }).disabled, true);
+  const running = view({ status: "running" });
+  assert.equal(running.disabled, true);
+  assert.match(running.text, /Checking GitHub for new runs… started 2026-10-18 06:30:00 UTC/);
+  assert.match(view({ status: "new_artifacts", counts: { fetched: 3 } }).text, /Downloaded 3 new artifact\(s\)/);
+  assert.match(view({ status: "no_new_artifacts" }).text, /No new runs on GitHub \(2026-10-18 06:31:00 UTC\)/);
+  assert.match(view({ status: "partial", code: "issues_listing_failed_http_403", counts: { fetched: 2 } }).text,
+    /Downloaded 2 new artifact\(s\).*token needs Issues: Read/);
+  assert.match(view({ status: "failed", code: "timeout" }).text, /longer than 10 minutes/);
+  assert.match(view({ status: "failed", code: "shutdown" }).text, /shutting down/);
+  assert.match(view({ status: "failed", code: "internal_error" }).text, /internal error/);
+  assert.match(R.fetchView(Object.assign({}, base, { status: "running" }), null, "poll_failed").text, /Lost contact/);
+  assert.match(R.fetchView(Object.assign({}, base, { status: "running" }), null, "watch_limit").text, /stopped watching/);
+  assert.match(view({ status: "failed", code: "artifacts_listing_failed_httperror" }).text, /Actions: Read/);
+  assert.match(view({ status: "failed", code: "something_new" }).text, /unknown error/);
+  assert.match(R.fetchView(null, { code: "fetch_cooldown", retryAfter: 42 }).text, /try again in 42 s/);
+  assert.match(R.fetchView(null, { code: "fetch_access_denied" }).text, /data_refresher/);
+  assert.match(R.fetchView(null, { code: "fetch_in_progress" }).text, /already running/);
+});
+
+// ---------------------------------------------------------------- Task 13.5
+
+test("githubProblem: every category is explained without claiming more than the response said", () => {
+  assert.match(R.githubProblem("invalid_token", 401), /invalid, expired or revoked/);
+  assert.match(R.githubProblem("invalid_token", 401), /HTTP 401/);
+  const perm = R.githubProblem("insufficient_permissions", 403, "issues");
+  assert.match(perm, /lacks a repository permission/);
+  assert.match(perm, /Issues: Read/);
+  assert.doesNotMatch(perm, /invalid/);  // a permission problem is never called an invalid token
+  assert.match(R.githubProblem("insufficient_permissions", 403, "actions"), /Actions: Read/);
+  assert.match(R.githubProblem("repository_not_accessible", 404), /repository could not be accessed/);
+  assert.doesNotMatch(R.githubProblem("repository_not_accessible", 404), /invalid, expired/);
+  assert.match(R.githubProblem("rate_limited", 429), /rate-limited/);
+  assert.match(R.githubProblem("network_error"), /could not be reached/);
+  assert.doesNotMatch(R.githubProblem("network_error"), /HTTP/);
+  assert.match(R.githubProblem("api_error", 502), /HTTP 502/);
+  assert.equal(R.githubProblem("something_new"), null);  // unknown: callers fall back, nothing is guessed
+});
+
+test("fetchWindow: truthful stages, counts and elapsed time; no percentages; HTML-escaped", () => {
+  const base = { available: true, allowed: true, status: "running", started_at: "2026-10-18T06:30:00Z", counts: {},
+    stage: "downloading", connection: { connected: true, verified: true, last_error: null } };
+  const running = R.fetchWindow(base, { now: Date.parse("2026-10-18T06:31:05Z") });
+  assert.match(running, /Running/);
+  assert.match(running, /1 min 05 s/);
+  assert.match(running, /data-state="done"[^>]*><span class="fw-mark"[^>]*><\/span>Listing artifacts/);
+  assert.match(running, /data-state="active"[^>]*><span class="fw-mark"[^>]*><\/span>Downloading new reports/);
+  assert.match(running, /data-state="pending"[^>]*><span class="fw-mark"[^>]*><\/span>Refreshing dashboard data/);
+  assert.doesNotMatch(running, /%/);
+  const done = R.fetchWindow(Object.assign({}, base, { status: "no_new_artifacts", elapsed_seconds: 3,
+    counts: { already_present: 81 } }), {});
+  assert.doesNotMatch(done, /data-state="(active|pending)"/);
+  const reloading = R.fetchWindow(Object.assign({}, base, { status: "new_artifacts" }), { refreshing: true });
+  assert.match(reloading, /data-state="active"[^>]*><span class="fw-mark"[^>]*><\/span>Refreshing dashboard data/);
+  const failed = R.fetchWindow(Object.assign({}, base, { status: "failed", stage: "listing", category: "rate_limited",
+    code: "artifacts_listing_failed_rate_limited" }), {});
+  assert.match(failed, /Failed/);
+  assert.match(failed, /data-state="failed"[^>]*><span class="fw-mark"[^>]*><\/span>Listing artifacts/);
+  assert.match(failed, /rate-limited/);
+  assert.doesNotMatch(failed, /data-state="active"/);
+  assert.match(R.fetchWindow(Object.assign({}, base, { status: "idle", stage: null })), /Idle/);
+  const hostile = R.fetchWindow(Object.assign({}, base, { status: "failed", code: "<img src=x onerror=alert(1)>" }), {});
+  assert.doesNotMatch(hostile, /<img/);
+});
+
+test("connectionView: not connected, verified, unverified and rejected", () => {
+  assert.equal(R.connectionView(null).connected, false);
+  assert.equal(R.connectionView({ connection: { connected: false } }).label, "Not connected");
+  assert.match(R.connectionView({ connection: { connected: true, verified: true } }).label, /verified/);
+  assert.match(R.connectionView({ connection: { connected: true, verified: false } }).label, /not verified/);
+  assert.equal(R.connectionView({ connection: { connected: true, verified: false, last_error: { category: "invalid_token" } } }).tone, "error");
+});
+
+test("connectionView: an Issues-only refusal is a warning; a refused token and missing Actions access stay distinct", () => {
+  const view = (c) => R.connectionView({ connection: Object.assign({ connected: true, verified: true }, c) });
+  const warn = view({ warning: { category: "insufficient_permissions", http_status: 403, need: "issues" } });
+  assert.equal(warn.tone, "warn");
+  assert.match(warn.label, /verified; lacks Issues: Read/);
+  assert.doesNotMatch(warn.label, /rejected|invalid/);
+  const invalid = view({ verified: false, last_error: { category: "invalid_token", http_status: 401 } });
+  assert.match(invalid.label, /rejected the token \(invalid, expired or revoked\)/);
+  const actions = view({ verified: false, last_error: { category: "insufficient_permissions", http_status: 403, need: "actions" } });
+  assert.match(actions.label, /lacks Actions: Read/);
+  assert.doesNotMatch(actions.label, /rejected|invalid/);
+  assert.match(view({ verified: false, last_error: { category: "repository_not_accessible" } }).label, /cannot access the repository/);
+  assert.match(view({ verified: false, last_error: { category: "sso_required" } }).label, /SSO/);
+  assert.match(R.githubProblem("sso_required", 403), /single sign-on \(HTTP 403\)/);
+});
+
+test("fetchWindow: a partial result says the reports were downloaded and names the missing Issues permission", () => {
+  const html = R.fetchWindow({ available: true, allowed: true, status: "partial", stage: "issues",
+    started_at: "2026-10-18T06:30:00Z", elapsed_seconds: 9, counts: { fetched: 2 }, category: "insufficient_permissions",
+    http_status: 403, need: "issues", code: "issues_listing_failed_http_403",
+    connection: { connected: true, verified: true, last_error: null,
+      warning: { category: "insufficient_permissions", http_status: 403, need: "issues" } } }, {});
+  assert.match(html, /Completed with a warning/);
+  assert.match(html, /Reports were downloaded, but drift issue states were not updated/);
+  assert.match(html, /Issues: Read/);
+  assert.match(html, /verified; lacks Issues: Read/);
+  assert.doesNotMatch(html, /invalid, expired or revoked/);
+});

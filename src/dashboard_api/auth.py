@@ -7,7 +7,9 @@ Bearer tokens, one per dashboard user, configured in a local users file
                 "roles": ["viewer", "caller_reader"]}]}
 
 - `viewer`: every `/api/*` endpoint without caller identity;
-- `caller_reader`: additionally `include_caller=true` (needs `viewer` too).
+- `caller_reader`: additionally `include_caller=true` (needs `viewer` too);
+- `data_refresher`: additionally starts the "Check GitHub for new runs" fetch
+  (`POST /api/fetch`, Task 13.4; needs `viewer` too).
 
 Every comparison is constant-time over all users. The file must be a regular file
 that neither group nor others can write (the digests decide who sees caller
@@ -25,7 +27,7 @@ import re
 import stat
 from dataclasses import dataclass
 
-ROLES = ("caller_reader", "viewer")
+ROLES = ("caller_reader", "data_refresher", "viewer")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MAX_USERS_FILE_BYTES = 64 * 1024

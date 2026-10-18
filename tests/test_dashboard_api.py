@@ -23,6 +23,7 @@ import logging
 import os
 import secrets
 import sys
+import threading
 import unittest
 
 TESTS = os.path.dirname(os.path.abspath(__file__))
@@ -334,6 +335,24 @@ class AmbiguousVerdictCallerTests(_DashboardBase):
                 if status == "local_only":
                     self.assertEqual(source.calls, [])
 
+    def test_operation_lookups_run_concurrently(self):
+        """Run History performance: the two Activity Log queries of R3 overlap instead of running one after the
+        other (each takes about a second on real Azure). The source only answers once both have started."""
+        inner = FakeSource({RG: [page(*self.rows())]})
+        barrier = threading.Barrier(2, timeout=5)
+
+        class BothAtOnce:
+            calls = inner.calls
+
+            def pages(self, subscription_id, query_filter):
+                barrier.wait()  # raises BrokenBarrierError (then: query_failed) if the queries run sequentially
+                yield from inner.pages(subscription_id, query_filter)
+
+        result = self.caller(self.get(source=BothAtOnce())[1])
+        self.assertEqual([(o["op_id"], o["status"], o["value"]) for o in result["operations"]],
+                         [("op-1", "matched", HUMAN), ("op-2", "matched", self.OP2_CALLER)])  # order kept
+        self.assertEqual(len(inner.calls), 2)
+
     def test_viewer_never_receives_the_operation_callers(self):
         source = FakeSource({RG: [page(*self.rows())]})
         client, response = self.get(source=source, user="viewer")
@@ -549,6 +568,30 @@ class StoreTests(_DashboardBase):
         index = store.load(self.data)
         self.assertEqual((index.problems["investigation_leak"], index.problems["report_invalid"]), (1, 2))
         self.assertIsNotNone(index.get(RUN).investigation)
+
+    def test_hidden_staging_folders_are_never_indexed(self):
+        """Task 13.4: a fetch writes into a hidden `.fetch-*` folder before renaming it into place."""
+        report = json.loads(self.read("drift-report-500", "drift_report.json"))
+        other = dict(report, run=dict(report["run"], run_id="github-501-1"))
+        self.put(self.data, ".fetch-abc123", "drift_report.json", json.dumps(other).encode())
+        self.put(self.data, ".hidden", "drift_report.json", json.dumps(other).encode())
+        index = store.load(self.data)
+        self.assertIsNone(index.get("github-501-1"))
+        self.assertIsNotNone(index.get(RUN))
+        self.assertEqual(index.problems, {})
+
+    def test_drift_reports_must_validate_as_the_public_report(self):
+        """Task 13.4 hardening: the right shape is not enough; the public drift report model must accept it."""
+        report = json.loads(self.read("drift-report-500", "drift_report.json"))
+        for name, broken in (("x-extra", dict(report, run=dict(report["run"], run_id="github-502-1"), unexpected=1)),
+                             ("x-internal", {k: v for k, v in dict(report, run=dict(report["run"], run_id="github-503-1"))
+                                             .items() if k != "public_version"})):
+            self.put(self.data, name, "drift_report.json", json.dumps(broken).encode())
+        index = store.load(self.data)
+        self.assertIsNone(index.get("github-502-1"))
+        self.assertIsNone(index.get("github-503-1"))
+        self.assertEqual(index.problems["report_invalid"], 2)
+        self.assertIsNotNone(index.get(RUN))
 
     def test_symbolic_links_are_not_followed(self):
         outside = self.dir("outside")
