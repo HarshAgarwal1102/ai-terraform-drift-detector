@@ -2,6 +2,8 @@
 
 > Detect, analyze, and remediate infrastructure drift in Azure using Terraform, Python, LangGraph, and GitHub automation.
 
+> **Maintenance-only (since 2026-10-18).** This is **Level 1**, released as tag `level1-v1.0.0`. It receives only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2. See [Level 1 and Level 2](#level-1-and-level-2).
+
 Working today:
 - the **deterministic** core: Terraform plan evidence, drift classification and a typed
   Python drift engine;
@@ -89,7 +91,7 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
 #### Level 1 and Level 2
 
 - **Level 1** (this repository) is frozen as tag `level1-v1.0.0` (commit `daa95f8`): the stable,
-  reproducible baseline.
+  reproducible baseline. It is **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2.
 - **Level 2** is a separate, more user-friendly, local-first application in the private repository
   `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command `aitdd`). It
   copied only the drift-engine modules and the public report schema from `level1-v1.0.0`, records

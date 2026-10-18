@@ -255,7 +255,7 @@ Azure (dev)  <-- read-only OIDC --  GitHub Actions: drift-detection.yml (daily +
 
 ## 8. Level 1 and the Separate Level 2 Repository
 
-- **Level 1** is this repository, frozen as the release tag `level1-v1.0.0` (annotated tag `fe07743` → commit `daa95f8`, the merge of PR #14 after PR #13). It stays the stable, reproducible baseline.
+- **Level 1** is this repository, frozen as the release tag `level1-v1.0.0` (annotated tag `fe07743` → commit `daa95f8`, the merge of PR #14 after PR #13). It stays the stable, reproducible baseline and is **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2.
 - **Level 2** is a separate, more user-friendly, local-first application in the private repository `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command `aitdd`). It has its own plan, dependencies, tests, CI/CD, access control and releases.
 - **What Level 2 took from Level 1:** only the nine drift-engine modules (`parser`, `classifier`, `comparator`, `severity`, `models`, `report_public`, `investigation_public`, `formatters`, `logs`) and the public report schema, copied once from the tag with two recorded renames, plus 16 test fixtures. It records their provenance and tests that it produces the same public reports and exit codes as Level 1.
 - **What Level 2 never does:** install, import or depend on Level 1, or change this repository. Level 2's roadmap is kept in the Level 2 repository, not in this one.
