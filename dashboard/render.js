@@ -393,16 +393,42 @@
       '<span class="issue-when">' + esc(pr.reason || "") + "</span></span>";
   }
 
-  function issuesPanel(summary) {
+  /* GitHub drift issues. With `view` (the dashboard passes it), only the issues linked from the drift rows of
+     the run on screen are listed (view.run, else the latest run per environment), the same issues the Active
+     drifts grid shows; view.all lists the whole snapshot. Without `view`, the whole snapshot. */
+  function issuesPanel(summary, view) {
     const data = (summary && summary.issues) || {};
     if (!data.snapshot) {
       return '<p class="empty">No GitHub issue snapshot in the data directory (run scripts/fetch_dashboard_data.py).</p>';
     }
-    const head = '<p class="hint">' + esc(data.open) + " open, " + esc(data.closed) + " closed · snapshot " +
-      esc(formatTime(data.fetched_at)) + "</p>";
-    if (!data.items.length) return head + '<p class="empty">No drift issues.</p>';
-    return head + '<div class="table-wrap"><table><thead><tr><th>Issue</th><th>Resource</th><th>State</th>' +
-      "<th>Opened</th><th>Closed</th></tr></thead><tbody>" + data.items.map((i) =>
+    const total = data.items.length;
+    const toggle = (label) => view && total
+      ? ' · <button type="button" class="link-button" data-issues-toggle>' + esc(label) + "</button>" : "";
+    const snapshot = " · snapshot " + esc(formatTime(data.fetched_at));
+    if (!view || view.all) {
+      const head = '<p class="hint">' + (view ? "All drift issues: " : "") + esc(data.open) + " open, " +
+        esc(data.closed) + " closed" + snapshot + toggle("Show only this run’s issues") + "</p>";
+      return head + (total ? issueTable(data.items) : '<p class="empty">No drift issues.</p>');
+    }
+    const scope = view.run ? "run " + view.run : "the latest run per environment";
+    const showAll = toggle("Show all issues (" + total + ")");
+    if (view.loading) {
+      return '<p class="hint">Issues of the drifts in ' + esc(scope) + snapshot + showAll + "</p>" +
+        '<p class="empty">Loading this run’s drifts…</p>';
+    }
+    const numbers = new Set((view.drifts || []).map((d) => d.issue && d.issue.number).filter((n) => n != null));
+    const items = data.items.filter((i) => numbers.has(i.number));
+    const open = items.filter((i) => i.state === "open").length;
+    const head = '<p class="hint">Issues of the drifts in ' + esc(scope) + ": " + open + " open, " +
+      (items.length - open) + " closed" + snapshot + showAll + "</p>";
+    if (items.length) return head + issueTable(items);
+    return head + '<p class="empty">' + ((view.drifts || []).length
+      ? "No GitHub issue was found for these drifts." : "No drifts in " + esc(scope) + ", so no drift issues.") + "</p>";
+  }
+
+  function issueTable(items) {
+    return '<div class="table-wrap"><table><thead><tr><th>Issue</th><th>Resource</th><th>State</th>' +
+      "<th>Opened</th><th>Closed</th></tr></thead><tbody>" + items.map((i) =>
         "<tr><td>" + issueLink(i) + '</td><td><span class="address">' + esc(i.address || "(not in any report)") +
         "</span>" + (i.environment ? '<br><span class="rtype">' + esc(i.environment) + "</span>" : "") +
         '</td><td><span class="badge status-' + esc(i.state) + '">' + esc(i.state +

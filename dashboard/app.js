@@ -20,7 +20,7 @@
       flash: null, ticker: null, connecting: false };
   }
   const state = { token: null, summary: null, drifts: [], remediations: [], unmanaged: null, callerAccess: true, run: "",
-    historyQuery: "",
+    historyQuery: "", issuesAll: false,
     filters: { severity: "", type: "", environment: "" }, timer: null, loads: 0, signingIn: false, loadingRun: null,
     fetch: newFetchState(), session: 0 };
   const $ = (id) => document.getElementById(id);
@@ -175,9 +175,16 @@
     $("cards").innerHTML = R.overviewCards(state.summary);
     $("severity-bars").innerHTML = R.severityBreakdown(state.summary);
     renderHistory();
-    $("issues").innerHTML = R.issuesPanel(state.summary);
+    renderIssues();
     $("filter-run").innerHTML = R.runOptions(state.summary, state.run);
     renderDriftContext();
+  }
+
+  // The issues panel follows the drift rows on screen (the selected run, else the latest per environment).
+  function renderIssues() {
+    if (state.summary === null) return;
+    $("issues").innerHTML = R.issuesPanel(state.summary, { all: state.issuesAll, run: state.run,
+      drifts: state.drifts, loading: state.driftsRun !== state.run });
   }
 
   function renderUnmanaged() {
@@ -202,6 +209,7 @@
     $("drift-rows").innerHTML = R.driftRows(shown, indices, context.empty);
     $("drift-context").textContent = context.showing;
     $("drift-count").textContent = shown.length + " of " + state.drifts.length + " drifted resource(s)";
+    renderIssues();
   }
 
   // The "Showing run …" line follows the rows on screen, never a run whose rows are still loading.
@@ -222,6 +230,7 @@
     const scroll = () => $("drifts-panel").scrollIntoView({ behavior: "smooth", block: "start" });
     if (runId === state.run && state.loadingRun === runId) { scroll(); return; }  // already loading it
     state.run = runId;
+    state.issuesAll = false;  // a newly opened run shows its own issues
     renderHistory();  // the clicked row is highlighted at once
     load().then(scroll);
   }
@@ -564,6 +573,7 @@
     state.loadingRun = null;
     state.shown = undefined;
     state.driftsRun = undefined;
+    state.issuesAll = false;
     state.token = null;
     state.summary = null;
     state.drifts = [];
@@ -671,7 +681,16 @@
         openRun(row.dataset.run);
       }
     });
-    $("filter-run").addEventListener("change", (event) => { state.run = event.target.value; load(); });
+    $("filter-run").addEventListener("change", (event) => {
+      state.run = event.target.value;
+      state.issuesAll = false;
+      load();
+    });
+    $("issues").addEventListener("click", (event) => {
+      if (!event.target.closest("button[data-issues-toggle]")) return;
+      state.issuesAll = !state.issuesAll;
+      renderIssues();
+    });
     $("drift-rows").addEventListener("click", (event) => {
       const button = event.target.closest("button.details");
       if (button) openDetails(Number(button.dataset.index));

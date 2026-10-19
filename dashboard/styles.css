@@ -296,6 +296,9 @@ select, input[type="password"] { background: var(--surface); border: 1px solid v
 .card h2 { color: var(--muted); font-size: 0.85rem; font-weight: 600; margin: 0; }
 .card-value { font-size: 1.8rem; font-weight: 700; margin: 4px 0; }
 .card-hint, .hint { color: var(--muted); font-size: 0.8rem; margin: 0; }
+/* A text-style button (e.g. "Show all issues"); the global button rule would make it a filled accent key. */
+.link-button { background: none; border: 0; border-radius: 0; padding: 0; color: var(--accent); font: inherit;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 16px; }
 @media (min-width: 1000px) {

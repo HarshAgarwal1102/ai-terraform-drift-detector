@@ -197,6 +197,24 @@ test("issues panel lists states with the snapshot time", () => {
   assert.match(html, /closed · completed/);
   assert.match(html, /\(not in any report\)/);
   assert.match(R.issuesPanel({ issues: { snapshot: false } }), /No GitHub issue snapshot/);
+  // With a view (as the dashboard passes it): only the issues linked from the drift rows on screen.
+  const runView = R.issuesPanel(summary, { run: "github-1-1", drifts: [{ issue: { status: "closed", number: 12 } }] });
+  assert.match(runView, /Issues of the drifts in run github-1-1: 0 open, 1 closed/);
+  assert.match(runView, /issues\/12/);
+  assert.doesNotMatch(runView, /issues\/13/);
+  assert.match(runView, /data-issues-toggle[^>]*>Show all issues \(2\)</);
+  const latest = R.issuesPanel(summary, { run: "", drifts: [] });
+  assert.match(latest, /the latest run per environment/);
+  assert.match(latest, /No drifts in the latest run per environment, so no drift issues/);
+  assert.doesNotMatch(latest, /<table/);
+  assert.match(R.issuesPanel(summary, { run: "r", drifts: [{ issue: { status: "none_found" } }] }),
+    /No GitHub issue was found for these drifts/);
+  assert.match(R.issuesPanel(summary, { run: "r", drifts: [], loading: true }), /Loading this run’s drifts/);
+  const all = R.issuesPanel(summary, { all: true, run: "r", drifts: [] });
+  assert.match(all, /All drift issues: 1 open, 1 closed/);
+  assert.match(all, /issues\/13/);
+  assert.match(all, /issues\/12/);
+  assert.match(all, />Show only this run’s issues</);
   assert.match(R.detailModal(Object.assign({ address: "a", report_id: "r", changes: [] },
     { issue: { status: "none_found" }, remediation_pr: { status: "not_enabled", reason: "x" } }), []),
     /GitHub issue[\s\S]*No drift issue found[\s\S]*Remediation PR[\s\S]*No remediation PR/);
