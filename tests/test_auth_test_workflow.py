@@ -536,6 +536,7 @@ def test_azure_login_only_on_trusted_events_after_offline_checks(auth_wf):
     assert job["permissions"] == {"id-token": "write", "contents": "read"}
     assert [s["name"] for s in job["steps"]] == ["Checkout Code", "Azure OIDC Login", "Verify Azure OIDC Authentication",
                                                  "Setup Terraform", "Validate Dev Environment Configuration"]
+    assert _steps(job)["Checkout Code"]["with"] == {"persist-credentials": False}  # F-7: no token left in .git/config
     for name, other in auth_wf["jobs"].items():
         if name != "validate-and-plan":
             assert "azure/login" not in yaml.safe_dump(other) and "secrets." not in yaml.safe_dump(other), name

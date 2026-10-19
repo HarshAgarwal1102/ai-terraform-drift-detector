@@ -98,7 +98,8 @@ def test_analyze_writes_internal_runner_only_and_public_in_place(wf):
                                               "${{ runner.temp }}/drift/detection_run.json"]
     text = WORKFLOW.read_text(encoding="utf-8")
     uploads = [s["with"]["path"] for job in wf["jobs"].values() for s in job.get("steps", [])
-               if s.get("uses") == "actions/upload-artifact@v4"]
+               if s.get("uses", "").startswith("actions/upload-artifact@")]
+    assert uploads  # never pass vacuously (e.g. after a change to the action reference)
     for forbidden in ("drift-internal", "restricted", "anchors", "investigation-venv", "plan.json", "tfplan"):
         assert not any(forbidden in path for path in uploads), forbidden
     assert text.count("drift-internal") == 3  # the comment, the directory, and the investigation step's input

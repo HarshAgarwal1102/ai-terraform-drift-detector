@@ -1265,7 +1265,7 @@ class WorkflowStructureTests(unittest.TestCase):
     def test_triggers_permissions_and_concurrency_unchanged(self):
         triggers = self.wf.get("on", self.wf.get(True))
         self.assertEqual(sorted(triggers), ["schedule", "workflow_dispatch"])
-        self.assertEqual(self.wf["permissions"], {"id-token": "write", "contents": "read"})
+        self.assertEqual(self.wf["permissions"], {"contents": "read"})  # F-6: OIDC only where a job asks for it
         self.assertEqual(self.wf["concurrency"], {
             "group": "drift-detection-${{ github.event.inputs.environment || 'dev' }}", "cancel-in-progress": False})
         self.assertEqual(sorted(self.jobs), ["cost", "investigation", "issues", "plan-and-analyze", "preflight",
@@ -1275,6 +1275,8 @@ class WorkflowStructureTests(unittest.TestCase):
         # Task 9B.5 (G10): plan-and-analyze adds actions: read for the anchor fetch, nothing else
         self.assertEqual(self.jobs["plan-and-analyze"]["permissions"],
                          {"id-token": "write", "contents": "read", "actions": "read"})
+        self.assertEqual([name for name, job in self.jobs.items() if "id-token" in job.get("permissions", {})],
+                         ["plan-and-analyze"])
         self.assertEqual(self.jobs["report"]["needs"], ["preflight", "plan-and-analyze"])
 
     def test_issues_job(self):
@@ -1288,7 +1290,8 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertNotIn("concurrency", job)
         steps = job["steps"]
         uses = [s.get("uses") for s in steps]
-        self.assertEqual(uses, ["actions/checkout@v4", "actions/setup-python@v5", None, "actions/download-artifact@v4", None])
+        self.assertEqual(uses, ["actions/checkout@11d5960a326750d5838078e36cf38b85af677262", "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", None,
+                                "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", None])
         self.assertEqual(steps[0]["with"], {"persist-credentials": False})
         self.assertEqual(steps[3]["with"]["name"], "drift-report-${{ github.run_id }}")
         for step in steps:

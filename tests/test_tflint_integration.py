@@ -207,7 +207,7 @@ class SecurityScanWorkflowTests(unittest.TestCase):
         self.assertIn("not drift detection", job["name"])
         steps = job["steps"]
         self.assertEqual([s.get("uses") for s in steps],
-                         ["actions/checkout@v4", "terraform-linters/setup-tflint@v6", None])
+                         ["actions/checkout@11d5960a326750d5838078e36cf38b85af677262", "terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337", None])
         self.assertEqual(steps[0]["with"], {"persist-credentials": False})
         self.assertEqual(steps[1]["with"], {"tflint_version": f"v{TFLINT_VERSION}"})  # no cache, default token input
         self.assertEqual(steps[2]["run"].strip(), "./scripts/run_tflint.sh")
