@@ -362,8 +362,11 @@ goes to `/api/*` with the bearer token.
   binding to the run; report v2 and unknown versions never show an amount. Unmanaged resources are
   never drift and never change the drift counts. Runs before Task 10.4 show
   "No unmanaged-resource inventory for this run".
-- **GitHub drift issues** panel: every drift issue of the snapshot with its resource, state and
-  resolution (`closed · completed` when the drift was resolved).
+- **GitHub drift issues** panel: the drift issues of the run on screen (the run clicked in Run history
+  or chosen in the Run filter, else the latest run per environment), that is, exactly the issues the
+  Active drifts rows link to, with resource, state and resolution (`closed · completed` when the drift
+  was resolved). An in-sync run says so instead of listing issues. **Show all issues (N)** lists every
+  drift issue of the snapshot; opening another run goes back to that run's issues.
 - **Details**: a modal with the Terraform-style diff, the AI analysis narrative, the GitHub issue
   state, the remediation PR state, the remediation recommendation and every option's approval
   and execution status.
