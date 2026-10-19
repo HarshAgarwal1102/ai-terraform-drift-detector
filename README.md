@@ -22,8 +22,8 @@ more user-friendly Level 2 is developed in another repository (see
 [Level 1 and Level 2](#level-1-and-level-2)).
 
 The AI engine has a CLI and a no-LLM CI workflow (Task 9A.1, validated in a real CI run).
-Remediation is planned, not built (Phase 11). See
-[What works today](#-what-works-today) and [Planned](#-planned-not-yet-implemented).
+Remediation is not part of Level 1 (Phase 11 on hold; transferred to the Level 2 backlog). See
+[What works today](#-what-works-today) and [Not in Level 1](#-not-in-level-1-transferred-to-level-2).
 
 ---
 
@@ -72,7 +72,9 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
   run #4 passed on its commit. Task 12.3 (least-privilege and secret audit) is complete: the
   repository has no hardcoded secrets, the OIDC trust is limited to this repository's `main` branch,
   and the CI identity has only its two documented roles and no client secret (verified 2026-10-16).
-  The detailed audit report is kept private.
+  The detailed audit report is kept private. At the Level 1 closeout (2026-10-19) every workflow action
+  was pinned by full commit SHA, only the Azure plan job may request an OIDC token, no checkout keeps
+  its credentials, and `main` requires a pull request with six passing checks.
 - **Phase 13 — Professional Dashboard: built and released in Level 1.** A loopback-only data API
   (`dashboard-api`) and browser UI over the real CI artifacts: drift, investigation (with the
   Azure caller for the `caller_reader` role), AI report, cost and unmanaged resources, and
@@ -80,13 +82,15 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
   memory only). Merged through PRs #10–#14; automated tests pass and the owner tested it on their
   own system. Open validation items (Tasks 13.3 and 13.5 in `PROJECT_PLAN.md`): a browser check of
   the issue column on the fetched issue snapshot, a real-Chrome password-prompt check, and a
-  recorded check against real GitHub with good, invalid and Issues-less tokens. See
-  [docs/dashboard.md](docs/dashboard.md).
+  recorded check against real GitHub with good, invalid and Issues-less tokens; they were transferred
+  to the Level 2 backlog at the Level 1 closeout. PR #17 (2026-10-19) made the GitHub drift issues
+  panel follow the run on screen. See [docs/dashboard.md](docs/dashboard.md).
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
   [docs/remediation-safeguards.md](docs/remediation-safeguards.md) (revision 9). No remediation
-  workflow, approval environment or write permission exists.
-- **Not started: Phase 14** — final documentation, demo and portfolio assets.
+  workflow, approval environment or write permission exists. Transferred to the Level 2 backlog.
+- **Not started: Phase 14** — final documentation, demo and portfolio assets. Transferred to the
+  Level 2 backlog.
 
 #### Level 1 and Level 2
 
@@ -97,6 +101,11 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
   copied only the drift-engine modules and the public report schema from `level1-v1.0.0`, records
   their provenance, tests that it produces the same reports, and never installs or imports
   Level 1. Its plan and releases live in that repository.
+- **Level 1 closeout (2026-10-19)**: security follow-up (pinned actions, least-privilege OIDC,
+  no persisted checkout credentials, protected `main`), deferred work transferred to the Level 2
+  backlog, and the maintenance watch items (scheduled workflows are disabled by GitHub after 60 days
+  without repository activity; the AZU-0012 risk acceptance expires 2027-03-31). Details: the
+  **Level 1 closeout** entry in [PROJECT_PLAN.md](PROJECT_PLAN.md).
 
 | Phase | Status |
 |---|---|
@@ -113,10 +122,10 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
-| 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 — Testing & security hardening | 🟡 All tasks complete (12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit); deferred scope open |
-| 13 — Professional dashboard | 🟡 Built, merged and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 |
-| 14 — Final documentation, demo & portfolio | ⬜ Not started |
+| 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built; → Level 2 backlog) |
+| 12 — Testing & security hardening | 🟡 All tasks complete (12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit); deferred scope → Level 2 backlog |
+| 13 — Professional dashboard | 🟡 Built, merged and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 → Level 2 backlog |
+| 14 — Final documentation, demo & portfolio | ⬜ Not started (→ Level 2 backlog) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
 criteria and validation evidence.
@@ -147,8 +156,8 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
 - **Python drift engine** (`src/drift_engine/`): plan parser, classifier, strict Pydantic
   report models, attribute comparator with noise and user-configured assessment, a
   rules-based severity rating, the `drift-engine analyze` command with JSON, YAML and
-  console output, and opt-in structured logging. Coverage is gated at 85% (currently
-  above 99%). See [Python drift engine](#-python-drift-engine).
+  console output, and opt-in structured logging. Coverage is gated at 85% (98.85% at the
+  last full run). See [Python drift engine](#-python-drift-engine).
 - **Plan-only CI with OIDC**: GitHub Actions authenticates to Azure without stored secrets
   and runs `terraform plan`; the identity has no write permissions.
 - **Scheduled drift detection** (Phase 5): `drift-detection.yml` runs daily and on demand.
@@ -196,9 +205,10 @@ gaps that can lead to security vulnerabilities, compliance violations and outage
   the Infracost estimate, and the finding never fails the run. Verified on real Azure in run #44.
   See [Unmanaged Resources](#-unmanaged-resources-task-104).
 
-### 🔜 Planned (not yet implemented)
+### ⏭️ Not in Level 1 (transferred to Level 2)
 
-These are on the roadmap ([PROJECT_PLAN.md](PROJECT_PLAN.md)) and **do not exist yet**:
+These **do not exist in Level 1**. They were transferred to the Level 2 backlog at the Level 1
+closeout (2026-10-19); their records stay in [PROJECT_PLAN.md](PROJECT_PLAN.md):
 
 - Human-approved remediation (Phase 11). This includes the remediation-PR scope of the
   superseded Task 8.2: the remediation direction is a human choice, there's no auto-merge
@@ -281,7 +291,7 @@ design: backend, security controls, OIDC flow, and the CI workflows' access mode
 | TFLint + `tflint-ruleset-azurerm` | `0.64.0` + `0.32.0` | Static Terraform linting (Task 9.1) |
 | Trivy (`trivy config`) | `0.75.0`, SHA-256-pinned Linux binary in CI | Terraform security scan (Task 9.2) |
 | TruffleHog | `3.97.9`, SHA-256-pinned Linux binary in CI | Secret scan of the Git history (Task 9.3) |
-| GitHub Actions | `actions/checkout@v4`, `azure/login@v3`, `hashicorp/setup-terraform@v3`, `actions/setup-python@v5`, `actions/upload-artifact@v4` / `download-artifact@v4`, `terraform-linters/setup-tflint@v6` | Plan-only CI with OIDC, drift detection, security scans |
+| GitHub Actions | Every action pinned by full commit SHA: `actions/checkout` v4.4.0 (v6.1.0 in `tests.yml`), `azure/login` v3.1.0, `hashicorp/setup-terraform` v3.1.2, `actions/setup-python` v5.6.0 (v6.3.0 in `tests.yml`), `actions/upload-artifact` v4.6.2 / `download-artifact` v4.3.0, `terraform-linters/setup-tflint` v6.3.2 | Plan-only CI with OIDC, drift detection, security scans |
 
 `scripts/detect_drift.py` and the engine modules it imports use only the Python standard
 library, so they run with plain `python3`. Pydantic and PyYAML are needed only for
@@ -1437,10 +1447,10 @@ registration holds zero credentials.
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
-| 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started |
-| 12 | Testing and hardening | 🟡 All tasks complete: 12.1A log-exposure hardening (verified on auth-test run #68); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope open |
-| 13 | Professional dashboard | 🟡 Built, merged (PRs #10–#14) and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 |
-| 14 | Final documentation / demo | ⬜ Not started |
+| 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started; → Level 2 backlog |
+| 12 | Testing and hardening | 🟡 All tasks complete: 12.1A log-exposure hardening (verified on auth-test run #68); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope → Level 2 backlog |
+| 13 | Professional dashboard | 🟡 Built, merged (PRs #10–#14) and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 → Level 2 backlog |
+| 14 | Final documentation / demo | ⬜ Not started (→ Level 2 backlog) |
 
 ### Known limitations (current state)
 
@@ -1483,8 +1493,9 @@ registration holds zero credentials.
     state`, `/subscriptions/` or account data. Not verified live: a `drift-detection.yml` run (its
     auth check and the removed `plan.log` tail are covered by local tests; the same auth-check block
     passed live in the auth-test).
-  - Still open: older auth-test logs stay public until they are handled under the historical-log
-    procedure in the Task 11.1 specification (§12.1; draft, not yet in the repository). Residual: the
+  - Accepted residual: the logs of runs before `6d1aa86` were not reviewed or deleted at the Level 1
+    closeout; they stay readable by signed-in GitHub users until GitHub's log retention removes them
+    (90 days by default; see [`docs/remediation-safeguards.md`](docs/remediation-safeguards.md) §12.1). Residual: the
     drift-detection `terraform init`/`validate` steps still print Terraform's own output (failure
     text can include backend and resource names, which are public in `backend.tf`/`dev.tfvars`).
     The auth-test `Validate Bootstrap Configuration` (offline, `-backend=false`) and `Check

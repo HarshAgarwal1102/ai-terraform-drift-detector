@@ -124,13 +124,19 @@ Every task in this plan must have exactly one status from the following lifecycl
 
 ## 📊 Master Project Overview
 
-- **Current Active Phase**: none. Level 1 was released as the stable baseline on 2026-10-18: tag `level1-v1.0.0` (annotated tag `fe07743` → commit `daa95f8`, the merge of PR #14 after PR #13), with CI green on `main`. Further development happens in the separate Level 2 repository (see **Level 2** below). Phase 13 stays 🟡: Tasks 13.1 and 13.2 are 🟢; Tasks 13.3–13.5 are implemented, merged and tested by the user, with the open validation items listed under each task. Phase 12 stays 🟡: all its tasks are 🟢 (Task 12.1A 2026-10-14; Tasks 12.1, 12.2 and 12.3 2026-10-16), but the scope deferred into it is still open (see Phase 12). Phase 11 is on hold (user decision 2026-10-13; see below). Phase 14 has not started.
-- **Current Active Task**: none in Level 1. Not scheduled, and done only if the owner reopens them: Task 13.3's browser check of the GitHub issue column and panel on the issue snapshot; Task 13.5's real-Chrome check that no password-save prompt appears for the GitHub token, and a recorded check of the current implementation against real GitHub (good, invalid and Issues-less tokens). Last completed: Task 13.2 — UI Component Development & Visual Analytics and Task 13.1 — Dashboard Data API & State Engine (both 🟢 2026-10-17; branch `phase-13-dashboard`, commits `b6aaa4f` and `ad3cde1`, merged to `main` through PR #10).
+- **Current Active Phase**: none. Level 1 was released as the stable baseline on 2026-10-18: tag `level1-v1.0.0` (annotated tag `fe07743` → commit `daa95f8`, the merge of PR #14 after PR #13), with CI green on `main`. Further development happens in the separate Level 2 repository (see **Level 2** below). Phase 13 stays 🟡: Tasks 13.1 and 13.2 are 🟢; Tasks 13.3–13.5 are implemented, merged and tested by the user, with the open validation items listed under each task. Phase 12 stays 🟡: all its tasks are 🟢 (Task 12.1A 2026-10-14; Tasks 12.1, 12.2 and 12.3 2026-10-16), but the scope deferred into it is still open (see Phase 12). Phase 11 is on hold (user decision 2026-10-13; see below). Phase 14 has not started. Level 1 was closed out on 2026-10-19 (see **Level 1 closeout** below).
+- **Current Active Task**: none in Level 1. The open validation items of Tasks 13.3 and 13.5 were transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19). Last Level 1 change: the closeout PR (workflow hardening and this record), after PR #17 (dashboard: the GitHub drift issues panel follows the run on screen, merged 2026-10-19; `main` CI passed on `2172f52`).
 - **On hold**: Phase 11 — Human-Approved Remediation (🔴 BLOCKED — on hold, user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on it. It resumes at Task 11.1 on user instruction. Task 11.1 — Safe Remediation Architecture & Controls stays 🟡 WORK IN PROGRESS (since 2026-10-11; dependency Task 8.3 🟢), paused. Documentation only: `docs/remediation-safeguards.md` revision 9 awaits user review, with the remaining security decision R13 (not approved; deferred until the user's PIM licensing check), unverified assumptions and a verification-status matrix in its §15; `apply_enabled` stays `false` until every enablement gate (E1–E11, including the auth-test log fix E6, the just-in-time role procedure E7, the Environment configuration check E8, real-plan eligibility validation E9 and an Azure-side role expiry control E10) is verified and approved; not complete until the user approves it. No apply, Azure write, GitHub environment or RBAC change is part of it (Tasks 11.2–11.3 need separate user approval, Execution Rules 10 and 13).
 - **Last completed**: Phase 10 — FinOps / Cost Analysis (🟢 2026-10-11). Tasks 10.3 and 10.4 were verified together by the user-approved drift-detection dispatch #44 `38140497702` on commit `8ef89b6` and its AI analysis run #27 `38140599354` (see the Task 10.3 and 10.4 completion notes). Phase 9B was completed on 2026-10-11 by Task 9B.6: real Azure cycle 2 on commit `4d89c94` (R1 in-sync anchor #37 `38104177960`, primary R2 #38 `38105671846`, Control A R3 #39 `38109121618`, Control B R4 #40 `38111406531`); see the Task 9B.6 completion notes.
 - **Phases Completed**: 10 of 14 (Phases 1–10). Phases 6 and 7, reopened on 2026-10-04 after a requirement gap found in a real Azure test, returned to 🟢 on 2026-10-11 when Task 9B.6 passed (see Phase 9B). Lettered phases (5A, 9A, 9B) are not counted.
 - **Level 1 status**: **maintenance-only** since 2026-10-18 (after the documentation closeout, PR #15): only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2. Phases 11 and 14 are not resumed unless the owner decides otherwise. The scheduled drift-detection workflow and the other CI workflows keep running as before.
 - **Level 2 (separate codebase, 2026-10-18)**: a more user-friendly, local-first application is developed in the separate private repository `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command `aitdd`), with its own plan, dependencies, CI and releases. It copied only the nine drift-engine modules and the public report schema from `level1-v1.0.0`, with recorded provenance and compatibility tests, and never installs or imports Level 1. Its plan is kept there, not in this file, and this repository is not changed for Level 2. Level 2 Milestone 1 (package skeleton, copied engine, compatibility tests) was merged there on 2026-10-18 (PR #1).
+- **Level 1 closeout (2026-10-19)**: Level 1 stays maintenance-only; no further phases or tasks are done in it. Changes on `main` after `level1-v1.0.0`: PR #15 and PR #16 (documentation), PR #17 (dashboard fix; it was merged before its pull-request checks finished, and all of them passed afterwards) and the closeout PR. The closeout release is the closeout PR's merge commit, tagged with a new tag; `level1-v1.0.0` is not moved.
+  - **Security follow-up of Task 12.3**: every GitHub Actions `uses:` in the five workflows is pinned by full commit SHA with its release as a comment (41 references changed; each SHA resolved from the action's official repository on 2026-10-19 and equal to the major tag used before, so the actions run unchanged); `drift-detection.yml` grants `id-token: write` only in the `plan-and-analyze` job (workflow default `contents: read`); the authenticated `terraform-auth-test.yml` checkout no longer persists credentials. `tests/test_workflow_pins.py` guards all three, and the upload checks in `tests/test_investigation_workflow.py` and `tests/test_unmanaged_workflow.py` now fail if they match no upload step. `main` is protected by a branch ruleset: pull request required (no approval count), six required checks (`Fast tier`, `Full suite and coverage`, `TFLint (static lint, not drift detection)`, `Trivy config (static security scan, not drift detection)`, `TruffleHog (secret scan, not drift detection)`, `Terraform Offline Validation`), no force push, no deletion, no bypass.
+  - **Transferred to the Level 2 backlog** (not done in Level 1; their records below are unchanged): Phase 11 (Tasks 11.1–11.3, including the remediation-PR scope of Task 8.2; `docs/remediation-safeguards.md` revision 9 is design input only, never approved); Phase 14 (Tasks 14.1–14.3); Task 9.4 and the rest of the Phase 12 deferred scope (actionlint, the zizmor findings, per-package coverage thresholds, Python 3.14 support, the open items listed under Task 12.1); the open validation items of Tasks 13.3 and 13.5; a real-LLM quality check; real network-drift and priced-cost tests; network restrictions for the state storage account (Trivy AZU-0012).
+  - **Accepted residuals (not resolved)**: the logs of runs before `6d1aa86` (67 `terraform-auth-test.yml` runs and 46 `drift-detection.yml` runs) were neither reviewed nor deleted; they stay readable by signed-in GitHub users until GitHub's log retention removes them (90 days by default: about 2026-12-30 to 2027-01-11; the repository's own retention setting was not checked). Rotating the state storage account keys and disabling its shared-key access are deferred to a separate review. A live `drift-detection.yml` log has still not been inspected for the Task 12.1A changes.
+  - **Maintenance watch**: GitHub disables scheduled workflows in a public repository after 60 days without repository activity (about 2026-12-18, counted from the last activity on 2026-10-19), so the daily drift detection needs repository activity or re-enabling until Level 2 replaces it. The AZU-0012 risk acceptance expires 2027-03-31; from 2027-04-01 the required Trivy check fails until it is reviewed. Actions stay on their current major versions; an action runtime deprecation may require a maintenance update.
+  - **Statuses**: unchanged, because no new evidence was produced: Phase 11 🔴, Phase 12 🟡 (every task 🟢; the deferred scope is transferred, not done), Phase 13 🟡 (13.1 and 13.2 🟢; 13.3–13.5 🟡), Phase 14 ⬜.
 
 ---
 
@@ -2040,6 +2046,7 @@ Phase 8 automates workflow actions upon drift detection by creating structured G
 
 #### Task 8.2 — Automated Remediation Branch & PR Generator
 - **Status**: 🔴 BLOCKED — superseded by Phase 11, design review 2026-10-03
+- **Level 1 disposition**: transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19); not completed in Level 1, and the record below is kept unchanged.
 - **Objective**: Implement workflow step to generate a Git remediation branch and PR updating Terraform HCL to match desired/remediated state. *(Executes third per the approved Phase 8 restructuring, 2026-10-03; requires its own design review before implementation.)* **Not implemented in Phase 8:** the 2026-10-03 design review found this objective unsafe and non-deterministic under the locked Phase 8 rules (see Design Review); the remediation scope moved to Phase 11.
 - **Dependencies**: Task 8.3, Task 6.6
 - **Files/Areas**: `scripts/create_remediation_pr.py` — **not created**. No Task 8.2 implementation, workflow, job, permission (`contents: write` / `pull-requests: write`) or repository-setting change ("Allow GitHub Actions to create and approve pull requests") was made.
@@ -2581,6 +2588,7 @@ Phase 9 integrates deterministic security scanners into CI/CD to validate Terraf
 
 #### Task 9.4 — Super-Linter Code Quality Enforcement
 - **Status**: 🔴 BLOCKED — deferred to Phase 12 (user decision 2026-10-04); not implemented
+- **Level 1 disposition**: transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19); not completed in Level 1, and the record below is kept unchanged.
 - **Deferral record (2026-10-04)**:
   - Task 9.4 was paused before its baseline. The Docker daemon was not running on the host, and the user decided not to download or run the Super-Linter image in Phase 9.
   - Nothing was implemented: no `super-linter.yml`, no `scripts/run_super_linter.sh`, no `.github/linters/` configs, no tests, no image pulled, no baseline measured.
@@ -5118,10 +5126,13 @@ Phase 10 integrates Infracost to provide deterministic cost estimates for config
 ### PHASE 11 — Human-Approved Remediation
 **Status**: 🔴 BLOCKED — on hold (user decision 2026-10-13): intentionally deferred while Phase 12 testing and security hardening are prioritized; no Phase 12 task depends on Phase 11. Task 11.1 stays 🟡 (specification revision 9 under user review, 2026-10-12; progress and recorded decisions unchanged); Tasks 11.2 and 11.3 ⬜ NOT STARTED. Resumes at Task 11.1 on user instruction.
 
+> **Level 1 disposition**: Phase 11 (Tasks 11.1–11.3) was transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19); not completed in Level 1, and the record below is kept unchanged.
+
 Phase 11 enforces strict human approval controls before applying any automated infrastructure remediation.
 
 #### Task 11.1 — Safe Remediation Architecture & Controls
 - **Status**: 🟡 WORK IN PROGRESS (specification revision 9 drafted; awaiting user review and approval) — paused while Phase 11 is on hold (2026-10-13); progress and recorded decisions unchanged.
+- **Level 1 disposition**: transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19); not completed in Level 1, and the record below is kept unchanged.
 - **Started**: 2026-10-11
 - **Objective**: Architect human-in-the-loop controls prohibiting autonomous destructive apply actions.
 - **Dependencies**: Task 8.3
@@ -5198,6 +5209,8 @@ Phase 11 enforces strict human approval controls before applying any automated i
 
 ### PHASE 12 — Testing & Security Hardening
 **Status**: 🟡 WORK IN PROGRESS — Task 12.1A 🟢 COMPLETED (2026-10-14); Task 12.1 🟢 COMPLETED (2026-10-16); Task 12.2 🟢 COMPLETED (2026-10-16); Task 12.3 🟢 COMPLETED (2026-10-16). All tasks are complete; the deferred scope recorded below is still open.
+
+> **Level 1 disposition**: The deferred scope of Phase 12 (not its completed tasks) was transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19); not completed in Level 1, and the record below is kept unchanged.
 
 Phase 12 builds a comprehensive end-to-end test suite and performs security hardening across all platform components.
 
@@ -5393,6 +5406,7 @@ Phase 12 builds a comprehensive end-to-end test suite and performs security hard
   - **Passed**: no hardcoded credentials; tenant, client and object IDs absent from the repository; no Terraform state ever committed; no `pull_request_target`; API keys environment-only, scoped and never logged.
   - **Remediated during the task**: the audit found deviations from the documented design on the CI identity: additional role assignments and a client secret, added outside this repository. They were removed in Azure outside this audit, and two read-only re-audits (2026-10-16) verified the removal.
   - **Follow-up**: the remaining hardening recommendations are tracked in the private report. Those that change existing workflows need a separately approved task (WF-1).
+  - **Closeout follow-up (2026-10-19)**: action pinning by commit SHA, the workflow-level OIDC permission and the persisted checkout credentials were fixed in the closeout PR, and `main` is protected by a ruleset (see **Level 1 closeout** in the Master Project Overview).
 ---
 
 ### PHASE 13 — Professional Dashboard
@@ -5510,6 +5524,7 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 
 #### Task 13.3 — Live Data Integration & Real-Time Status Monitoring
 - **Status**: 🟡 WORK IN PROGRESS (🔵 STARTED 2026-10-17)
+- **Level 1 disposition**: the work recorded below is part of Level 1; its open items (criterion 2 and the issue-column browser check in the validation) were transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19). Status unchanged.
 - **Started**: 2026-10-17
 - **Objective**: Connect web dashboard frontend to backend API to ensure 100% real project data (zero mock data in final build).
 - **Dependencies**: Task 13.2
@@ -5583,8 +5598,10 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
     - **Browser (built-in browser, `caller_reader`, run `github-38109121618-1` selected)**: the Active drifts row and the details panel each list `op-1 · 2026-10-11 02:27:00 UTC` and `op-2 · 2026-10-11 03:34:30 UTC`, both `matched`, type User, with caller hashes equal to `who`'s (checked in the page, no screenshot); the disclaimer is present; storage and cookies empty. As viewer: "Not available (needs the caller_reader role)", no operations.
     - **Tests**: `tests/test_dashboard_api.py` 24 passed (new `AmbiguousVerdictCallerTests` on the real R3 artifacts with Activity Log rows reproducing both operations to the microsecond: per-operation callers equal `who.run_who` on the same inputs; `no_match`, `retention_exceeded`, `resource_ids_unavailable`, `address_unknown`, `azure_sign_in_unavailable` and `local_only` stay `Unknown` per operation, with no Azure query for `local_only`; viewer refused with no query); against the pre-fix behaviour the new tests fail (7 errors). Component tests 19 passed (new: per-operation rendering in the row and the details panel, escaping, an unavailable operation keeps its reason). Full suite (fresh CPython 3.13 venv, pinned `requirements.txt`) **3087 passed**, 0 failed, 0 skipped; `src/drift_engine` coverage 98.85%. gitleaks 8.30.1: no findings in the 23 modified or untracked files; the 2 history findings are older false positives (a sentinel test key in `tests/test_infracost.py`, prose in `PROJECT_PLAN.md` since `17eff5f`). TruffleHog is not installed locally.
   - **Open before 🟢**: ~~the GitHub issue snapshot of the user's authenticated fetch~~ (now present: user-confirmed dashboard fetch around 12:25 IST on 2026-10-18 (the user clicked **Check GitHub for new runs**; see Task 13.4) plus the observed local file `.artifacts/dashboard/github_issues.json`, written at about 12:25:02 IST (`fetched_at` 2026-10-18T06:54:56Z) and holding 6 issues. The issue states in it were not independently checked against GitHub, and neither its completeness nor its freshness has been confirmed), and the browser check of the issue column and panel on it (**still open**). Real issue states were already validated through the public API on the 9B.6 artifacts (issue #9 for R2 and R3, 6 closed `completed`), but not yet from the fetched data in the browser. Needed then: the user re-runs the fetch with a token that has "Issues: read"; the 12:25 IST dashboard fetch has since produced the snapshot. Still needed: the browser check of the issue column and the "GitHub drift issues" panel on this snapshot. Remediation PR state stays `not_enabled` (Task 8.2 blocked), as documented.
+  - **PR #17 (2026-10-19)**: the "GitHub drift issues" panel now lists only the issues of the run on screen, with "Show all issues (N)" for the whole snapshot (component tests added). It changes the panel the open browser check refers to; that check is still not recorded.
 #### Task 13.4 — On-Demand GitHub Fetch from the Dashboard
 - **Status**: 🟡 WORK IN PROGRESS (🔵 STARTED 2026-10-18 on the user's instruction "Start implementation")
+- **Level 1 disposition**: no acceptance criterion is open; the status stays 🟡 because closing the task is the owner's decision, which was not taken at the Level 1 closeout (2026-10-19).
 - **Started**: 2026-10-18
 - **Objective**: Add a `Check GitHub for new runs` button that, for an authorized user, runs the existing GitHub artifact fetch as a secure background job and then reloads the dashboard, without changing the existing Refresh behavior (Phase 13 design amendment, 2026-10-18).
 - **Dependencies**: Tasks 13.1 and 13.2 (🟢); the fetch script and data path of Task 13.3 (`scripts/fetch_dashboard_data.py`, `.artifacts/dashboard`, `scripts/run_dashboard.sh`).
@@ -5639,6 +5656,7 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 
 #### Task 13.5 — Dashboard-Native GitHub Authentication and Fetch Status Window
 - **Status**: 🟡 WORK IN PROGRESS (🔵 STARTED 2026-10-18 on the user's instruction; implemented and tested; merged to `main` in PR #13 (`d340763`) with follow-up UI changes in PR #14 (`e6dbfc4`); open items below)
+- **Level 1 disposition**: the work recorded below is part of Level 1; its open items (the real-Chrome check and the recorded check against real GitHub) were transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19). Status unchanged.
 - **Started**: 2026-10-18
 - **Objective**: Let the user connect, verify and replace a GitHub personal access token from the dashboard itself (no startup flag), explain token and permission failures precisely, and show GitHub fetch progress and results in a separate, dismissible status window, without changing the local-first design or Task 13.4's protections.
 - **Dependencies**: Task 13.4 (🟡; its fetch job, endpoints and protections are reused).
@@ -5682,6 +5700,8 @@ Phase 13 builds a web-based management dashboard consuming live platform APIs an
 
 ### PHASE 14 — Final Documentation, Demo & Portfolio Assets
 **Status**: ⬜ NOT STARTED
+
+> **Level 1 disposition**: Phase 14 (Tasks 14.1–14.3) was transferred to the Level 2 backlog at the Level 1 closeout (2026-10-19); not completed in Level 1, and the record below is kept unchanged.
 
 Phase 14 finalizes documentation, builds an end-to-end automated demo walkthrough, and creates portfolio materials.
 

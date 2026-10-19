@@ -5,6 +5,8 @@
 > nothing in it is implemented, and `apply_enabled` stays `false`. It is published as part of the
 > Level 1 documentation closeout (2026-10-18) as a design record only; the Level 1 baseline
 > (`level1-v1.0.0`) contains no remediation workflow, approval environment or write permission.
+> **Level 1 closeout (2026-10-19)**: frozen at revision 9, never approved, and transferred to the Level 2
+> backlog as design input only. The §12.1 log procedure was not run; see §12.1.
 > - Revision 1 review: D1, D3, D5, D6 and D8 approved; D2, D4 and D7 sent back.
 > - Revision 2 review: C1 approved (no create in v1); D2 approved as a proposal, not as validated
 >   Azure permissions; D4 sent back; D7 approved provisionally.
@@ -1277,6 +1279,13 @@ separately approved run if needed. CI never force-unlocks, retries or rolls back
   the concern is drift values (for example manually added tags) and refreshed values.
 - Subscription and tenant IDs are GitHub secrets and appear masked (`***`) in logs.
 - Until the E6 fix lands, every new successful push run adds a new log with a printed plan.
+
+**Level 1 closeout (2026-10-19)**: the E6 fix landed in `6d1aa86` (Task 12.1A), so no new run prints a
+plan. The classification and deletion procedure above was **not** run: the owner decided not to review
+the historical logs at the closeout. The 67 auth-test runs (and the 46 drift-detection runs before
+`6d1aa86`) keep their logs until GitHub's log retention removes them (90 days by default: about
+2026-12-30 to 2027-01-11; the repository's own retention setting was not checked). This residual is
+accepted, not resolved.
 
 ## 13. Audit evidence (D8, retained)
 
