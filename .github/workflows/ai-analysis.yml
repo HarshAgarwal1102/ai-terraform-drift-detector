@@ -95,7 +95,7 @@ jobs:
       # pattern (not name): a missing artifact downloads nothing instead of failing,
       # so the next step can report "unknown". The token is used only here.
       - name: Download source drift report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: drift-report-${{ github.event.workflow_run.id }}
           run-id: ${{ github.event.workflow_run.id }}
@@ -104,7 +104,7 @@ jobs:
 
       # Task 9B.5: same pattern rule; a missing investigation is not a failure.
       - name: Download source drift investigation
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: drift-investigation-${{ github.event.workflow_run.id }}
           run-id: ${{ github.event.workflow_run.id }}
@@ -113,7 +113,7 @@ jobs:
 
       # Task 10.3: same pattern rule; a missing cost report is not a failure (cost status not_available).
       - name: Download source cost report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: infracost-report-${{ github.event.workflow_run.id }}
           run-id: ${{ github.event.workflow_run.id }}
@@ -122,7 +122,7 @@ jobs:
 
       # Task 10.4: same pattern rule; a missing unmanaged report is not a failure (status not_available).
       - name: Download source unmanaged resources report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: unmanaged-resources-${{ github.event.workflow_run.id }}
           run-id: ${{ github.event.workflow_run.id }}
@@ -162,14 +162,14 @@ jobs:
 
       - name: Checkout Code
         if: ${{ steps.present.outputs.present == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           set-safe-directory: false
 
       - name: Setup Python
         if: ${{ steps.present.outputs.present == 'true' }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -288,7 +288,7 @@ jobs:
 
       - name: Upload AI analysis report
         if: ${{ steps.gate.outputs.valid == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ai-analysis-report-${{ github.event.workflow_run.id }}
           path: |

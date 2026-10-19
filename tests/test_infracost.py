@@ -581,7 +581,7 @@ def test_secret_and_continue_on_error_are_confined(wf):
 
 def test_cost_artifact(wf):
     upload = steps_by_name(wf["jobs"]["plan-and-analyze"])["Upload Infracost Report"]
-    assert upload["uses"] == "actions/upload-artifact@v4" and upload["continue-on-error"] is True
+    assert upload["uses"] == "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" and upload["continue-on-error"] is True
     assert upload["with"] == {
         "name": "infracost-report-${{ github.run_id }}",
         "path": "${{ runner.temp }}/cost/report/infracost.json\n${{ runner.temp }}/cost/report/cost_run.json\n",

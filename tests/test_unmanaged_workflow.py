@@ -121,7 +121,8 @@ def test_unmanaged_job_is_least_privilege_and_isolated(wf):
 
 def test_no_upload_carries_plan_or_restricted_files(wf):
     uploads = [s["with"]["path"] for job in wf["jobs"].values() for s in job.get("steps", [])
-               if s.get("uses") == "actions/upload-artifact@v4"]
+               if s.get("uses", "").startswith("actions/upload-artifact@")]
+    assert uploads  # never pass vacuously (e.g. after a change to the action reference)
     for forbidden in ("restricted", "inventory-venv", "plan.json", "inventory.log"):
         assert not any(forbidden in path for path in uploads), forbidden
 

@@ -17,6 +17,9 @@
 >   [Level 1 and Level 2](#level-1-and-level-2)). The roadmap tables, status labels and the status
 >   summary reflect that state; the explanatory sections were not rewritten. Section 18 keeps its
 >   earlier status column.
+> - **Closeout** (2026-10-19): deferred items are labelled ➡️ TRANSFERRED (Level 2 backlog);
+>   Section 12 and Section 18 updated where they were stale. The full record is the **Level 1
+>   closeout** entry of `PROJECT_PLAN.md`.
 > - Sections 5–11 still explain Phases 1–3 the way they were designed, with their final
 >   status. Phases 4–10 are summarized in [Section 4](#what-phases-410-delivered).
 > - For anything newer, `PROJECT_PLAN.md` wins.
@@ -35,6 +38,7 @@
 | 🟢 **CURRENT / DONE** | Built, tested, committed |
 | 🟡 **IN PROGRESS** | Partly done |
 | ⬜ **FUTURE** | Planned in `PROJECT_PLAN.md`, not built yet |
+| ➡️ **TRANSFERRED** | Not done in Level 1; moved to the Level 2 backlog at the Level 1 closeout |
 | ⏸️ **DEFERRED** | Deliberately left out of the current scope (may return in a later phase) |
 
 ---
@@ -366,12 +370,12 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 | TFLint + Trivy config + TruffleHog scanning | 🟢 CURRENT (Tasks 9.1–9.3) | `.github/workflows/security-scan.yml` |
 | Infracost plan estimate + cost delta + AI cost impact | 🟢 CURRENT (Tasks 10.1–10.3) | `scripts/infracost_analysis.sh`, `src/drift_engine/cost.py`, `src/ai_engine/nodes/cost_analysis.py` |
 | Unmanaged-resource inventory + Azure Retail Prices estimate | 🟢 CURRENT (Task 10.4; verified on real Azure, run #44) | `src/drift_engine/inventory.py`, `unmanaged_cost.py`, `scripts/inventory_analysis.sh` |
-| Super-Linter code-quality enforcement | ⬜ FUTURE (Task 9.4, deferred to Phase 12) | — |
+| Super-Linter code-quality enforcement | ➡️ TRANSFERRED (Task 9.4; Level 2 backlog) | — |
 | Dashboard API + UI over real CI artifacts, on-demand GitHub fetch | 🟢 CURRENT (Phase 13, Level 1; Tasks 13.3–13.5 have open validation items) | `src/dashboard_api/`, `dashboard/`, `scripts/run_dashboard.sh` |
 | Test tiers, scenario matrix, log-exposure hardening, least-privilege audit | 🟢 CURRENT (Phase 12 tasks; its deferred scope is still open) | `tests/`, `.github/workflows/tests.yml` |
-| Human-approved remediation | ⏸️ ON HOLD (Phase 11; specification only, nothing built) | `docs/remediation-safeguards.md` |
-| Final docs, demo, portfolio | ⬜ FUTURE (Phase 14, not started) | — |
-| Remediation PRs (old Task 8.2) | ⬜ FUTURE (moved to Phase 11) | — |
+| Human-approved remediation | ➡️ TRANSFERRED (Phase 11 on hold; specification only, nothing built) | `docs/remediation-safeguards.md` |
+| Final docs, demo, portfolio | ➡️ TRANSFERRED (Phase 14, not started) | — |
+| Remediation PRs (old Task 8.2) | ➡️ TRANSFERRED (moved to Phase 11) | — |
 | Application Storage Account, Key Vault | ⏸️ DEFERRED | Not in the codebase |
 
 ---
@@ -402,14 +406,14 @@ That figure counts the numbered phases 1–14. The lettered phases are planned s
 | 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | 🟢 COMPLETED |
 | 9B | Drift Investigation (WHO / WHEN / WHAT) | Read-only Activity Log investigation in CI, proven on real Azure | 🟢 COMPLETED |
 | 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation; separate list-price estimate of resources Terraform doesn't manage (10.4) | 🟢 COMPLETED (2026-10-11) |
-| 11 | Human-Approved Remediation | Apply fixes only after human approval | 🔴 ON HOLD (2026-10-13; Task 11.1 specification paused under review; nothing built) |
-| 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | 🟡 IN PROGRESS (all tasks 🟢: 12.1A, 12.1, 12.2, 12.3; deferred scope still open) |
+| 11 | Human-Approved Remediation | Apply fixes only after human approval | 🔴 ON HOLD (2026-10-13; Task 11.1 specification paused under review; nothing built; ➡️ Level 2 backlog) |
+| 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | 🟡 IN PROGRESS (all tasks 🟢: 12.1A, 12.1, 12.2, 12.3; deferred scope ➡️ Level 2 backlog) |
 | 13 | Professional Dashboard | API + UI showing real drift data | 🟡 IN PROGRESS (13.1–13.2 🟢; 13.3–13.5 built, merged and user-tested, with open validation items; released in `level1-v1.0.0`) |
-| 14 | Final Documentation, Demo & Portfolio Assets | Final docs, demo script, portfolio summary | ⬜ NOT STARTED |
+| 14 | Final Documentation, Demo & Portfolio Assets | Final docs, demo script, portfolio summary | ⬜ NOT STARTED (➡️ Level 2 backlog) |
 
 > **About Phases 11 and 14 and Task 9.4:** each has a drafted task list in
-> `PROJECT_PLAN.md`. They are **future scope, not yet finalized**: every task gets its own
-> design review before implementation, and reviews have changed tasks before. For example,
+> `PROJECT_PLAN.md`. They were **not done in Level 1** and were transferred to the Level 2 backlog at
+> the Level 1 closeout; reviews had changed tasks before. For example,
 > tfsec was replaced by Trivy in 9.2, and the remediation PRs of 8.2 moved to Phase 11.
 
 ### Roadmap diagram (main dependencies from `PROJECT_PLAN.md`)
@@ -432,7 +436,7 @@ flowchart LR
     P5 --> P10["P10 FinOps<br/>DONE"]
     P9A --> P10
     P9B --> P10
-    P8 --> P11["P11 Human-Approved Remediation<br/>NEXT"]
+    P8 --> P11["P11 Human-Approved Remediation<br/>ON HOLD, to Level 2"]
     P4 --> P12["P12 Testing + Hardening"]
     P6 --> P12
     P8 --> P12
@@ -1229,7 +1233,7 @@ strict.
 ## 12. Testing Strategy
 
 ```text
-Unit Tests (pytest; latest full run, 2026-10-11 at commit 8ef89b6: 2763 passed, coverage 98.85%)
+Unit Tests (pytest; latest full run, 2026-10-19 on the `level1-v1.0.0` code: 3228 passed, coverage 98.85%)
     +
 Real Terraform Evidence Fixtures (11 scenarios)
     +
@@ -1310,7 +1314,7 @@ pytest --cov=src/drift_engine tests/
 | Super-Linter code-quality checks (deferred from Task 9.4; locked design kept, re-validate first) | 12 |
 | Human approval gates before any remediation apply | 11 |
 | Full RBAC/secret hardening audit | 12.3 |
-| Pinning GitHub Actions by commit SHA | 12 |
+| Pinning GitHub Actions by commit SHA | Done at the Level 1 closeout |
 
 ---
 
@@ -1386,7 +1390,7 @@ unmanaged resources (10.4).)*
 | **Phase 11** | 🔴 | Task 11.1 safeguards specification (revision 9), paused under review; nothing built | On hold (user decision 2026-10-13) |
 | **Phase 12** | 🟡 | Test tiers and `tests.yml` (12.1), log-exposure hardening (12.1A), scenario matrix (12.2), least-privilege audit (12.3) | Deferred scope (e.g. Super-Linter 9.4) still open |
 | **Phase 13** | 🟡 | Dashboard API + UI over real CI artifacts (13.1–13.2), live data and caller attribution (13.3), GitHub fetch from the dashboard (13.4–13.5); released in `level1-v1.0.0` | Open validation items in Tasks 13.3 and 13.5 |
-| **Phase 14** | ⬜ | Task list drafted | Not started |
+| **Phase 14** | ⬜ | Task list drafted | Not started; ➡️ Level 2 backlog |
 | Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7, 9B.6) | — |
 | Detection running in CI? | ✅ Yes | Daily scheduled + manual runs | — |
 | Resources outside Terraform detected? | ✅ Yes | A portal-created VM in `aitdd-dev-main-rg`: 5 unmanaged resources, $44.85/month list price (run #44); VM deleted afterwards | Next scheduled inventory shows whether anything remains |
@@ -1440,7 +1444,7 @@ unmanaged resources (10.4).)*
 
 | Term | Simple explanation | In this project |
 |---|---|---|
-| **Terraform** | A tool that creates and manages infrastructure from code | Manages `aitdd-dev-main-rg` and the state storage |
+| **Terraform** | A tool that creates and manages infrastructure from code | Manages `aitdd-dev-main-rg`, its VNet, subnet, NSG and subnet–NSG association, and the state storage |
 | **Terraform Configuration** | The `.tf` / `.tfvars` files describing what I want | `terraform/environments/dev/` + `dev.tfvars` (the **D** view) |
 | **Terraform State** | Terraform's memory of what it created | Blob `dev.tfstate` in container `tfstate` (the **S** view) |
 | **Actual** | What really exists in the cloud right now | Azure as seen during refresh (the **R** view) |
@@ -1479,7 +1483,7 @@ unmanaged resources (10.4).)*
 ## 18. Known Ambiguities & Open Questions
 
 I found these while reading the repository at commit `3e2a696`. The **Status (2026-10-03)**
-column records what happened since; `PROJECT_PLAN.md` has the details.
+column (items 5, 8 and 9 updated at the Level 1 closeout, 2026-10-19) records what happened since; `PROJECT_PLAN.md` has the details.
 
 | # | Topic | What I found | Suggested handling | Status (2026-10-03) |
 |---|---|---|---|---|
@@ -1487,11 +1491,11 @@ column records what happened since; `PROJECT_PLAN.md` has the details.
 | 2 | **Phase 3 vs Phase 4 overlap** | Phase 4 plans a new package `src/drift_engine/` overlapping `scripts/detect_drift.py` and Task 3.4. | Migrate `detect_drift.py` into `src/drift_engine/` rather than rebuilding it. | ✅ Resolved: code moved, not rewritten (Phase 4) |
 | 3 | **README is out of date** | README listed `network`, `storage` and `key-vault` modules that do not exist, and old phase statuses. | Fix during a documentation task. | ✅ Resolved: README updated to the current plan |
 | 4 | **`architecture.md` is out of date** | Header said "Phase 2 in progress"; it listed modules and storage that do not exist. | Same as #3. | ✅ Resolved: updated to the current plan |
-| 5 | **Pull-request workflow runs** | `terraform-auth-test.yml` triggers on `pull_request`, but the OIDC federated credential exists only for `main`. PR runs fail at Azure login. | Add a PR credential or drop the PR trigger. | ⏳ Still open: PR runs fail with `AADSTS700213` (seen in the Task 9.1/9.2 CI proofs); relevant to Task 12.3 |
+| 5 | **Pull-request workflow runs** | `terraform-auth-test.yml` triggers on `pull_request`, but the OIDC federated credential exists only for `main`. PR runs fail at Azure login. | Add a PR credential or drop the PR trigger. | ✅ Resolved: since `81aae71` pull requests run only the offline validation job; the Azure login and plan job runs on push and manual dispatch |
 | 6 | **AI root cause before Activity Log** | Task 6.5 comes before Phase 7. AI must not claim who made a change without Phase 7 evidence. | Keep Task 6.5 strictly to evidence-based, labelled hypotheses. | ✅ Handled: attribution stays unknown/unconfirmed in the AI report |
 | 7 | **Test framework wording** | Phase 12 says `pytest`; tests used `unittest`. | Decide in Phase 4.1. | ✅ Resolved: `pytest` (dev extra) runs the whole suite |
-| 8 | **Task 3.2 tests not committed** | The 16-case stub suite for `generate_plan_json.sh` lived in a scratch folder only. | Consider committing a script test suite later. | ⏳ Still open (Phase 12) |
-| 9 | **Unverified Terraform behaviours** | Exit codes for move-only/import-only plans are unverified. | Verify when moves/imports are introduced. | ⏳ Still open (spec §5.3, §9) |
+| 8 | **Task 3.2 tests not committed** | The 16-case stub suite for `generate_plan_json.sh` lived in a scratch folder only. | Consider committing a script test suite later. | ◐ Partly: `tests/test_generate_plan_json.py` (Task 12.1A) tests the script's failure handling; the original 16-case suite was not committed |
+| 9 | **Unverified Terraform behaviours** | Exit codes for move-only/import-only plans are unverified. | Verify when moves/imports are introduced. | ➡️ Level 2 backlog (still unverified; spec §5.3, §9) |
 | 10 | **Real drift not yet proven** | External drift was only proven by simulation. | Tasks 3.6–3.7, with approval. | ✅ Resolved: real tag drift detected and reverted (2026-10-02) |
 | 11 | **Unpushed commit** | Commit `3e2a696` existed only locally. | Push when ready. | ✅ Resolved: pushed |
 

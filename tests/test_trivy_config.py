@@ -426,7 +426,7 @@ class StaticTests(unittest.TestCase):
                     "container"):
             self.assertNotIn(key, job)
         steps = job["steps"]
-        self.assertEqual([s.get("uses") for s in steps], ["actions/checkout@v4", None, None])
+        self.assertEqual([s.get("uses") for s in steps], ["actions/checkout@11d5960a326750d5838078e36cf38b85af677262", None, None])
         self.assertEqual(steps[0]["with"], {"persist-credentials": False})
         install = steps[1]
         self.assertEqual(install["env"], {"PINNED_TRIVY_VERSION": TRIVY_VERSION,

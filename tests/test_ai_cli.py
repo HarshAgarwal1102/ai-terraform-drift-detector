@@ -368,22 +368,22 @@ def test_steps_download_install_and_upload(workflow):
                            "Validate and bind the drift report", "Run AI analysis (no LLM)", "Summary (counts only)",
                            "Upload AI analysis report"]
     download = steps["Download source drift report"]
-    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["uses"] == "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
     assert download["with"] == {"pattern": "drift-report-${{ github.event.workflow_run.id }}",
                                 "run-id": "${{ github.event.workflow_run.id }}",
                                 "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
     investigation = steps["Download source drift investigation"]  # Task 9B.5: pattern, so a missing one is no failure
-    assert investigation["uses"] == "actions/download-artifact@v4" and "if" not in investigation
+    assert investigation["uses"] == "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" and "if" not in investigation
     assert investigation["with"] == {"pattern": "drift-investigation-${{ github.event.workflow_run.id }}",
                                      "run-id": "${{ github.event.workflow_run.id }}",
                                      "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
     cost = steps["Download source cost report"]  # Task 10.3: pattern, so a missing cost report is no failure
-    assert cost["uses"] == "actions/download-artifact@v4" and "if" not in cost
+    assert cost["uses"] == "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" and "if" not in cost
     assert cost["with"] == {"pattern": "infracost-report-${{ github.event.workflow_run.id }}",
                             "run-id": "${{ github.event.workflow_run.id }}",
                             "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
     unmanaged = steps["Download source unmanaged resources report"]  # Task 10.4: pattern, missing is no failure
-    assert unmanaged["uses"] == "actions/download-artifact@v4" and "if" not in unmanaged
+    assert unmanaged["uses"] == "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" and "if" not in unmanaged
     assert unmanaged["with"] == {"pattern": "unmanaged-resources-${{ github.event.workflow_run.id }}",
                                  "run-id": "${{ github.event.workflow_run.id }}",
                                  "github-token": "${{ github.token }}", "path": "${{ runner.temp }}/source"}
@@ -397,7 +397,7 @@ def test_steps_download_install_and_upload(workflow):
     assert steps["Setup Python"]["with"] == {"python-version": "3.12"}
     assert '-c ci/ai-constraints.txt ".[ai]"' in steps["Install AI analysis (pinned)"]["run"]
     upload = steps["Upload AI analysis report"]
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
     assert upload["with"]["name"] == "ai-analysis-report-${{ github.event.workflow_run.id }}"
     assert upload["with"]["retention-days"] == 30 and upload["with"]["if-no-files-found"] == "error"
     assert upload["with"]["path"].splitlines() == ["${{ runner.temp }}/ai-analysis/ai_analysis_report.json",

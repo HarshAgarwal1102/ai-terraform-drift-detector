@@ -27,10 +27,10 @@ This platform detects, analyzes, and remediates **infrastructure drift** — the
 | **9A** | **AI Analysis Integration** | `ai-analysis` CLI and the no-LLM `ai-analysis.yml` workflow (no Azure access) | ✅ Complete |
 | **9B** | **Drift Investigation (WHO / WHEN / WHAT)** | Read-only Activity Log investigation in `drift-detection.yml`; public projections of the drift report and the investigation | ✅ Complete |
 | **10** | **FinOps / Cost Analysis** | Infracost plan estimate (10.1), cost delta (10.2), AI cost impact (10.3); read-only unmanaged-resource inventory with an Azure Retail Prices API list-price estimate (10.4), separate from drift and from Infracost | ✅ Complete |
-| 11 | Human-Approved Remediation | Task 11.1 safeguards specification only ([`remediation-safeguards.md`](remediation-safeguards.md)); no workflow, environment or write permission | 🔴 On hold (since 2026-10-13) |
-| **12** | **Testing & Security Hardening** | Test tiers and `tests.yml` (12.1), plan/log exposure hardening (12.1A), 135-case scenario matrix (12.2), least-privilege and secret audit (12.3) | 🟡 Tasks complete; deferred scope (e.g. Super-Linter 9.4) open |
-| **13** | **Professional Dashboard** | `src/dashboard_api` + `dashboard/` over the real CI artifacts; caller attribution; on-demand GitHub fetch (see [Section 7](#7-level-1-application-architecture)) | 🟡 Built, merged and user-tested; open validation items in 13.3 and 13.5 |
-| 14 | Final Documentation, Demo & Portfolio | See `PROJECT_PLAN.md` | ⬜ Not started |
+| 11 | Human-Approved Remediation | Task 11.1 safeguards specification only ([`remediation-safeguards.md`](remediation-safeguards.md)); no workflow, environment or write permission | 🔴 On hold (since 2026-10-13); → Level 2 backlog |
+| **12** | **Testing & Security Hardening** | Test tiers and `tests.yml` (12.1), plan/log exposure hardening (12.1A), 135-case scenario matrix (12.2), least-privilege and secret audit (12.3) | 🟡 Tasks complete; deferred scope (e.g. Super-Linter 9.4) → Level 2 backlog |
+| **13** | **Professional Dashboard** | `src/dashboard_api` + `dashboard/` over the real CI artifacts; caller attribution; on-demand GitHub fetch (see [Section 7](#7-level-1-application-architecture)) | 🟡 Built, merged and user-tested; open validation items in 13.3 and 13.5 → Level 2 backlog |
+| 14 | Final Documentation, Demo & Portfolio | See `PROJECT_PLAN.md` | ⬜ Not started; → Level 2 backlog |
 
 ---
 
@@ -168,6 +168,11 @@ Only the `main` branch has a federated credential. Pull requests therefore run o
 validation job of `terraform-auth-test.yml`; the Azure login and `plan` job runs on trusted events
 (push to `main`, manual dispatch). The dashboard (Section 7) is not a workflow: it runs on the
 owner's machine and has no Azure write access either.
+
+Every action in every workflow is pinned by full commit SHA, `id-token: write` is granted only to the
+job that logs in to Azure (never at workflow level), and no checkout keeps its credentials
+(`tests/test_workflow_pins.py`). `main` accepts changes only through a pull request whose six checks
+(both `tests.yml` jobs, the three `security-scan.yml` jobs and `Terraform Offline Validation`) pass.
 
 > **Future / conditional only — not current access.** Should a later phase introduce
 > automated remediation, any write capability (for example a narrowly scoped
