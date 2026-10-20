@@ -29,13 +29,13 @@ Remediation is not part of Level 1 (Phase 11 on hold; transferred to the Level 2
 
 ## 📌 Current Status
 
-**Phases 1–10 are complete**, and so are the lettered phases 5A, 9A and 9B. Phase 12's tasks are
-complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-v1.0.0` on
+**Phases 1–10 and 12 are complete**, and so are the lettered phases 5A, 9A and 9B. Phase 13's dashboard
+is built (Tasks 13.1–13.4 complete; Task 13.5 has one open validation item); Level 1 was released as tag `level1-v1.0.0` on
 2026-10-18 (see below).
 
-`PROJECT_PLAN.md` reports **"Phases Completed: 10 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
+`PROJECT_PLAN.md` reports **"Phases Completed: 11 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
-  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "10 of 14".
+  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "11 of 14".
 - **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **complete**: Task 9A.1 was validated locally and in a real CI run.
 - **Phase 9B** (Drift Investigation: WHO / WHEN / WHAT) is **complete** (2026-10-11). Task 9B.6
   proved it end to end on real Azure: a portal tag change investigated as the sole capable
@@ -62,8 +62,8 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
     and its AI analysis run #27. That run found 5 resources in `aitdd-dev-main-rg` created
     outside Terraform (a VM made in the Azure Portal for the test), with a list-price estimate
     of $44.85/month. The test VM has since been deleted.
-- **Phase 12 — Testing & Security Hardening: all tasks complete**, with the scope deferred into
-  it (e.g. Super-Linter, Task 9.4) still open. Task 12.1A (Terraform plan and
+- **Phase 12 — Testing & Security Hardening: complete** (closed 2026-10-20). The scope deferred into
+  it (e.g. Super-Linter, Task 9.4) was transferred to the Level 2 backlog. Task 12.1A (Terraform plan and
   diagnostic log exposure hardening) is complete: commit `6d1aa86` on `main`, verified by a real
   sentinel check on auth-test run #68 (see [Known limitations](#known-limitations-current-state)).
   Task 12.1 (test tiers, pinned test dependencies and the new `tests.yml` workflow) is complete:
@@ -80,10 +80,10 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
   Azure caller for the `caller_reader` role), AI report, cost and unmanaged resources, and
   **Check GitHub for new runs** with a GitHub token connected from the dashboard (held in server
   memory only). Merged through PRs #10–#14; automated tests pass and the owner tested it on their
-  own system. Open validation items (Tasks 13.3 and 13.5 in `PROJECT_PLAN.md`): a browser check of
-  the issue column on the fetched issue snapshot, a real-Chrome password-prompt check, and a
-  recorded check against real GitHub with good, invalid and Issues-less tokens; they were transferred
-  to the Level 2 backlog at the Level 1 closeout. PR #17 (2026-10-19) made the GitHub drift issues
+  own system. Tasks 13.1–13.4 are complete (13.3's issue-column browser check was done on 2026-10-20).
+  Task 13.5 has one open validation item: a recorded check against real GitHub with the owner's
+  token (good, invalid and Issues-less). The real-Chrome password-prompt check was transferred to the
+  Level 2 backlog. PR #17 (2026-10-19) made the GitHub drift issues
   panel follow the run on screen. See [docs/dashboard.md](docs/dashboard.md).
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
@@ -123,8 +123,8 @@ complete and Phase 13's dashboard is built; Level 1 was released as tag `level1-
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built; → Level 2 backlog) |
-| 12 — Testing & security hardening | 🟡 All tasks complete (12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit); deferred scope → Level 2 backlog |
-| 13 — Professional dashboard | 🟡 Built, merged and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 → Level 2 backlog |
+| 12 — Testing & security hardening | ✅ Complete (2026-10-20): 12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit; deferred scope → Level 2 backlog |
+| 13 — Professional dashboard | 🟡 13.1–13.4 complete; released in `level1-v1.0.0` and `level1-v1.0.1`; 13.5 validation against real GitHub open |
 | 14 — Final documentation, demo & portfolio | ⬜ Not started (→ Level 2 backlog) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
@@ -216,7 +216,7 @@ closeout (2026-10-19); their records stay in [PROJECT_PLAN.md](PROJECT_PLAN.md):
 - The scope deferred into Phase 12: Super-Linter code-quality enforcement (Task 9.4) and the
   other items listed under Phase 12 in `PROJECT_PLAN.md`.
 - Final documentation, demo and portfolio assets (Phase 14).
-- The open dashboard validation items of Tasks 13.3 and 13.5.
+- The real-Chrome password-prompt check of Task 13.5 (not an acceptance criterion).
 
 ### Core principles
 
@@ -1448,8 +1448,8 @@ registration holds zero credentials.
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started; → Level 2 backlog |
-| 12 | Testing and hardening | 🟡 All tasks complete: 12.1A log-exposure hardening (verified on auth-test run #68); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope → Level 2 backlog |
-| 13 | Professional dashboard | 🟡 Built, merged (PRs #10–#14) and user-tested; released in `level1-v1.0.0`; open validation items in 13.3 and 13.5 → Level 2 backlog |
+| 12 | Testing and hardening | ✅ Complete (2026-10-20): 12.1A log-exposure hardening (verified on auth-test run #68 and drift run #54); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope → Level 2 backlog |
+| 13 | Professional dashboard | 🟡 13.1–13.4 complete (PRs #10–#14, #17); released in `level1-v1.0.0` and `level1-v1.0.1`; 13.5 validation against real GitHub open |
 | 14 | Final documentation / demo | ⬜ Not started (→ Level 2 backlog) |
 
 ### Known limitations (current state)
@@ -1490,9 +1490,9 @@ registration holds zero credentials.
   - Verified: the real sentinel check (E6 item d) passed on push-triggered auth-test run #68 with a
     temporary probe tag (since removed): the log shows only the fixed lines
     (`plan_exit_code=2 … change=1`, all other counts 0) and none of the probe tag, `Refreshing
-    state`, `/subscriptions/` or account data. Not verified live: a `drift-detection.yml` run (its
-    auth check and the removed `plan.log` tail are covered by local tests; the same auth-check block
-    passed live in the auth-test).
+    state`, `/subscriptions/` or account data. Verified live on 2026-10-20 (scheduled drift-detection run #54): its
+    auth check printed only the fixed line; the removed `plan.log` tail could only appear on a failed
+    run and stays covered by local tests.
   - Accepted residual: the logs of runs before `6d1aa86` were not reviewed or deleted at the Level 1
     closeout; they stay readable by signed-in GitHub users until GitHub's log retention removes them
     (90 days by default; see [`docs/remediation-safeguards.md`](docs/remediation-safeguards.md) §12.1). Residual: the
