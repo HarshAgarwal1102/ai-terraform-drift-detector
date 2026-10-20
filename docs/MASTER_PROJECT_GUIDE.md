@@ -11,7 +11,7 @@
 >   complete with Tasks 9.1–9.3; Task 9.4 deferred to Phase 12; Task 9A.1 next).
 > - **Updated** against commit `8ef89b6` (2026-10-11): Phases 9A, 9B and 10 complete
 >   (Task 10.4 verified on real Azure in drift-detection run #44).
-> - **Last updated** for the Level 1 closeout (2026-10-18), against tag `level1-v1.0.0`
+> - **Last updated** for the Level 1 closeout (2026-10-18), against the then tag `level1-v1.0.0`
 >   (commit `daa95f8`): Phase 11 on hold, Phase 12 tasks complete, Phase 13 dashboard built and
 >   released in Level 1, Phase 14 not started, and Level 2 moved to a separate repository (see
 >   [Level 1 and Level 2](#level-1-and-level-2)). The roadmap tables, status labels and the status
@@ -1235,7 +1235,7 @@ strict.
 ## 12. Testing Strategy
 
 ```text
-Unit Tests (pytest; latest full run, 2026-10-19 on the `level1-v1.0.0` code: 3228 passed, coverage 98.85%)
+Unit Tests (pytest; latest full run, 2026-10-19 on the code of the 2026-10-18 baseline `daa95f8`: 3228 passed, coverage 98.85%)
     +
 Real Terraform Evidence Fixtures (11 scenarios)
     +
@@ -1391,26 +1391,26 @@ unmanaged resources (10.4).)*
 | **Phase 10** | 🟢 | Infracost estimate (10.1), cost delta (10.2), AI cost impact (10.3), unmanaged resources + Azure Retail Prices estimate (10.4; real Azure run #44) | — |
 | **Phase 11** | 🔴 | Task 11.1 safeguards specification (revision 9), paused under review; nothing built | On hold (user decision 2026-10-13) |
 | **Phase 12** | 🟢 | Test tiers and `tests.yml` (12.1), log-exposure hardening (12.1A), scenario matrix (12.2), least-privilege audit (12.3) | — (deferred scope ➡️ Level 2 backlog) |
-| **Phase 13** | 🟢 | Dashboard API + UI over real CI artifacts (13.1–13.2), live data and caller attribution (13.3), GitHub fetch from the dashboard (13.4–13.5); released in `level1-v1.0.0` and `level1-v1.0.1` | — (real-Chrome password-prompt check ➡️ Level 2 backlog) |
+| **Phase 13** | 🟢 | Dashboard API + UI over real CI artifacts (13.1–13.2), live data and caller attribution (13.3), GitHub fetch from the dashboard (13.4–13.5); released in `level1-v1.0.0` (`280466b`) | — (real-Chrome password-prompt check ➡️ Level 2 backlog) |
 | **Phase 14** | ⬜ | Task list drafted | Not started; ➡️ Level 2 backlog |
 | Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7, 9B.6) | — |
 | Detection running in CI? | ✅ Yes | Daily scheduled + manual runs | — |
 | Resources outside Terraform detected? | ✅ Yes | A portal-created VM in `aitdd-dev-main-rg`: 5 unmanaged resources, $44.85/month list price (run #44); VM deleted afterwards | Next scheduled inventory shows whether anything remains |
 
 **Current phase:** none in Level 1. Level 1 was released as the stable baseline on 2026-10-18
-(tag `level1-v1.0.0`, commit `daa95f8`).
+(commit `daa95f8`). The Version 1 release tag is `level1-v1.0.0` on commit `280466b` (2026-10-20).
 **Current active task:** none in Level 1 (see `PROJECT_PLAN.md`, Master Project Overview).
 
 ### Level 1 and Level 2
 
-- **Level 1** is this repository: everything above, released as tag `level1-v1.0.0`. It is
-  **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2. It is the
+- **Level 1** is this repository: everything above, released as tag `level1-v1.0.0` (commit `280466b`). It is
+  **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The Version 1 release tag `level1-v1.0.0` (commit `280466b`, 2026-10-20) is not moved again; a later fix release would get its own new tag. New development happens in Level 2. It is the
   stable baseline: Terraform evidence, the deterministic engine, CI detection, issues, AI
   analysis, investigation, cost, security scanning and the dashboard.
 - **Level 2** is a separate, more user-friendly, local-first application in the private
   repository `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command
   `aitdd`). It copied only the nine drift-engine modules and the public report schema from
-  `level1-v1.0.0`, records where they came from, and tests that it produces the same reports. It
+  the 2026-10-18 baseline `daa95f8` (then tagged `level1-v1.0.0`), records where they came from, and tests that it produces the same reports. It
   never installs or imports Level 1, and its plan lives in that repository, not here.
 
 ---

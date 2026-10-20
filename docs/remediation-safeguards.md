@@ -4,7 +4,8 @@
 > **Phase 11 is on hold** (user decision 2026-10-13): this specification is paused under review,
 > nothing in it is implemented, and `apply_enabled` stays `false`. It is published as part of the
 > Level 1 documentation closeout (2026-10-18) as a design record only; the Level 1 baseline
-> (`level1-v1.0.0`) contains no remediation workflow, approval environment or write permission.
+> (`daa95f8`) and the release `level1-v1.0.0` (`280466b`) contain no remediation workflow, approval
+> environment or write permission.
 > **Level 1 closeout (2026-10-19)**: frozen at revision 9, never approved, and transferred to the Level 2
 > backlog as design input only. The §12.1 log procedure was not run; see §12.1.
 > - Revision 1 review: D1, D3, D5, D6 and D8 approved; D2, D4 and D7 sent back.
