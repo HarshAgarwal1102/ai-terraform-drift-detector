@@ -29,13 +29,13 @@ Remediation is not part of Level 1 (Phase 11 on hold; transferred to the Level 2
 
 ## 📌 Current Status
 
-**Phases 1–10 and 12 are complete**, and so are the lettered phases 5A, 9A and 9B. Phase 13's dashboard
-is built (Tasks 13.1–13.4 complete; Task 13.5 has one open validation item); Level 1 was released as tag `level1-v1.0.0` on
+**Phases 1–10, 12 and 13 are complete**, and so are the lettered phases 5A, 9A and 9B (Phases 12 and 13
+closed 2026-10-20); Level 1 was released as tag `level1-v1.0.0` on
 2026-10-18 (see below).
 
-`PROJECT_PLAN.md` reports **"Phases Completed: 11 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
+`PROJECT_PLAN.md` reports **"Phases Completed: 12 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
-  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "11 of 14".
+  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "12 of 14".
 - **Phase 9A** (AI Analysis Integration) is placed before Phase 10. It is **complete**: Task 9A.1 was validated locally and in a real CI run.
 - **Phase 9B** (Drift Investigation: WHO / WHEN / WHAT) is **complete** (2026-10-11). Task 9B.6
   proved it end to end on real Azure: a portal tag change investigated as the sole capable
@@ -80,10 +80,10 @@ is built (Tasks 13.1–13.4 complete; Task 13.5 has one open validation item); L
   Azure caller for the `caller_reader` role), AI report, cost and unmanaged resources, and
   **Check GitHub for new runs** with a GitHub token connected from the dashboard (held in server
   memory only). Merged through PRs #10–#14; automated tests pass and the owner tested it on their
-  own system. Tasks 13.1–13.4 are complete (13.3's issue-column browser check was done on 2026-10-20).
-  Task 13.5 has one open validation item: a recorded check against real GitHub with the owner's
-  token (good, invalid and Issues-less). The real-Chrome password-prompt check was transferred to the
-  Level 2 backlog. PR #17 (2026-10-19) made the GitHub drift issues
+  own system. Phase 13 is complete (2026-10-20): Task 13.3's issue-column browser check was done on the real
+  fetched data, and the owner validated Task 13.5 against real GitHub (wrong token refused with HTTP 401,
+  valid read-only token connected, Check GitHub for new runs completed). The real-Chrome password-prompt
+  check was transferred to the Level 2 backlog. PR #17 (2026-10-19) made the GitHub drift issues
   panel follow the run on screen. See [docs/dashboard.md](docs/dashboard.md).
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
   Remediation Architecture & Controls) is a specification only, paused under review:
@@ -124,7 +124,7 @@ is built (Tasks 13.1–13.4 complete; Task 13.5 has one open validation item); L
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built; → Level 2 backlog) |
 | 12 — Testing & security hardening | ✅ Complete (2026-10-20): 12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit; deferred scope → Level 2 backlog |
-| 13 — Professional dashboard | 🟡 13.1–13.4 complete; released in `level1-v1.0.0` and `level1-v1.0.1`; 13.5 validation against real GitHub open |
+| 13 — Professional dashboard | ✅ Complete (2026-10-20): 13.1–13.5; released in `level1-v1.0.0` and `level1-v1.0.1` |
 | 14 — Final documentation, demo & portfolio | ⬜ Not started (→ Level 2 backlog) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
@@ -1449,7 +1449,7 @@ registration holds zero credentials.
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started; → Level 2 backlog |
 | 12 | Testing and hardening | ✅ Complete (2026-10-20): 12.1A log-exposure hardening (verified on auth-test run #68 and drift run #54); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope → Level 2 backlog |
-| 13 | Professional dashboard | 🟡 13.1–13.4 complete (PRs #10–#14, #17); released in `level1-v1.0.0` and `level1-v1.0.1`; 13.5 validation against real GitHub open |
+| 13 | Professional dashboard | ✅ Complete (2026-10-20): 13.1–13.5 (PRs #10–#14, #17); released in `level1-v1.0.0` and `level1-v1.0.1` |
 | 14 | Final documentation / demo | ⬜ Not started (→ Level 2 backlog) |
 
 ### Known limitations (current state)
