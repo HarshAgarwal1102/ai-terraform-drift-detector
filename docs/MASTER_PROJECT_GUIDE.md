@@ -20,6 +20,8 @@
 > - **Closeout** (2026-10-19): deferred items are labelled ➡️ TRANSFERRED (Level 2 backlog);
 >   Section 12 and Section 18 updated where they were stale. The full record is the **Level 1
 >   closeout** entry of `PROJECT_PLAN.md`.
+> - **Updated 2026-10-20**: Phases 12 and 13 complete (Phases Completed 12 of 14); Task 13.5 closed on
+>   the owner's manual validation against real GitHub.
 > - Sections 5–11 still explain Phases 1–3 the way they were designed, with their final
 >   status. Phases 4–10 are summarized in [Section 4](#what-phases-410-delivered).
 > - For anything newer, `PROJECT_PLAN.md` wins.
@@ -371,8 +373,8 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 | Infracost plan estimate + cost delta + AI cost impact | 🟢 CURRENT (Tasks 10.1–10.3) | `scripts/infracost_analysis.sh`, `src/drift_engine/cost.py`, `src/ai_engine/nodes/cost_analysis.py` |
 | Unmanaged-resource inventory + Azure Retail Prices estimate | 🟢 CURRENT (Task 10.4; verified on real Azure, run #44) | `src/drift_engine/inventory.py`, `unmanaged_cost.py`, `scripts/inventory_analysis.sh` |
 | Super-Linter code-quality enforcement | ➡️ TRANSFERRED (Task 9.4; Level 2 backlog) | — |
-| Dashboard API + UI over real CI artifacts, on-demand GitHub fetch | 🟢 CURRENT (Phase 13, Level 1; Tasks 13.3–13.5 have open validation items) | `src/dashboard_api/`, `dashboard/`, `scripts/run_dashboard.sh` |
-| Test tiers, scenario matrix, log-exposure hardening, least-privilege audit | 🟢 CURRENT (Phase 12 tasks; its deferred scope is still open) | `tests/`, `.github/workflows/tests.yml` |
+| Dashboard API + UI over real CI artifacts, on-demand GitHub fetch | 🟢 CURRENT (Phase 13, complete 2026-10-20) | `src/dashboard_api/`, `dashboard/`, `scripts/run_dashboard.sh` |
+| Test tiers, scenario matrix, log-exposure hardening, least-privilege audit | 🟢 CURRENT (Phase 12, complete; its deferred scope ➡️ Level 2 backlog) | `tests/`, `.github/workflows/tests.yml` |
 | Human-approved remediation | ➡️ TRANSFERRED (Phase 11 on hold; specification only, nothing built) | `docs/remediation-safeguards.md` |
 | Final docs, demo, portfolio | ➡️ TRANSFERRED (Phase 14, not started) | — |
 | Remediation PRs (old Task 8.2) | ➡️ TRANSFERRED (moved to Phase 11) | — |
@@ -383,11 +385,11 @@ The real task dependencies are in the [Phase-by-Phase Roadmap](#4-phase-by-phase
 ## 4. Phase-by-Phase Roadmap
 
 All names and statuses below are taken from `PROJECT_PLAN.md`.
-**Phases completed: 10 of 14**, as reported by `PROJECT_PLAN.md`.
+**Phases completed: 12 of 14**, as reported by `PROJECT_PLAN.md`.
 
 That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
-  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "10 of 14".
+  (the plan places it before Phase 6). It wasn't skipped; it just isn't counted in "12 of 14".
 - **Phase 9A** (AI Analysis Integration) and **Phase 9B** (Drift Investigation), placed before
   Phase 10, are both complete.
 
@@ -402,13 +404,13 @@ That figure counts the numbered phases 1–14. The lettered phases are planned s
 | 6 | LangGraph AI Analysis Engine | AI explains drift (security, cost, risk, remediation) from evidence | 🟢 COMPLETED |
 | 7 | Azure Activity Log Investigation | Find which Azure operation/caller made the change | 🟢 COMPLETED |
 | 8 | GitHub Issue / PR Automation | Open/close drift issues automatically (remediation PRs moved to Phase 11) | 🟢 COMPLETED |
-| 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog in CI (Super-Linter deferred to Phase 12) | 🟢 COMPLETED (9.1–9.3; 9.4 deferred) |
+| 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog in CI (Super-Linter deferred to Phase 12) | 🟢 COMPLETED (9.1–9.3; 9.4 deferred, then ➡️ Level 2 backlog) |
 | 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | 🟢 COMPLETED |
 | 9B | Drift Investigation (WHO / WHEN / WHAT) | Read-only Activity Log investigation in CI, proven on real Azure | 🟢 COMPLETED |
 | 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation; separate list-price estimate of resources Terraform doesn't manage (10.4) | 🟢 COMPLETED (2026-10-11) |
 | 11 | Human-Approved Remediation | Apply fixes only after human approval | 🔴 ON HOLD (2026-10-13; Task 11.1 specification paused under review; nothing built; ➡️ Level 2 backlog) |
-| 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | 🟡 IN PROGRESS (all tasks 🟢: 12.1A, 12.1, 12.2, 12.3; deferred scope ➡️ Level 2 backlog) |
-| 13 | Professional Dashboard | API + UI showing real drift data | 🟡 IN PROGRESS (13.1–13.2 🟢; 13.3–13.5 built, merged and user-tested, with open validation items; released in `level1-v1.0.0`) |
+| 12 | Testing & Security Hardening | Full test suite, scenario matrix, security audit | 🟢 COMPLETED (2026-10-20; deferred scope ➡️ Level 2 backlog) |
+| 13 | Professional Dashboard | API + UI showing real drift data | 🟢 COMPLETED (2026-10-20; 13.1–13.5 🟢) |
 | 14 | Final Documentation, Demo & Portfolio Assets | Final docs, demo script, portfolio summary | ⬜ NOT STARTED (➡️ Level 2 backlog) |
 
 > **About Phases 11 and 14 and Task 9.4:** each has a drafted task list in
@@ -437,11 +439,11 @@ flowchart LR
     P9A --> P10
     P9B --> P10
     P8 --> P11["P11 Human-Approved Remediation<br/>ON HOLD, to Level 2"]
-    P4 --> P12["P12 Testing + Hardening"]
+    P4 --> P12["P12 Testing + Hardening<br/>DONE"]
     P6 --> P12
     P8 --> P12
     P9 --> P12
-    P4 --> P13["P13 Dashboard"]
+    P4 --> P13["P13 Dashboard<br/>DONE"]
     P8 --> P13
     P12 --> P14["P14 Docs + Demo"]
     P13 --> P14
@@ -1383,13 +1385,13 @@ unmanaged resources (10.4).)*
 | **Phase 6** | 🟢 | AI analysis engine (library, LLM opt-in) | — (CLI + CI done in 9A) |
 | **Phase 7** | 🟢 | Activity Log collector + attribution | — (runs in CI through 9B) |
 | **Phase 8** | 🟢 | Drift issues create/update/close (8.1, 8.3) | Remediation PRs moved to Phase 11 |
-| **Phase 9** | 🟢 | TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3), validated in CI | Super-Linter (9.4) deferred to Phase 12 |
+| **Phase 9** | 🟢 | TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3), validated in CI | Super-Linter (9.4) deferred to Phase 12, then ➡️ Level 2 backlog |
 | **Phase 9A** | 🟢 | `ai-analysis` CLI + no-LLM `ai-analysis.yml` | — |
 | **Phase 9B** | 🟢 | Drift investigation (WHO / WHEN / WHAT), proven on real Azure (9B.6) | — |
 | **Phase 10** | 🟢 | Infracost estimate (10.1), cost delta (10.2), AI cost impact (10.3), unmanaged resources + Azure Retail Prices estimate (10.4; real Azure run #44) | — |
 | **Phase 11** | 🔴 | Task 11.1 safeguards specification (revision 9), paused under review; nothing built | On hold (user decision 2026-10-13) |
-| **Phase 12** | 🟡 | Test tiers and `tests.yml` (12.1), log-exposure hardening (12.1A), scenario matrix (12.2), least-privilege audit (12.3) | Deferred scope (e.g. Super-Linter 9.4) still open |
-| **Phase 13** | 🟡 | Dashboard API + UI over real CI artifacts (13.1–13.2), live data and caller attribution (13.3), GitHub fetch from the dashboard (13.4–13.5); released in `level1-v1.0.0` | Open validation items in Tasks 13.3 and 13.5 |
+| **Phase 12** | 🟢 | Test tiers and `tests.yml` (12.1), log-exposure hardening (12.1A), scenario matrix (12.2), least-privilege audit (12.3) | — (deferred scope ➡️ Level 2 backlog) |
+| **Phase 13** | 🟢 | Dashboard API + UI over real CI artifacts (13.1–13.2), live data and caller attribution (13.3), GitHub fetch from the dashboard (13.4–13.5); released in `level1-v1.0.0` and `level1-v1.0.1` | — (real-Chrome password-prompt check ➡️ Level 2 backlog) |
 | **Phase 14** | ⬜ | Task list drafted | Not started; ➡️ Level 2 backlog |
 | Real external drift tested in Azure? | ✅ Yes | Tag drift on `aitdd-dev-main-rg`, detected and reverted (Tasks 3.6–3.7, 9B.6) | — |
 | Detection running in CI? | ✅ Yes | Daily scheduled + manual runs | — |
