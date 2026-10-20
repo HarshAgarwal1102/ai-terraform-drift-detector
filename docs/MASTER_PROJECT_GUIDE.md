@@ -20,6 +20,8 @@
 > - **Closeout** (2026-10-19): deferred items are labelled ➡️ TRANSFERRED (Level 2 backlog);
 >   Section 12 and Section 18 updated where they were stale. The full record is the **Level 1
 >   closeout** entry of `PROJECT_PLAN.md`.
+> - **Updated 2026-10-20**: Phases 12 and 13 complete (Phases Completed 12 of 14); Task 13.5 closed on
+>   the owner's manual validation against real GitHub.
 > - Sections 5–11 still explain Phases 1–3 the way they were designed, with their final
 >   status. Phases 4–10 are summarized in [Section 4](#what-phases-410-delivered).
 > - For anything newer, `PROJECT_PLAN.md` wins.
@@ -402,7 +404,7 @@ That figure counts the numbered phases 1–14. The lettered phases are planned s
 | 6 | LangGraph AI Analysis Engine | AI explains drift (security, cost, risk, remediation) from evidence | 🟢 COMPLETED |
 | 7 | Azure Activity Log Investigation | Find which Azure operation/caller made the change | 🟢 COMPLETED |
 | 8 | GitHub Issue / PR Automation | Open/close drift issues automatically (remediation PRs moved to Phase 11) | 🟢 COMPLETED |
-| 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog in CI (Super-Linter deferred to Phase 12) | 🟢 COMPLETED (9.1–9.3; 9.4 deferred) |
+| 9 | DevSecOps Integration | TFLint, Trivy config, TruffleHog in CI (Super-Linter deferred to Phase 12) | 🟢 COMPLETED (9.1–9.3; 9.4 deferred, then ➡️ Level 2 backlog) |
 | 9A | AI Analysis Integration | AI analysis CLI and no-LLM CI integration | 🟢 COMPLETED |
 | 9B | Drift Investigation (WHO / WHEN / WHAT) | Read-only Activity Log investigation in CI, proven on real Azure | 🟢 COMPLETED |
 | 10 | FinOps / Cost Analysis | Infracost cost deltas + AI cost explanation; separate list-price estimate of resources Terraform doesn't manage (10.4) | 🟢 COMPLETED (2026-10-11) |
@@ -437,11 +439,11 @@ flowchart LR
     P9A --> P10
     P9B --> P10
     P8 --> P11["P11 Human-Approved Remediation<br/>ON HOLD, to Level 2"]
-    P4 --> P12["P12 Testing + Hardening"]
+    P4 --> P12["P12 Testing + Hardening<br/>DONE"]
     P6 --> P12
     P8 --> P12
     P9 --> P12
-    P4 --> P13["P13 Dashboard"]
+    P4 --> P13["P13 Dashboard<br/>DONE"]
     P8 --> P13
     P12 --> P14["P14 Docs + Demo"]
     P13 --> P14
@@ -1383,7 +1385,7 @@ unmanaged resources (10.4).)*
 | **Phase 6** | 🟢 | AI analysis engine (library, LLM opt-in) | — (CLI + CI done in 9A) |
 | **Phase 7** | 🟢 | Activity Log collector + attribution | — (runs in CI through 9B) |
 | **Phase 8** | 🟢 | Drift issues create/update/close (8.1, 8.3) | Remediation PRs moved to Phase 11 |
-| **Phase 9** | 🟢 | TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3), validated in CI | Super-Linter (9.4) deferred to Phase 12 |
+| **Phase 9** | 🟢 | TFLint (9.1), Trivy config (9.2) and TruffleHog (9.3), validated in CI | Super-Linter (9.4) deferred to Phase 12, then ➡️ Level 2 backlog |
 | **Phase 9A** | 🟢 | `ai-analysis` CLI + no-LLM `ai-analysis.yml` | — |
 | **Phase 9B** | 🟢 | Drift investigation (WHO / WHEN / WHAT), proven on real Azure (9B.6) | — |
 | **Phase 10** | 🟢 | Infracost estimate (10.1), cost delta (10.2), AI cost impact (10.3), unmanaged resources + Azure Retail Prices estimate (10.4; real Azure run #44) | — |

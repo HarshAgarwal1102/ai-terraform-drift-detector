@@ -75,14 +75,14 @@ closed 2026-10-20); Level 1 was released as tag `level1-v1.0.0` on
   The detailed audit report is kept private. At the Level 1 closeout (2026-10-19) every workflow action
   was pinned by full commit SHA, only the Azure plan job may request an OIDC token, no checkout keeps
   its credentials, and `main` requires a pull request with six passing checks.
-- **Phase 13 — Professional Dashboard: built and released in Level 1.** A loopback-only data API
+- **Phase 13 — Professional Dashboard: complete and released in Level 1.** A loopback-only data API
   (`dashboard-api`) and browser UI over the real CI artifacts: drift, investigation (with the
   Azure caller for the `caller_reader` role), AI report, cost and unmanaged resources, and
   **Check GitHub for new runs** with a GitHub token connected from the dashboard (held in server
   memory only). Merged through PRs #10–#14; automated tests pass and the owner tested it on their
   own system. Phase 13 is complete (2026-10-20): Task 13.3's issue-column browser check was done on the real
-  fetched data, and the owner validated Task 13.5 against real GitHub (wrong token refused with HTTP 401,
-  valid read-only token connected, Check GitHub for new runs completed). The real-Chrome password-prompt
+  fetched data, and Task 13.5 was closed on the owner's manual validation against real GitHub (owner-confirmed:
+  wrong token refused with HTTP 401, valid read-only token connected, Check GitHub for new runs completed). The real-Chrome password-prompt
   check was transferred to the Level 2 backlog. PR #17 (2026-10-19) made the GitHub drift issues
   panel follow the run on screen. See [docs/dashboard.md](docs/dashboard.md).
 - **On hold: Phase 11 — Human-Approved Remediation** (user decision 2026-10-13). Task 11.1 (Safe
@@ -118,7 +118,7 @@ closed 2026-10-20); Level 1 was released as tag `level1-v1.0.0` on
 | 6 — LangGraph AI analysis engine (library; CLI/CI added in 9A) | ✅ Complete |
 | 7 — Azure Activity Log investigation (collector + attribution) | ✅ Complete |
 | 8 — GitHub Issue automation (8.1, 8.3; 8.2 superseded by Phase 11) | ✅ Complete |
-| 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12) |
+| 9 — DevSecOps integration | ✅ Complete (9.1, 9.2, 9.3; 9.4 Super-Linter deferred to Phase 12, then → Level 2 backlog) |
 | 9A — AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B — Drift investigation (WHO / WHEN / WHAT), proven on real Azure | ✅ Complete |
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
@@ -1443,7 +1443,7 @@ registration holds zero credentials.
 | 6 | LangGraph AI analysis | ✅ Complete (library; CLI/CI added in 9A) |
 | 7 | Azure Activity Log investigation | ✅ Complete |
 | 8 | GitHub Issue/PR automation | ✅ Complete (8.1, 8.3; 8.2 superseded by Phase 11) |
-| 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12) |
+| 9 | DevSecOps scanning | ✅ Complete: 9.1 TFLint, 9.2 Trivy config, 9.3 TruffleHog (9.4 Super-Linter deferred to Phase 12, then → Level 2 backlog) |
 | 9A | AI analysis CLI & no-LLM CI integration | ✅ Complete |
 | 9B | Drift investigation (WHO / WHEN / WHAT) | ✅ Complete (proven on real Azure in Task 9B.6) |
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
@@ -1554,8 +1554,8 @@ registration holds zero credentials.
   `id-token: write` (needed for the Azure login), so the runner still holds the OIDC request
   credential for that job; the cost step only removes it from its own process environment.
 - TruffleHog 3.97.9 has no Infracost detector, so the secret scan wouldn't catch a leaked
-  Infracost key; protection relies on the cost step never printing or writing it (Phase 12
-  hardening candidate).
+  Infracost key; protection relies on the cost step never printing or writing it (a hardening
+  candidate for the Level 2 backlog).
 
 ---
 

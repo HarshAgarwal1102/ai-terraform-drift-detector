@@ -1,8 +1,8 @@
 # Dashboard
 
 Phase 13. This page covers the dashboard data API (Task 13.1, `src/dashboard_api/`), the
-dashboard UI (Task 13.2, `dashboard/`) and the live-data integration (Task 13.3,
-`scripts/fetch_dashboard_data.py`).
+dashboard UI (Task 13.2, `dashboard/`), the live-data integration (Task 13.3,
+`scripts/fetch_dashboard_data.py`) and checking GitHub for new runs from the dashboard (Tasks 13.4 and 13.5).
 
 ## Quick start (one command)
 
