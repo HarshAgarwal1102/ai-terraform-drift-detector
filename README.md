@@ -2,7 +2,7 @@
 
 > Detect, analyze, and remediate infrastructure drift in Azure using Terraform, Python, LangGraph, and GitHub automation.
 
-> **Maintenance-only (since 2026-10-18).** This is **Level 1**, released as tag `level1-v1.0.0`. It receives only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2. See [Level 1 and Level 2](#level-1-and-level-2).
+> **Maintenance-only (since 2026-10-18).** This is **Level 1**; its release tag is `level1-v1.0.0` (commit `280466b`, 2026-10-20). It receives only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The Version 1 release tag `level1-v1.0.0` (commit `280466b`, 2026-10-20) is not moved again; a later fix release would get its own new tag. New development happens in Level 2. See [Level 1 and Level 2](#level-1-and-level-2).
 
 Working today:
 - the **deterministic** core: Terraform plan evidence, drift classification and a typed
@@ -17,7 +17,7 @@ Working today:
 - a local **dashboard** (loopback API and browser UI) over the real CI artifacts, which can fetch
   new runs from GitHub on demand.
 
-This repository is **Level 1**, released as the stable baseline tag `level1-v1.0.0`. A separate,
+This repository is **Level 1**, released as tag `level1-v1.0.0` (commit `280466b`). A separate,
 more user-friendly Level 2 is developed in another repository (see
 [Level 1 and Level 2](#level-1-and-level-2)).
 
@@ -30,8 +30,8 @@ Remediation is not part of Level 1 (Phase 11 on hold; transferred to the Level 2
 ## 📌 Current Status
 
 **Phases 1–10, 12 and 13 are complete**, and so are the lettered phases 5A, 9A and 9B (Phases 12 and 13
-closed 2026-10-20); Level 1 was released as tag `level1-v1.0.0` on
-2026-10-18 (see below).
+closed 2026-10-20); Level 1's release tag is `level1-v1.0.0` on
+commit `280466b` (2026-10-20; see below).
 
 `PROJECT_PLAN.md` reports **"Phases Completed: 12 of 14"**. That figure counts the numbered phases 1–14. The lettered phases are planned separately:
 - **Phase 5A** (Dev Infrastructure Expansion) is a completed expansion phase after Phase 5
@@ -94,11 +94,12 @@ closed 2026-10-20); Level 1 was released as tag `level1-v1.0.0` on
 
 #### Level 1 and Level 2
 
-- **Level 1** (this repository) is frozen as tag `level1-v1.0.0` (commit `daa95f8`): the stable,
-  reproducible baseline. It is **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The tag `level1-v1.0.0` is never moved; a fix release would get its own new tag. New development happens in Level 2.
+- **Level 1** (this repository) is released as tag `level1-v1.0.0` (commit `280466b`; the 2026-10-18 baseline was `daa95f8`): the stable,
+  reproducible baseline. It is **maintenance-only** since 2026-10-18: only bug fixes, security fixes and documentation corrections, each through a pull request with CI; no new features or phases. The Version 1 release tag `level1-v1.0.0` (commit `280466b`, 2026-10-20) is not moved again; a later fix release would get its own new tag. New development happens in Level 2.
 - **Level 2** is a separate, more user-friendly, local-first application in the private repository
   `HarshAgarwal1102/ai-terraform-drift-detector-v2` (package `aitdd-drift`, command `aitdd`). It
-  copied only the drift-engine modules and the public report schema from `level1-v1.0.0`, records
+  copied only the drift-engine modules and the public report schema from
+  the 2026-10-18 baseline `daa95f8` (then tagged `level1-v1.0.0`), records
   their provenance, tests that it produces the same reports, and never installs or imports
   Level 1. Its plan and releases live in that repository.
 - **Level 1 closeout (2026-10-19)**: security follow-up (pinned actions, least-privilege OIDC,
@@ -124,7 +125,7 @@ closed 2026-10-20); Level 1 was released as tag `level1-v1.0.0` on
 | 10 — FinOps / cost analysis (Infracost plan estimate, cost delta, AI cost impact, unmanaged resources) | ✅ Complete (10.3 and 10.4 verified on real Azure/CI in run #44) |
 | 11 — Human-approved remediation | 🔴 On hold (2026-10-13; Task 11.1 specification paused under review; nothing built; → Level 2 backlog) |
 | 12 — Testing & security hardening | ✅ Complete (2026-10-20): 12.1A log-exposure hardening; 12.1 tests.yml run #2 passed; 12.2 tests.yml run #4 passed; 12.3 least-privilege and secret audit; deferred scope → Level 2 backlog |
-| 13 — Professional dashboard | ✅ Complete (2026-10-20): 13.1–13.5; released in `level1-v1.0.0` and `level1-v1.0.1` |
+| 13 — Professional dashboard | ✅ Complete (2026-10-20): 13.1–13.5; released in `level1-v1.0.0` (`280466b`) |
 | 14 — Final documentation, demo & portfolio | ⬜ Not started (→ Level 2 backlog) |
 
 [PROJECT_PLAN.md](PROJECT_PLAN.md) is the single source of truth for task status, acceptance
@@ -1449,7 +1450,7 @@ registration holds zero credentials.
 | 10 | FinOps / Infracost | ✅ Complete: 10.1 Infracost integration, 10.2 cost delta, 10.3 AI cost impact (report v3), 10.4 unmanaged resources + Azure Retail Prices list-price estimate (report v4); 10.3 and 10.4 verified on real Azure/CI in run #44 |
 | 11 | Human-approved remediation | 🔴 On hold (2026-10-13): Task 11.1 safeguards specification paused under review; 11.2–11.3 not started; → Level 2 backlog |
 | 12 | Testing and hardening | ✅ Complete (2026-10-20): 12.1A log-exposure hardening (verified on auth-test run #68 and drift run #54); 12.1 (tests.yml run #2 passed); 12.2 (tests.yml run #4 passed); 12.3 (least-privilege and secret audit). Deferred scope → Level 2 backlog |
-| 13 | Professional dashboard | ✅ Complete (2026-10-20): 13.1–13.5 (PRs #10–#14, #17); released in `level1-v1.0.0` and `level1-v1.0.1` |
+| 13 | Professional dashboard | ✅ Complete (2026-10-20): 13.1–13.5 (PRs #10–#14, #17); released in `level1-v1.0.0` (`280466b`) |
 | 14 | Final documentation / demo | ⬜ Not started (→ Level 2 backlog) |
 
 ### Known limitations (current state)
