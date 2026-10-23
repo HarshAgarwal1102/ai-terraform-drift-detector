@@ -1,0 +1,11 @@
+{
+  "users": [
+    {
+      "name": "demo-viewer",
+      "token_sha256": "caf5fdac5343e5a77a99e360b0ce37c013a22e2109b5789286813af5bc142b9b",
+      "roles": [
+        "viewer"
+      ]
+    }
+  ]
+}

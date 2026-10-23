@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "fastapi",
+  "installCommand": "python -m pip install --disable-pip-version-check --no-input --require-hashes --no-deps --only-binary=:all: -r deploy/vercel/requirements.txt",
+  "functions": {
+    "index.py": {
+      "excludeFiles": "{.artifacts/**,.github/**,build/**,dist/**,ci/**,docs/**,schemas/**,scripts/**,security/**,terraform/**,src/ai_engine/**,tests/*.py,tests/corpora/**,tests/integration/**,tests/mutation/**,tests/scenarios/**,tests/fixtures/activity_log/**,tests/fixtures/cost_config_plans/**,tests/fixtures/infracost/**,tests/fixtures/plan_evidence/**,tests/fixtures/report_plans/**,tests/fixtures/retail_prices/**,tests/fixtures/root_cause_plans/**,tests/fixtures/security_plans/**,dashboard/*.test.js,PROJECT_PLAN.md,README.md,requirements.txt,**/.terraform/**,**/*.tfstate,**/*.tfstate.*,**/*.tfplan,**/tfplan,**/plan.json,**/*.tfvars,**/*.tfvars.json,**/.env,**/.env.*,**/*.pem,**/*.key,**/*.pfx,**/*.dmg,**/.coverage,**/.coverage.*}"
+    }
+  }
+}

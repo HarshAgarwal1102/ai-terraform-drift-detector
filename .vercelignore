@@ -1,0 +1,47 @@
+# Files Vercel may upload for the dashboard demo (index.py, docs/vercel-demo.md). Allowlist: everything is
+# ignored unless listed below, so local secrets (.artifacts/: users files, tokens, Terraform state; .env*;
+# .venv/; saved plans) can never reach a `vercel deploy` from this checkout. .gitignore is not relied on.
+/*
+
+!/index.py
+!/vercel.json
+!/.python-version
+!/pyproject.toml
+!/LICENSE
+!/src
+!/dashboard
+!/deploy
+!/tests
+
+# Within the allowed folders: only what the demo runs.
+/src/ai_engine
+/dashboard/*.test.js
+/tests/*
+!/tests/fixtures
+/tests/fixtures/*
+!/tests/fixtures/dashboard
+/tests/fixtures/dashboard/*
+!/tests/fixtures/dashboard/real_9b6
+
+# Never, wherever they appear.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.json
+*.tfvars
+*.tfvars.json
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.dmg
+.coverage
+.coverage.*
+.DS_Store
+*-token.txt
