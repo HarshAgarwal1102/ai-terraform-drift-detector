@@ -22,6 +22,7 @@
 !/tests/fixtures/dashboard
 /tests/fixtures/dashboard/*
 !/tests/fixtures/dashboard/real_9b6
+!/tests/fixtures/dashboard/real_10_4
 
 # Never, wherever they appear.
 __pycache__/

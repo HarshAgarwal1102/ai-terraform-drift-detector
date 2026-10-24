@@ -1,9 +1,11 @@
 # Vercel dashboard demo
 
 A read-only preview of the Phase 13 dashboard on Vercel, for testing and portfolio demonstration. It runs the
-existing FastAPI application and UI unchanged, on the `vercel-demo` branch only, over the three public runs
-already committed in `tests/fixtures/dashboard/real_9b6`. No database, external backend, GitHub token, Azure
-sign-in or Terraform state is involved.
+existing FastAPI application and UI unchanged, on the `vercel-demo` branch only, over four real public runs
+committed under `tests/fixtures/dashboard`. Three are in `real_9b6`. The fourth is in `real_10_4`: drift-detection
+run #44 `github-38140497702-1`, whose five artifacts were copied unchanged and which found five Azure resources
+not managed by Terraform, estimated at $44.85/month. No database, external backend, GitHub token, Azure sign-in
+or Terraform state is involved.
 
 ## What is deployed
 
@@ -115,8 +117,10 @@ curl -s URL/api/summary
 The first shows `200`, the strict CSP, `no-store` and `DENY`. The second answers
 `{"error":"unauthenticated"}`. Then open `URL` in a browser and sign in with the token. Check that:
 
-- Run History lists three runs (`github-38105671846-1`, `github-38109121618-1`, `github-38111406531-1`),
-  and the 11 October run shows the `tags` drift on the resource group;
+- Run History lists four runs (`github-38105671846-1`, `github-38109121618-1`, `github-38111406531-1`,
+  `github-38140497702-1`), and run `github-38109121618-1` shows the `tags` drift on the resource group;
+- run `github-38140497702-1`, the latest, so the Overview opens on it, shows no drift and five unmanaged
+  resources (`FrontEndVM`, its OS disk, network interface, public IP and health extension) at $44.85/month;
 - the drift table says caller identity is hidden for this user;
 - the GitHub panel says GitHub access is turned off;
 - a wrong token is refused.
@@ -138,7 +142,7 @@ pytest tests/test_vercel_demo.py
 These checks run without Vercel. They load the entry point the way Vercel does and cover:
 
 - sign-in;
-- the three runs;
+- the four runs, including the five unmanaged resources of run #44;
 - disabled GitHub and caller lookup, including for a user holding every role;
 - security headers;
 - the pins against `ci/*-constraints.txt`;

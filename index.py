@@ -4,7 +4,8 @@ Vercel serves the ASGI `app` of this file. It is the existing dashboard (`dashbo
 unchanged: bearer sign-in, public drift report validation, CSP and security headers, UI and API from one
 origin) with a fixed demo configuration that the deployment environment cannot change:
 
-- data: the committed public fixtures `tests/fixtures/dashboard/real_9b6` (three real runs, read-only);
+- data: the committed public fixtures under `tests/fixtures/dashboard` (read-only): `real_9b6` (three real
+  runs) and `real_10_4` (run #44 `github-38140497702-1`, with its five unmanaged resources);
 - sign-in: `deploy/vercel/users.json` (SHA-256 digests only; the demo account holds `viewer` only);
 - GitHub: off (`github_enabled=False`): Connect GitHub and Check GitHub are refused with 503 `disabled`
   and no GitHub token is ever accepted;
@@ -26,7 +27,7 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 from dashboard_api.app import create_app  # noqa: E402
 from drift_engine import activity_logs as al  # noqa: E402
 
-DATA_DIR = os.path.join(ROOT, "tests", "fixtures", "dashboard", "real_9b6")
+DATA_DIR = os.path.join(ROOT, "tests", "fixtures", "dashboard")
 USERS_FILE = os.path.join(ROOT, "deploy", "vercel", "users.json")
 UI_DIR = os.path.join(ROOT, "dashboard")
 

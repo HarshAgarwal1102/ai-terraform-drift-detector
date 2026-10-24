@@ -38,7 +38,30 @@ try:
 except ImportError:  # the dashboard extra (or httpx) is not installed
     TestClient = None
 
-REAL_RUNS = {"github-38105671846-1", "github-38109121618-1", "github-38111406531-1"}
+REAL_RUNS = {"github-38105671846-1", "github-38109121618-1", "github-38111406531-1"}  # real_9b6
+RUN_44 = "github-38140497702-1"  # real_10_4: drift-detection run #44 (Task 10.4), five unmanaged resources
+DEMO_RUNS = REAL_RUNS | {RUN_44}
+FIXTURES = os.path.join(ROOT, "tests", "fixtures", "dashboard")
+# The five real artifacts of run #44, copied unchanged from its GitHub Actions artifacts.
+RUN_44_SHA256 = {
+    "ai-analysis-report-38140497702/ai_analysis_report.json":
+        "a5b22bc195071c254488c6e96e0e230f0bd3696833ddf996f39b7c0f7e91a042",
+    "drift-investigation-38140497702/drift_investigation.json":
+        "059e8b3fb6ac674f39ad9b3ebc62a3027b9533439ae6f9f89cfb673be8dc208a",
+    "drift-report-38140497702/drift_report.json": "5aaaf6069e267db814147274721d60f672d3c5822e0cc7f07951755ec4ac4557",
+    "infracost-report-38140497702/cost_run.json": "bdce97b424e5d80496a937cb7576d11ceec94561251c5a00a49505d53e373038",
+    "unmanaged-inventory-38140497702/unmanaged_inventory.json":
+        "d12f2f90d640053d1b75cfe74f611c62507038cf47bebc3bc600574979c19e21",
+}
+RUN_44_UNMANAGED = [  # (ref, type, name, estimate status, display), as the inventory and the AI report record them
+    ("res-1", "Microsoft.Compute/disks", "FrontEndVM_OsDisk_1_2a6024a00d3b40798ce2415e1dcbf4a7", "estimated",
+     "$5.28/month"),
+    ("res-2", "Microsoft.Compute/virtualMachines", "FrontEndVM", "estimated", "$35.92/month"),
+    ("res-3", "Microsoft.Compute/virtualMachines/extensions", "FrontEndVM/HealthExtension", "no_direct_charge",
+     "$0.00/month"),
+    ("res-4", "Microsoft.Network/networkInterfaces", "frontendvm948", "no_direct_charge", "$0.00/month"),
+    ("res-5", "Microsoft.Network/publicIPAddresses", "FrontEndVM-ip", "estimated", "$3.65/month"),
+]
 GET_ENDPOINTS = ("/api/summary", "/api/drifts", "/api/remediations", "/api/unmanaged", "/api/fetch/status",
                  "/api/reports/github-38109121618-1")
 USERS_FILE = os.path.join(ROOT, "deploy", "vercel", "users.json")
@@ -86,7 +109,7 @@ class VercelEntryPointTest(unittest.TestCase):
         from fastapi import FastAPI
 
         self.assertIsInstance(self.index.app, FastAPI)
-        self.assertEqual(self.index.DATA_DIR, os.path.join(ROOT, "tests", "fixtures", "dashboard", "real_9b6"))
+        self.assertEqual(self.index.DATA_DIR, FIXTURES)
         self.assertEqual(self.index.USERS_FILE, USERS_FILE)
         self.assertEqual(self.index.UI_DIR, os.path.join(ROOT, "dashboard"))
 
@@ -117,15 +140,15 @@ class VercelEntryPointTest(unittest.TestCase):
         for response in (signed_in, client.get("/"), client.get("/app.js")):
             self.assertNotIn("set-cookie", response.headers)
 
-    def test_viewer_reads_the_three_fixture_runs(self) -> None:
+    def test_viewer_reads_the_four_fixture_runs(self) -> None:
         client = self.client()
         summary = self.get(client, "/api/summary")
         self.assertEqual(summary.status_code, 200)
-        self.assertEqual({run["report_id"] for run in summary.json()["history"]}, REAL_RUNS)
+        self.assertEqual({run["report_id"] for run in summary.json()["history"]}, DEMO_RUNS)
         self.assertEqual(summary.json()["data_problems"], {})
         drifts = self.get(client, "/api/drifts").json()
-        self.assertEqual(drifts["reports"], ["github-38111406531-1"])  # the latest run of `dev`
-        for run_id in sorted(REAL_RUNS):
+        self.assertEqual(drifts["reports"], [RUN_44])  # the latest run of `dev` (2026-10-11T12:46:27Z)
+        for run_id in sorted(DEMO_RUNS):
             report = self.get(client, f"/api/reports/{run_id}")
             self.assertEqual(report.status_code, 200, run_id)
             self.assertEqual(report.json()["report_id"], run_id)
@@ -139,6 +162,50 @@ class VercelEntryPointTest(unittest.TestCase):
         self.assertEqual([row["address"] for row in drifted], ['module.resource_group.azurerm_resource_group.this["main"]'])
         for path in ("/api/remediations", "/api/unmanaged"):
             self.assertEqual(self.get(client, path).status_code, 200, path)
+
+    def test_run_44_shows_all_five_real_unmanaged_resources(self) -> None:
+        client = self.client()
+        expected = [(ref, kind, name) for ref, kind, name, _, _ in RUN_44_UNMANAGED]
+        estimates = [(ref, status, display) for ref, _, _, status, display in RUN_44_UNMANAGED]
+        for path in (f"/api/unmanaged?report_id={RUN_44}", f"/api/reports/{RUN_44}"):
+            doc = self.get(client, path).json()
+            view = doc["runs"][0] if "runs" in doc else doc["unmanaged"]
+            self.assertEqual((view["report_id"], view["available"], view["source"], view["outcome"]),
+                             (RUN_44, True, "unmanaged_inventory_artifact", "complete"), path)
+            self.assertEqual(view["counts"], {"listed": 7, "duplicates_dropped": 0, "managed": 2,
+                                              "attached_to_managed": 0, "unmanaged": 5})
+            self.assertEqual([(r["ref"], r["type"], r["name"]) for r in view["resources"]], expected)
+            self.assertEqual({r["resource_group"].lower() for r in view["resources"]}, {"aitdd-dev-main-rg"})
+            self.assertEqual({r["location"] for r in view["resources"]}, {"centralindia"})
+            self.assertEqual([(r["ref"], r["estimate"]["status"], r["estimate"]["display"]) for r in view["resources"]],
+                             estimates)
+            totals = view["cost"]["totals"]
+            self.assertEqual((view["cost"]["status"], totals["display"], totals["estimated_monthly_cost"],
+                              totals["complete"], totals["resources"], totals["estimated"], totals["no_direct_charge"]),
+                             ("complete", "$44.85/month", "44.8455", True, 5, 3, 2))
+            self.assertEqual(view["scopes"], [{"resource_group": "aitdd-dev-main-rg", "status": "complete", "error": None}])
+        report = self.get(client, f"/api/reports/{RUN_44}").json()
+        self.assertEqual((report["drifts"], report["artifacts"]["drift_report"]["has_drift"]), ([], False))
+        history = {run["report_id"]: run for run in self.get(client, "/api/summary").json()["history"]}
+        self.assertEqual(history[RUN_44]["unmanaged"],
+                         {"available": True, "unmanaged": 5, "display": "$44.85/month", "cost_status": "complete"})
+        for run_id in REAL_RUNS:
+            self.assertEqual(history[run_id]["unmanaged"]["available"], False, run_id)  # 9B.6 runs had no inventory
+
+    def test_the_three_original_runs_are_unchanged_by_the_added_run(self) -> None:
+        demo = self.client()
+        original = TestClient(app_module.create_app(data_dir=os.path.join(FIXTURES, "real_9b6"), users_file=self.users_file,
+                                                    terraform_json=None, source=self.index.NoActivityLog(), environ={},
+                                                    ui_dir=None, github_enabled=False))
+        for run_id in sorted(REAL_RUNS):
+            for path in (f"/api/reports/{run_id}", f"/api/drifts?report_id={run_id}", f"/api/remediations?report_id={run_id}",
+                         f"/api/unmanaged?report_id={run_id}"):
+                before, after = self.get(original, path), self.get(demo, path)
+                self.assertEqual((before.status_code, after.status_code), (200, 200), path)
+                self.assertEqual(after.json(), before.json(), path)
+        before = {r["report_id"]: r for r in self.get(original, "/api/summary").json()["history"]}
+        after = {r["report_id"]: r for r in self.get(demo, "/api/summary").json()["history"]}
+        self.assertEqual({k: after[k] for k in REAL_RUNS}, before)
 
     def test_viewer_gets_no_caller_identity_and_no_github_access(self) -> None:
         client = self.client()
@@ -185,7 +252,7 @@ class VercelEntryPointTest(unittest.TestCase):
             index = load_entry_point("vercel_demo_index_env")
             client = self.client()
             self.assertEqual(index.DATA_DIR, self.index.DATA_DIR)
-            self.assertEqual(len(self.get(client, "/api/summary").json()["history"]), 3)
+            self.assertEqual(len(self.get(client, "/api/summary").json()["history"]), len(DEMO_RUNS))
             self.assertEqual(TestClient(index.app).get("/api/summary").status_code, 401)  # still the deployed file
 
     def test_ui_and_api_share_one_origin_with_the_existing_security_headers(self) -> None:
@@ -202,6 +269,47 @@ class VercelEntryPointTest(unittest.TestCase):
         html = responses["/"].text
         self.assertNotRegex(html, r"""(src|href)=["'](https?:)?//""")  # nothing loaded from another origin
         self.assertIn("connect-src 'self'", app_module.SECURITY_HEADERS["Content-Security-Policy"])
+
+
+class Run44FixtureTest(unittest.TestCase):
+    """real_10_4 holds the five real artifacts of run #44 exactly as GitHub Actions published them."""
+
+    def read(self, name: str) -> bytes:
+        with open(os.path.join(FIXTURES, "real_10_4", name), "rb") as fh:
+            return fh.read()
+
+    def test_the_five_artifacts_are_the_published_bytes_and_nothing_else(self) -> None:
+        found = sorted(os.path.relpath(os.path.join(d, f), os.path.join(FIXTURES, "real_10_4"))
+                       for d, _, files in os.walk(os.path.join(FIXTURES, "real_10_4")) for f in files)
+        self.assertEqual(found, sorted(RUN_44_SHA256))
+        for name, digest in RUN_44_SHA256.items():
+            self.assertEqual(hashlib.sha256(self.read(name)).hexdigest(), digest, name)
+
+    def test_public_models_leak_scans_and_bindings_pass(self) -> None:
+        from drift_engine import unmanaged_public
+        from drift_engine.investigation_public import canonical_sha256, check_binding, leak_findings, load_public
+        from drift_engine.report_public import identifier_findings, validate_public
+
+        raw = {name: self.read(name) for name in RUN_44_SHA256}
+        docs = {name: json.loads(data) for name, data in raw.items()}
+        for name, doc in docs.items():
+            self.assertEqual((leak_findings(doc), identifier_findings(doc)), ([], []), name)
+            self.assertNotRegex(raw[name].decode(), r"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|"
+                                                    r"/subscriptions/|@|\b(?:\d{1,3}\.){3}\d{1,3}\b|ghp_|-----BEGIN")
+        report_name = "drift-report-38140497702/drift_report.json"
+        report = docs[report_name]
+        validate_public(report)
+        check_binding(load_public(raw["drift-investigation-38140497702/drift_investigation.json"]), raw[report_name])
+        inventory = unmanaged_public.load_inventory(docs["unmanaged-inventory-38140497702/unmanaged_inventory.json"])
+        sha = canonical_sha256(report)
+        ai = docs["ai-analysis-report-38140497702/ai_analysis_report.json"]
+        cost_run = docs["infracost-report-38140497702/cost_run.json"]
+        self.assertEqual({report["run"]["run_id"], inventory.binding.run_id, ai["provenance"]["run_id"], cost_run["run_id"]},
+                         {RUN_44})
+        self.assertEqual({inventory.binding.drift_report_sha256, ai["provenance"]["drift_report_sha256"],
+                          cost_run["drift_report_sha256"]}, {sha})
+        self.assertEqual([(r.ref, r.type, r.name) for r in inventory.resources],
+                         [(ref, kind, name) for ref, kind, name, _, _ in RUN_44_UNMANAGED])
 
 
 class DeployedUsersFileTest(unittest.TestCase):
@@ -360,7 +468,8 @@ def excluded_by_vercel_json(path: str) -> bool:
 RUNTIME_FILES = ("index.py", "deploy/vercel/users.json", "dashboard/index.html", "dashboard/app.js",
                  "dashboard/render.js", "dashboard/loader.js", "dashboard/styles.css", "src/dashboard_api/app.py",
                  "src/drift_engine/report_public.py",
-                 "tests/fixtures/dashboard/real_9b6/drift-report-38109121618/drift_report.json")
+                 "tests/fixtures/dashboard/real_9b6/drift-report-38109121618/drift_report.json",
+                 *(f"tests/fixtures/dashboard/real_10_4/{name}" for name in RUN_44_SHA256))
 SENSITIVE = re.compile(r"(^|/)(\.artifacts|\.venv|\.terraform|terraform|\.git)/|\.tfstate|\.tfplan$|(^|/)tfplan$|"
                        r"(^|/)plan\.json$|\.tfvars|(^|/)\.env|\.pem$|\.key$|\.pfx$|\.dmg$|token[^/]*\.txt$|\.coverage|"
                        r"dashboard-local|users\.json$")
@@ -386,7 +495,7 @@ class DeploymentContentsTest(unittest.TestCase):
             self.assertIn(path, files)
         allowed = re.compile(r"^(index\.py|vercel\.json|\.python-version|pyproject\.toml|LICENSE|src/(dashboard_api|"
                              r"drift_engine)/[^/]+|dashboard/[^/]+|deploy/vercel/[^/]+|"
-                             r"tests/fixtures/dashboard/real_9b6/.+)$")
+                             r"tests/fixtures/dashboard/(real_9b6|real_10_4)/.+)$")
         for path in files:
             self.assertRegex(path, allowed)
             if path != "deploy/vercel/users.json":

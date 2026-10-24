@@ -1,0 +1,734 @@
+{
+  "analysis": {
+    "configuration": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no configuration changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "cost": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no cost-relevant changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "investigation": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no investigated drifted resources",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "risk": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no deterministic risk factors",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "root_cause": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no changes with an origin to analyze",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    },
+    "security": {
+      "basis": "inference",
+      "findings": [],
+      "reason": "no security-relevant changes",
+      "rejected_count": 0,
+      "rejection_reasons": {},
+      "status": "skipped",
+      "summary": null
+    }
+  },
+  "cost": {
+    "cost_delta": {
+      "binding": {
+        "drift_report_sha256": "6af56352af56edfaf590f89313f178fac0f86dbe64e5a9f459b201f7f162b0ca",
+        "environment": "dev",
+        "run_id": "github-38140497702-1"
+      },
+      "cost_delta_version": "1",
+      "limitations": [
+        "list_prices_usd_no_usage_file",
+        "exact_address_match",
+        "absent_from_diff_is_not_zero",
+        "subresources_not_attributed",
+        "mixed_not_split",
+        "terraform_managed_resources_only",
+        "estimate_not_billing"
+      ],
+      "reconciliation": {
+        "projects": [
+          {
+            "has_diff": true,
+            "lines": 0,
+            "lines_without_amount": 0,
+            "listed_diff_sum": "0",
+            "project": 0,
+            "reported_diff_total": "0",
+            "residual": "0"
+          }
+        ],
+        "root_vs_projects": {
+          "compared_to": "0",
+          "reported_diff_total": "0",
+          "residual": "0"
+        },
+        "root_vs_total_minus_past": {
+          "compared_to": "0",
+          "reported_diff_total": "0",
+          "residual": "0"
+        },
+        "status": "reconciled"
+      },
+      "resources": [],
+      "sign_convention": "monthly_cost_delta = -(Infracost diff monthlyCost) = list-price estimate of the refreshed current configuration (prior_state) - list-price estimate of the declared configuration (planned_values); Terraform-managed resources only, not actual Azure billing; positive: the current configuration is estimated to cost more than the declared one",
+      "source": {
+        "currency": "USD",
+        "infracost_version": "v0.10.46",
+        "mode": "plan_json_breakdown",
+        "pricing": "list_prices_usd_no_usage_file",
+        "time_generated": "2026-10-11T12:46:50.125384163Z"
+      },
+      "totals": {
+        "ambiguous": {
+          "complete": true,
+          "display": null,
+          "monthly_cost_delta": null,
+          "with_cost": 0,
+          "without_cost": 0
+        },
+        "configuration": {
+          "complete": true,
+          "display": null,
+          "monthly_cost_delta": null,
+          "with_cost": 0,
+          "without_cost": 0
+        },
+        "confirmed_drift": {
+          "complete": true,
+          "display": null,
+          "monthly_cost_delta": null,
+          "with_cost": 0,
+          "without_cost": 0
+        },
+        "desired_monthly_cost": "0",
+        "infracost_plan_delta": {
+          "display": "$0.00/month",
+          "label": "Infracost plan total: drift and pending configuration changes combined; not a drift cost",
+          "monthly_cost_delta": "0"
+        },
+        "mixed": {
+          "complete": true,
+          "display": null,
+          "monthly_cost_delta": null,
+          "with_cost": 0,
+          "without_cost": 0
+        },
+        "past_monthly_cost": "0",
+        "unmatched": {
+          "complete": true,
+          "display": null,
+          "monthly_cost_delta": null,
+          "with_cost": 0,
+          "without_cost": 0
+        },
+        "unreconciled": {
+          "display": "$0.00/month",
+          "monthly_cost_delta": "0"
+        }
+      },
+      "unmatched_cost_lines": []
+    },
+    "monetary_impact": "estimated_list_price",
+    "pricing_source": "infracost_list_prices_usd_no_usage_file",
+    "reason": null,
+    "statements": [
+      {
+        "id": "cost.status_complete.v1",
+        "text": "Cost figures are Infracost list-price estimates (USD, no usage file) of the refreshed current configuration versus the declared configuration, for Terraform-managed resources only; they are not actual Azure billing, and resources outside Terraform are not covered."
+      },
+      {
+        "id": "cost.no_drift_cost.v1",
+        "text": "Confirmed drift has no cost line: no drift-attributable cost impact is reported."
+      },
+      {
+        "id": "cost.plan_delta.v1",
+        "text": "Infracost plan total: $0.00/month (0 USD per month); drift and pending configuration changes combined; not a drift cost."
+      }
+    ],
+    "status": "complete"
+  },
+  "investigation": {
+    "anchors": {
+      "accepted": 0,
+      "examined": 0,
+      "rejected": {}
+    },
+    "completeness": {
+      "max_ingestion_delay_ms": null,
+      "not_before": null,
+      "polls": 1,
+      "queried_at": "2026-10-11T12:46:42.739289Z",
+      "settled": false
+    },
+    "exposure": {
+      "caller_identity": "withheld",
+      "correlation_id": "withheld",
+      "event_id": "withheld",
+      "resource_id": "withheld",
+      "who_path": "local_only"
+    },
+    "failure": null,
+    "observation": {
+      "finished_at": "2026-10-11T12:46:27.000000Z",
+      "started_at": "2026-10-11T12:46:10.000000Z"
+    },
+    "rules": {
+      "automated_overlap_minutes": 5,
+      "deletion_rules_version": "2",
+      "lookback_days": 30,
+      "poll_cap_minutes": 20,
+      "poll_interval_minutes": 2,
+      "settle_margin_minutes": 10,
+      "skew_seconds": 60,
+      "table_version": "1"
+    },
+    "status": "complete"
+  },
+  "limitations": [
+    "Terraform evidence (drift_report.json) is the source of truth for WHAT changed; AI sections are inference.",
+    "The Azure Activity Log records operations, not property values: an operation is related to drift only by inference (property link inferred_not_provable); only a deletion can be property-confirmed.",
+    "Caller identities are withheld in public reports; WHO is available locally via drift-engine who.",
+    "Client application azure_cli also covers Terraform run locally with Azure CLI authentication.",
+    "Completeness-dependent statements cover only the Activity Log events available at the investigation's query time (queried_at); Microsoft publishes no ingestion SLA.",
+    "Recommendations follow the deterministic recommendation policy v1; investigation verdicts and caller data never change them. Nothing has been executed; every option needs human approval (Phase 11).",
+    "HCL value fragments do not say where a value is defined (resource block, module input or tfvars).",
+    "Cost figures are Infracost list-price estimates (USD, no usage file) for Terraform-managed resources only, not actual Azure billing; resources outside Terraform and usage-based charges are not covered.",
+    "Only the confirmed-drift subtotal is drift cost; mixed, ambiguous, configuration and unmatched amounts and the Infracost plan total are not.",
+    "Unmanaged resources come from a read-only Azure inventory of the Terraform-managed resource groups (exact, case-insensitive ARM ID match); they are not drift and never change the drift result.",
+    "Unmanaged-resource estimates are Azure Retail Prices API list prices (USD, pay-as-you-go, no usage charges), not actual Azure billing, and are separate from the Infracost cost of the Terraform plan; an unavailable estimate is never counted as $0.",
+    "AI analysis was not performed: no relevant changes."
+  ],
+  "llm": {
+    "attempted": false,
+    "evidence_sent": [],
+    "investigation_sent": [],
+    "max_retries": null,
+    "model": null,
+    "provider": "none",
+    "reason": "no relevant changes",
+    "status": "not_attempted"
+  },
+  "provenance": {
+    "classification_version": "2",
+    "cost_input_sha256": {
+      "cost_run": "cbed9c0e223185a7575c4376cc5c253298e39110d28248b001879025f88159c2",
+      "infracost": "210ade4bfe7411aec917b951bd17be36e11317edf740c315e0adf77091e3f3e8"
+    },
+    "drift_report_sha256": "6af56352af56edfaf590f89313f178fac0f86dbe64e5a9f459b201f7f162b0ca",
+    "environment": "dev",
+    "investigation_sha256": "9ab0a2d12bf50a67798e847f716eaaf5f70349ac5473a90eb95bd395cfc3d16a",
+    "plan_timestamp": "2026-10-11T12:46:20Z",
+    "run_id": "github-38140497702-1",
+    "unmanaged_input_sha256": {
+      "cost": "77b0fa2f46fcd0748407b3796f13a4af717ab95ece6aee22a555ad64c11b63b8",
+      "inventory": "5dcd385e0f464907d177e7ac50994eedc8c2d95e9d368f6ae1ce5d4f0cc2f462"
+    },
+    "versions": {
+      "capable_operations_table": "1",
+      "cost_delta": "1",
+      "deletion_rules": "2",
+      "investigation_public": "1",
+      "recommendation_policy": "1",
+      "remediation_catalogue": "1",
+      "report": "4",
+      "statements": "1",
+      "unmanaged_cost": "1",
+      "unmanaged_inventory": "1"
+    }
+  },
+  "remediation": {
+    "approval_required": true,
+    "automatic_apply": false,
+    "catalogue_version": "1",
+    "options": [],
+    "reason": null,
+    "recommendation_policy_version": "1"
+  },
+  "report_version": "4",
+  "resources": [],
+  "summary": {
+    "classification_counts": {
+      "in_sync": 5
+    },
+    "drifted_resources": 0,
+    "failure": null,
+    "has_drift": false,
+    "highest_severity": "INFO",
+    "outcome": "succeeded",
+    "resources_total": 5
+  },
+  "unmanaged": {
+    "cost": {
+      "binding": {
+        "drift_report_sha256": "6af56352af56edfaf590f89313f178fac0f86dbe64e5a9f459b201f7f162b0ca",
+        "environment": "dev",
+        "inventory_sha256": "5dcd385e0f464907d177e7ac50994eedc8c2d95e9d368f6ae1ce5d4f0cc2f462",
+        "run_id": "github-38140497702-1"
+      },
+      "failure": null,
+      "limitations": [
+        "list_prices_usd_pay_as_you_go",
+        "estimate_not_billing",
+        "usage_based_charges_not_priced",
+        "separate_from_infracost_plan_estimate",
+        "not_drift_cost",
+        "prices_change_over_time",
+        "unknown_is_never_zero"
+      ],
+      "resources": [
+        {
+          "assumptions": [
+            "disk_billed_at_tier_size",
+            "pay_as_you_go_list_price"
+          ],
+          "components": [
+            {
+              "arm_region_name": "centralindia",
+              "effective_start_date": "2018-05-01T00:00:00Z",
+              "meter_name": "P4 LRS Disk",
+              "monthly_cost": "5.2795",
+              "product_name": "Premium SSD Managed Disks",
+              "quantity": "1",
+              "sku_name": "P4 LRS",
+              "unit_of_measure": "1/Month",
+              "unit_price": "5.2795"
+            }
+          ],
+          "display": "$5.28/month",
+          "estimate_status": "estimated",
+          "exclusions": [
+            "snapshots_and_backups"
+          ],
+          "location": "centralindia",
+          "monthly_cost": "5.2795",
+          "name": "FrontEndVM_OsDisk_1_2a6024a00d3b40798ce2415e1dcbf4a7",
+          "reason": null,
+          "ref": "res-1",
+          "type": "Microsoft.Compute/disks"
+        },
+        {
+          "assumptions": [
+            "compute_only_disks_and_ips_priced_separately",
+            "pay_as_you_go_list_price",
+            "runs_730_hours_per_month"
+          ],
+          "components": [
+            {
+              "arm_region_name": "centralindia",
+              "effective_start_date": "2023-09-01T00:00:00Z",
+              "meter_name": "B2as v2",
+              "monthly_cost": "35.9160",
+              "product_name": "Virtual Machines Basv2 Series",
+              "quantity": "730",
+              "sku_name": "B2as v2",
+              "unit_of_measure": "1 Hour",
+              "unit_price": "0.0492"
+            }
+          ],
+          "display": "$35.92/month",
+          "estimate_status": "estimated",
+          "exclusions": [
+            "data_transfer",
+            "usage_based_charges"
+          ],
+          "location": "centralindia",
+          "monthly_cost": "35.9160",
+          "name": "FrontEndVM",
+          "reason": null,
+          "ref": "res-2",
+          "type": "Microsoft.Compute/virtualMachines"
+        },
+        {
+          "assumptions": [],
+          "components": [],
+          "display": "$0.00/month",
+          "estimate_status": "no_direct_charge",
+          "exclusions": [
+            "usage_based_charges"
+          ],
+          "location": "centralindia",
+          "monthly_cost": "0",
+          "name": "FrontEndVM/HealthExtension",
+          "reason": null,
+          "ref": "res-3",
+          "type": "Microsoft.Compute/virtualMachines/extensions"
+        },
+        {
+          "assumptions": [],
+          "components": [],
+          "display": "$0.00/month",
+          "estimate_status": "no_direct_charge",
+          "exclusions": [
+            "usage_based_charges"
+          ],
+          "location": "centralindia",
+          "monthly_cost": "0",
+          "name": "frontendvm948",
+          "reason": null,
+          "ref": "res-4",
+          "type": "Microsoft.Network/networkInterfaces"
+        },
+        {
+          "assumptions": [
+            "pay_as_you_go_list_price",
+            "runs_730_hours_per_month"
+          ],
+          "components": [
+            {
+              "arm_region_name": "centralindia",
+              "effective_start_date": "2018-06-01T00:00:00Z",
+              "meter_name": "Standard IPv4 Static Public IP",
+              "monthly_cost": "3.650",
+              "product_name": "IP Addresses",
+              "quantity": "730",
+              "sku_name": "Standard",
+              "unit_of_measure": "1 Hour",
+              "unit_price": "0.005"
+            }
+          ],
+          "display": "$3.65/month",
+          "estimate_status": "estimated",
+          "exclusions": [
+            "data_transfer"
+          ],
+          "location": "centralindia",
+          "monthly_cost": "3.650",
+          "name": "FrontEndVM-ip",
+          "reason": null,
+          "ref": "res-5",
+          "type": "Microsoft.Network/publicIPAddresses"
+        }
+      ],
+      "source": {
+        "api_version": "2023-01-01-preview",
+        "currency": "USD",
+        "endpoint": "prices.azure.com/api/retail/prices",
+        "hours_per_month": "730",
+        "name": "azure_retail_prices_api",
+        "price_type": "Consumption",
+        "queried_at": "2026-10-11T12:47:08.802123Z"
+      },
+      "status": "complete",
+      "totals": {
+        "complete": true,
+        "display": "$44.85/month",
+        "estimated": 3,
+        "estimated_monthly_cost": "44.8455",
+        "label": "Estimated monthly list-price cost of Azure resources not managed by Terraform (Azure Retail Prices API, USD, pay-as-you-go); not actual Azure billing; separate from the Infracost Terraform plan estimate; never drift cost",
+        "no_direct_charge": 2,
+        "partial": 0,
+        "resources": 5,
+        "unavailable": 0
+      },
+      "unmanaged_cost_version": "1"
+    },
+    "inventory": {
+      "binding": {
+        "drift_report_sha256": "6af56352af56edfaf590f89313f178fac0f86dbe64e5a9f459b201f7f162b0ca",
+        "environment": "dev",
+        "plan_timestamp": "2026-10-11T12:46:20Z",
+        "run_id": "github-38140497702-1"
+      },
+      "collected_at": "2026-10-11T12:46:34.654071Z",
+      "counts": {
+        "attached_to_managed": 0,
+        "duplicates_dropped": 0,
+        "listed": 7,
+        "managed": 2,
+        "unmanaged": 5
+      },
+      "failure": null,
+      "limitations": [
+        "terraform_managed_resource_groups_only",
+        "arm_resource_list_only",
+        "exact_case_insensitive_id_match",
+        "attached_to_managed_not_unmanaged",
+        "snapshot_after_plan",
+        "not_drift"
+      ],
+      "outcome": "complete",
+      "resources": [
+        {
+          "attached_to": {
+            "address": null,
+            "kind": "inventory",
+            "ref": "res-2"
+          },
+          "category": "unmanaged",
+          "detail_error": null,
+          "detail_status": "read",
+          "location": "centralindia",
+          "name": "FrontEndVM_OsDisk_1_2a6024a00d3b40798ce2415e1dcbf4a7",
+          "name_status": "published",
+          "parent": null,
+          "pricing_inputs": {
+            "disk_size_gb": 30,
+            "disk_sku": "Premium_LRS",
+            "disk_state": "Attached",
+            "disk_tier": "P4",
+            "image_publisher": null,
+            "ip_allocation": null,
+            "ip_sku": null,
+            "ip_tier": null,
+            "ip_version": null,
+            "license_type": null,
+            "marketplace_plan": null,
+            "max_shares": null,
+            "os_type": null,
+            "power_state": null,
+            "priority": null,
+            "vm_size": null
+          },
+          "ref": "res-1",
+          "resource_group": "AITDD-DEV-MAIN-RG",
+          "type": "Microsoft.Compute/disks"
+        },
+        {
+          "attached_to": null,
+          "category": "unmanaged",
+          "detail_error": null,
+          "detail_status": "read",
+          "location": "centralindia",
+          "name": "FrontEndVM",
+          "name_status": "published",
+          "parent": null,
+          "pricing_inputs": {
+            "disk_size_gb": null,
+            "disk_sku": null,
+            "disk_state": null,
+            "disk_tier": null,
+            "image_publisher": "canonical",
+            "ip_allocation": null,
+            "ip_sku": null,
+            "ip_tier": null,
+            "ip_version": null,
+            "license_type": null,
+            "marketplace_plan": false,
+            "max_shares": null,
+            "os_type": "Linux",
+            "power_state": "running",
+            "priority": null,
+            "vm_size": "Standard_B2as_v2"
+          },
+          "ref": "res-2",
+          "resource_group": "aitdd-dev-main-rg",
+          "type": "Microsoft.Compute/virtualMachines"
+        },
+        {
+          "attached_to": null,
+          "category": "unmanaged",
+          "detail_error": null,
+          "detail_status": "not_required",
+          "location": "centralindia",
+          "name": "FrontEndVM/HealthExtension",
+          "name_status": "published",
+          "parent": {
+            "address": null,
+            "kind": "inventory",
+            "ref": "res-2"
+          },
+          "pricing_inputs": {
+            "disk_size_gb": null,
+            "disk_sku": null,
+            "disk_state": null,
+            "disk_tier": null,
+            "image_publisher": null,
+            "ip_allocation": null,
+            "ip_sku": null,
+            "ip_tier": null,
+            "ip_version": null,
+            "license_type": null,
+            "marketplace_plan": null,
+            "max_shares": null,
+            "os_type": null,
+            "power_state": null,
+            "priority": null,
+            "vm_size": null
+          },
+          "ref": "res-3",
+          "resource_group": "aitdd-dev-main-rg",
+          "type": "Microsoft.Compute/virtualMachines/extensions"
+        },
+        {
+          "attached_to": {
+            "address": null,
+            "kind": "inventory",
+            "ref": "res-2"
+          },
+          "category": "unmanaged",
+          "detail_error": null,
+          "detail_status": "read",
+          "location": "centralindia",
+          "name": "frontendvm948",
+          "name_status": "published",
+          "parent": null,
+          "pricing_inputs": {
+            "disk_size_gb": null,
+            "disk_sku": null,
+            "disk_state": null,
+            "disk_tier": null,
+            "image_publisher": null,
+            "ip_allocation": null,
+            "ip_sku": null,
+            "ip_tier": null,
+            "ip_version": null,
+            "license_type": null,
+            "marketplace_plan": null,
+            "max_shares": null,
+            "os_type": null,
+            "power_state": null,
+            "priority": null,
+            "vm_size": null
+          },
+          "ref": "res-4",
+          "resource_group": "aitdd-dev-main-rg",
+          "type": "Microsoft.Network/networkInterfaces"
+        },
+        {
+          "attached_to": {
+            "address": null,
+            "kind": "inventory",
+            "ref": "res-4"
+          },
+          "category": "unmanaged",
+          "detail_error": null,
+          "detail_status": "read",
+          "location": "centralindia",
+          "name": "FrontEndVM-ip",
+          "name_status": "published",
+          "parent": null,
+          "pricing_inputs": {
+            "disk_size_gb": null,
+            "disk_sku": null,
+            "disk_state": null,
+            "disk_tier": null,
+            "image_publisher": null,
+            "ip_allocation": "Static",
+            "ip_sku": "Standard",
+            "ip_tier": "Regional",
+            "ip_version": "IPv4",
+            "license_type": null,
+            "marketplace_plan": null,
+            "max_shares": null,
+            "os_type": null,
+            "power_state": null,
+            "priority": null,
+            "vm_size": null
+          },
+          "ref": "res-5",
+          "resource_group": "aitdd-dev-main-rg",
+          "type": "Microsoft.Network/publicIPAddresses"
+        }
+      ],
+      "scopes": [
+        {
+          "error": null,
+          "http_status": null,
+          "listed": 7,
+          "pages": 1,
+          "resource_group": "aitdd-dev-main-rg",
+          "status": "complete"
+        }
+      ],
+      "unmanaged_by_type": {
+        "Microsoft.Compute/disks": 1,
+        "Microsoft.Compute/virtualMachines": 1,
+        "Microsoft.Compute/virtualMachines/extensions": 1,
+        "Microsoft.Network/networkInterfaces": 1,
+        "Microsoft.Network/publicIPAddresses": 1
+      },
+      "unmanaged_inventory_version": "1"
+    },
+    "pricing_source": "azure_retail_prices_api_list_prices_usd",
+    "reason": null,
+    "resources": [
+      {
+        "ref": "res-1",
+        "statements": [
+          {
+            "id": "unmanaged.resource.v1",
+            "text": "FrontEndVM_OsDisk_1_2a6024a00d3b40798ce2415e1dcbf4a7 (Microsoft.Compute/disks, centralindia): not managed by Terraform; estimated $5.28/month (5.2795 USD per month; estimated); Azure Retail Prices API list price, not actual Azure billing."
+          }
+        ]
+      },
+      {
+        "ref": "res-2",
+        "statements": [
+          {
+            "id": "unmanaged.resource.v1",
+            "text": "FrontEndVM (Microsoft.Compute/virtualMachines, centralindia): not managed by Terraform; estimated $35.92/month (35.9160 USD per month; estimated); Azure Retail Prices API list price, not actual Azure billing."
+          }
+        ]
+      },
+      {
+        "ref": "res-3",
+        "statements": [
+          {
+            "id": "unmanaged.resource.v1",
+            "text": "FrontEndVM/HealthExtension (Microsoft.Compute/virtualMachines/extensions, centralindia): not managed by Terraform; estimated $0.00/month (0 USD per month; no_direct_charge); Azure Retail Prices API list price, not actual Azure billing."
+          }
+        ]
+      },
+      {
+        "ref": "res-4",
+        "statements": [
+          {
+            "id": "unmanaged.resource.v1",
+            "text": "frontendvm948 (Microsoft.Network/networkInterfaces, centralindia): not managed by Terraform; estimated $0.00/month (0 USD per month; no_direct_charge); Azure Retail Prices API list price, not actual Azure billing."
+          }
+        ]
+      },
+      {
+        "ref": "res-5",
+        "statements": [
+          {
+            "id": "unmanaged.resource.v1",
+            "text": "FrontEndVM-ip (Microsoft.Network/publicIPAddresses, centralindia): not managed by Terraform; estimated $3.65/month (3.650 USD per month; estimated); Azure Retail Prices API list price, not actual Azure billing."
+          }
+        ]
+      }
+    ],
+    "statements": [
+      {
+        "id": "unmanaged.inventory.v1",
+        "text": "Inventory complete for 1 Terraform-managed resource group(s): 7 resource(s) listed, 2 managed by Terraform, 5 not managed by Terraform, 0 attached to a Terraform-managed resource (not counted as unmanaged). Unmanaged resources are not drift."
+      },
+      {
+        "id": "unmanaged.by_type.v1",
+        "text": "Unmanaged resources by type: Microsoft.Compute/disks 1, Microsoft.Compute/virtualMachines 1, Microsoft.Compute/virtualMachines/extensions 1, Microsoft.Network/networkInterfaces 1, Microsoft.Network/publicIPAddresses 1."
+      },
+      {
+        "id": "unmanaged.total.v1",
+        "text": "Estimated monthly list-price cost of unmanaged resources: $44.85/month (44.8455 USD per month) from 5 of 5 resource(s); separate from the Infracost Terraform plan estimate; never drift cost."
+      }
+    ],
+    "status": "complete"
+  }
+}
