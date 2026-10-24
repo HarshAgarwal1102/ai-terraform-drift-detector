@@ -60,7 +60,7 @@ function harness(options) {
   const delays = [];  // every setTimeout delay the controller asked for (timers still fire at once)
   const calls = [];
   const auto = new Map();
-  const fetch = (url, options) => new Promise((resolve) => {
+  const fetch = (url, options) => new Promise((resolve, reject) => {
     const call = { path: url, method: options.method || "GET", auth: options.headers.Authorization || null,
       credentials: options.credentials, cache: options.cache, answered: false };
     call.respond = (status, body, hdrs) => {
@@ -68,6 +68,7 @@ function harness(options) {
       resolve({ ok: status >= 200 && status < 300, status, json: async () => body,
         headers: { get: (k) => (hdrs && k in hdrs ? hdrs[k] : null) } });
     };
+    call.fail = () => { call.answered = true; reject(new TypeError("Failed to fetch")); };  // as a browser does
     calls.push(call);
     if (!call.auth) call.respond(401, { error: "unauthenticated" });
     else if (auto.has(url)) call.respond(...auto.get(url));
@@ -296,6 +297,191 @@ test("authorization unchanged: a viewer is never sent callers; a rejected token 
   await h.signIn();  // the next user's session starts with nothing from the previous one
   assert.equal(h.sent("/api/summary"), summaries + 1);
   assert.match(h.$("drift-rows").innerHTML, /caller-latest/);
+});
+
+
+// ---------------------------------------------------------------- Sign-in outcomes: access granted / denied
+
+const UNAUTHENTICATED = [401, { error: "unauthenticated" }];
+// What Vercel Authentication answers before the API sees the request (its `error` is not a string).
+const PLATFORM_401 = [401, { error: { code: "401", message: "Protected deployment" }, message: "Protected by Vercel Authentication" }];
+const emptySummary = () => Object.assign(summary(), { reports_total: 0, history: [], environments: [] });
+
+// A harness page as index.html starts it: the dashboard and the sign-out button hidden.
+function signInPage() {
+  const h = harness();
+  h.$("app").hidden = true;
+  h.$("signout").hidden = true;
+  return h;
+}
+
+async function submitSignIn(h, token) {
+  h.$("token").value = token;
+  h.$("signin-form").fire("submit", { preventDefault() {} });
+  await h.flush();
+}
+
+// Answers the first load's open requests, `first` paths before the rest, each with answer(call, path).
+async function answerFirstLoad(h, answer, first) {
+  const p = paths("");
+  for (const path of [...(first || []), "/api/summary", p.callers, p.plain, p.remediations, p.unmanaged]) {
+    const open = h.open(path);
+    if (open.length) { answer(open[0], path); await h.flush(); }
+  }
+  await h.flush();
+}
+
+function countPopups(h) {
+  const dialog = h.$("auth-dialog");
+  const counter = { shown: 0 };
+  dialog.showModal = () => { counter.shown += 1; dialog.open = true; };
+  return counter;
+}
+
+function assertSignedOut(h) {
+  assert.equal(h.$("app").hidden, true);
+  assert.equal(h.$("signin").hidden, false);
+  assert.equal(h.$("signout").hidden, true);
+}
+
+test("sign-in: a rejected token is denied in the popup and on the sign-in screen, whatever answers first", async () => {
+  const p = paths("");
+  for (const first of [["/api/summary"], [p.callers], [p.unmanaged, p.callers]]) {  // the caller lookup may lose or win
+    const h = signInPage();
+    const popups = countPopups(h);
+    await submitSignIn(h, "wrong-token");
+    await answerFirstLoad(h, (call) => call.respond(...UNAUTHENTICATED), first);
+    assertSignedOut(h);
+    const dialog = h.$("auth-dialog");
+    assert.equal(popups.shown, 1, first.join());
+    assert.equal(dialog.open, true, first.join());
+    assert.equal(dialog.dataset.state, "denied", first.join());
+    assert.equal(dialog.getAttribute("role"), "alertdialog");
+    assert.equal(h.$("auth-title").textContent, "Access denied");
+    assert.equal(h.$("auth-retry").hidden, false);
+    assert.match(h.$("signin-error").textContent, /^Access denied: the token was not accepted/);
+    assert.equal(h.sent("/api/fetch/status"), 0);  // nothing is asked for a session that never started
+    assert.equal(h.calls.filter((c) => c.auth === "Bearer wrong-token").length, 5);  // the first load only
+    h.$("auth-retry").fire("click");  // "Try again": the popup closes, the reason stays on screen
+    assert.equal(dialog.open, false);
+    assert.match(h.$("signin-error").textContent, /^Access denied/);
+  }
+});
+
+test("sign-in: granted only once every panel arrived; a valid empty dataset is a usable empty dashboard", async () => {
+  const h = signInPage();
+  await submitSignIn(h, "t0k3n");
+  h.answer("/api/summary", 200, emptySummary());
+  await h.flush();
+  assert.equal(h.$("auth-dialog").dataset.state, "verifying");  // summary alone is not a loaded dashboard
+  assert.equal(h.$("app").hidden, true);
+  const p = paths("");
+  h.answer(p.callers, 403, { error: "caller_access_denied" });
+  h.answer(p.plain, 200, { drifts: [] });
+  h.answer(p.remediations, 200, { remediations: [] });
+  h.answer(p.unmanaged, 200, { runs: [] });
+  await h.flush();
+  assert.equal(h.$("auth-dialog").open, false);
+  assert.equal(h.$("auth-dialog").dataset.state, "granted");
+  assert.equal(h.$("app").hidden, false);
+  assert.equal(h.$("signin").hidden, true);
+  assert.equal(h.$("signin-error").textContent, "");
+  assert.match(h.$("history").innerHTML, /No runs found\./);  // an explicit empty state, not an error
+  assert.match(h.$("status").textContent, /^Updated .* from 0 run\(s\)/);
+  assert.equal(h.$("status").classes.has("error"), false);
+});
+
+test("sign-in: server, network and platform failures are a retryable error, never 'access denied'", async () => {
+  const cases = [
+    ["server error", (call) => call.respond(500, { error: "internal" }), /Could not load data \(internal\)/],
+    ["users file unusable", (call) => call.respond(503, { error: "auth_unavailable" }), /auth_unavailable/],
+    ["network", (call) => call.fail(), /could not be reached/],
+    ["platform 401", (call) => call.respond(...PLATFORM_401), /stopped before it reached the dashboard API/],
+  ];
+  for (const [name, fail, reason] of cases) {
+    const h = signInPage();
+    await submitSignIn(h, "t0k3n");
+    await answerFirstLoad(h, fail);
+    assertSignedOut(h);
+    const dialog = h.$("auth-dialog");
+    assert.equal(dialog.dataset.state, "error", name);
+    assert.equal(dialog.getAttribute("role"), "alertdialog", name);
+    assert.equal(h.$("auth-title").textContent, "Couldn’t load the dashboard", name);
+    assert.match(h.$("auth-message").textContent, reason, name);
+    assert.doesNotMatch(h.$("auth-title").textContent + h.$("signin-error").textContent, /Access denied/, name);
+    assert.match(h.$("signin-error").textContent, reason, name);
+    assert.match(h.$("signin-error").textContent, /The token was not rejected; try again\.$/, name);
+    assert.equal(h.$("auth-retry").hidden, false, name);
+    h.$("auth-retry").fire("click");
+    await h.signIn();  // the retry path: the same sign-in works once the API answers
+    assert.equal(h.$("app").hidden, false, name);
+    assert.equal(h.$("signin-error").textContent, "", name);
+  }
+});
+
+test("sign-in: a valid token whose account lacks the viewer role is denied as such", async () => {
+  const h = signInPage();
+  await submitSignIn(h, "no-viewer");
+  await answerFirstLoad(h, (call) => call.respond(403, { error: "forbidden" }));
+  assertSignedOut(h);
+  assert.equal(h.$("auth-dialog").dataset.state, "forbidden");
+  assert.equal(h.$("auth-title").textContent, "Access denied");
+  assert.match(h.$("auth-message").textContent, /viewer role/);
+  assert.match(h.$("signin-error").textContent, /^Access denied: this token is valid, .*viewer role/);
+});
+
+test("sign-in: an empty token sends nothing; a repeated submit while verifying starts no second sign-in", async () => {
+  const h = signInPage();
+  await h.flush();
+  const before = h.calls.length;  // the page's own pre-sign-in check
+  const popups = countPopups(h);
+  await submitSignIn(h, "   ");
+  assert.equal(h.calls.length, before);
+  assert.equal(popups.shown, 0);
+  assert.equal(h.$("app").hidden, true);
+  await submitSignIn(h, "t0k3n");
+  await submitSignIn(h, "t0k3n");
+  await submitSignIn(h, "other");
+  assert.equal(popups.shown, 1);
+  assert.equal(h.sent("/api/summary") - before, 1);
+  assert.ok(h.calls.slice(before).every((c) => c.auth === "Bearer t0k3n"));
+});
+
+test("signed in: the API's 401 signs out with a message; a platform 401 or a network error keeps the session", async () => {
+  let h = signInPage();
+  await h.signIn();
+  h.$("refresh").fire("click");
+  await h.flush();
+  h.answer("/api/summary", ...UNAUTHENTICATED);  // e.g. the token was revoked from the users file
+  await h.flush();
+  assertSignedOut(h);
+  assert.match(h.$("signin-error").textContent, /^Signed out: the token was not accepted/);
+  for (const [name, fail, reason] of [["platform 401", (c) => c.respond(...PLATFORM_401), /stopped before it reached/],
+    ["network", (c) => c.fail(), /could not be reached/], ["server error", (c) => c.respond(502, { error: "bad_gateway" }), /bad_gateway/]]) {
+    h = signInPage();
+    await h.signIn();
+    h.$("refresh").fire("click");
+    await h.flush();
+    fail(h.open("/api/summary")[0]);
+    await h.flush();
+    assert.equal(h.$("app").hidden, false, name);  // still signed in: the token was not rejected
+    assert.match(h.$("status").textContent, reason, name);
+    assert.equal(h.$("status").classes.has("error"), true, name);
+    assert.match(h.$("history").innerHTML, /github-2-1/, name);  // the loaded data stays; Refresh retries
+  }
+});
+
+test("sign-out: the session ends and later requests never carry the old token", async () => {
+  const h = signInPage();
+  await h.signIn("first-token");
+  h.$("signout-confirm").fire("click");
+  await h.flush();
+  assertSignedOut(h);
+  assert.equal(h.$("signin-error").textContent, "");
+  const before = h.calls.length;
+  await h.signIn("second-token");
+  assert.ok(h.calls.slice(before).every((c) => c.auth !== "Bearer first-token"));
+  assert.ok(h.calls.slice(before).some((c) => c.auth === "Bearer second-token"));
 });
 
 

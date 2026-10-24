@@ -29,6 +29,16 @@
     constructor(status, code, retryAfter) { super(code); this.status = status; this.code = code; this.retryAfter = retryAfter; }
   }
 
+  // Only the dashboard API's own `401 unauthenticated` means the token was rejected. A 401 without it was
+  // answered in front of the API (for example by the hosting platform's sign-in) and says nothing about the
+  // token; `403 forbidden` means a known token whose account lacks the viewer role.
+  const rejected = (err) => err.status === 401 && err.code === "unauthenticated";
+  const forbidden = (err) => err.status === 403 && err.code === "forbidden";
+  const REJECTED = "Signed out: the token was not accepted by the dashboard API. Sign in again.";
+  const DENIED = "Access denied: the token was not accepted. Check it and sign in again.";
+  const FORBIDDEN = "Access denied: this token is valid, but its account may not view the dashboard " +
+    "(it needs the viewer role).";
+
   // `method` is GET except for the write requests: POST /api/fetch ("Check GitHub for new runs") and the
   // GitHub connection (POST /api/github/connect with the GitHub token as a JSON body, /disconnect).
   // `credentials: "same-origin"`: a hosting platform's own sign-in cookie for this origin (Vercel
@@ -70,7 +80,7 @@
     try {
       await request("/api/summary");  // not cached: before sign-in
     } catch (err) {
-      if (err.status === 401 && err.code === "unauthenticated") return;
+      if (rejected(err)) return;
       $("signin-error").textContent = R.errorMessage(err.code, window.location.origin);
     }
   }
@@ -120,15 +130,18 @@
   /* Loads the selected run. Each panel renders as soon as its own response arrives; a response
      for an earlier selection (the user clicked another run meanwhile) is ignored. `force`
      (Refresh, auto-refresh) asks the API again instead of reusing recent responses.
-     Resolves to "ok", "denied" (401: the token was rejected) or "error" (shown in the status
-     line) once summary, drifts, remediations and the unmanaged panel are in; the caller
-     lookup may still be running then and updates its fields and the status line itself. */
+     Resolves to "ok" once summary, drifts, remediations and the unmanaged panel are in, else to
+     "denied" (the token was rejected), "forbidden" (no viewer role) or "error" (`state.loadError`
+     says why; shown in the status line). Outside sign-in, "denied" and "forbidden" sign out; while
+     signing in, signIn() alone reports the outcome. The caller lookup may still be running on "ok"
+     and updates its fields and the status line itself. */
   async function load(force) {
     if (force === true) loader.invalidate();
     const loadId = ++state.loads;
     const run = state.run;
     const current = () => loadId === state.loads && Boolean(state.token);
-    const view = { run, plain: null, callers: null, callerState: "pending" };
+    const view = { run, plain: null, callers: null, callerState: "pending", failed: false };
+    state.loadError = null;
     state.loadingRun = run;
     setStatus("Loading…");
     $("refresh").setAttribute("aria-busy", "true");
@@ -149,19 +162,24 @@
     callers.then(() => {
       if (current() && state.summary) setStatus(statusLine());
     }, (err) => {
-      if (!current()) return;
-      if (err.status === 401) signOut(state.signingIn ? "" : "Sign-in failed: the token was not accepted.");
+      // A failed panel request already explains this load. The caller lookup carries the same token as
+      // the panels, so while signing in their answers alone decide the outcome (no sign-out here first).
+      if (!current() || view.failed) return;
+      if (rejected(err)) { if (!state.signingIn) signOut(REJECTED); }
       else setStatus("Caller recorded by Azure: " + R.errorMessage(err.code, window.location.origin), true);
     }).finally(finish);
     try {
-      await Promise.all(core);  // fails fast: a rejected token signs out without waiting for slower panels
+      await Promise.all(core);  // fails fast: a rejected token is known without waiting for slower panels
     } catch (err) {
       if (!current()) return "error";
-      if (err.status === 401) {  // while signing in the popup says "Access denied"; no second message
-        signOut(state.signingIn ? "" : "Sign-in failed: the token was not accepted.");
-        return "denied";
-      }
       if (err.status === 404 && run) { state.run = ""; return load(); }  // the run is gone
+      view.failed = true;
+      state.loadError = err.code;
+      const outcome = rejected(err) ? "denied" : forbidden(err) ? "forbidden" : "error";
+      if (outcome !== "error") {
+        if (!state.signingIn) signOut(outcome === "denied" ? REJECTED : FORBIDDEN);
+        return outcome;
+      }
       setStatus(R.errorMessage(err.code, window.location.origin), true);
       return "error";
     }
@@ -365,7 +383,7 @@
     } catch (err) {
       if (session !== state.session) return;
       setConnecting(false);
-      if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
+      if (rejected(err)) { signOut(REJECTED); return; }
       $("github-error").textContent = {
         network_error: "The dashboard server could not be reached. Try again.",
         fetch_in_progress: "A GitHub check is running. Try again when it finishes.",
@@ -395,7 +413,7 @@
     } catch (err) {
       if (session !== state.session) return;
       setConnecting(false);
-      if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
+      if (rejected(err)) { signOut(REJECTED); return; }
       $("github-error").textContent = err.code === "fetch_in_progress"
         ? "A GitHub check is running. Try again when it finishes." : "Could not disconnect (" + err.code + ").";
     }
@@ -412,7 +430,7 @@
       renderFetch();
       if (doc.status === "running") pollFetch();
     } catch (err) {
-      if (session === state.session && err.status === 401) signOut("Sign-in failed: the token was not accepted.");
+      if (session === state.session && rejected(err)) signOut(REJECTED);
       // otherwise: the button stays hidden; the rest of the dashboard is unaffected
     }
   }
@@ -438,7 +456,7 @@
           doc = await request("/api/fetch/status");
         } catch (err) {
           if (session !== state.session) return;
-          if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
+          if (rejected(err)) { signOut(REJECTED); return; }
           failures += 1;
           if (failures >= FETCH_POLL_FAILURES) { state.fetch.notice = "poll_failed"; renderFetch(); return; }
           delay = Math.min(delay * 2, FETCH_POLL_MAX_MS);
@@ -491,7 +509,7 @@
       pollFetch();
     } catch (err) {
       if (session !== state.session) return;
-      if (err.status === 401) { signOut("Sign-in failed: the token was not accepted."); return; }
+      if (rejected(err)) { signOut(REJECTED); return; }
       const refusal = { code: err.code, retryAfter: err.retryAfter };
       state.fetch.refusal = refusal;
       renderFetch();
@@ -516,40 +534,55 @@
     state.timer = $("auto-refresh").checked && state.token ? setInterval(() => load(true), REFRESH_MS) : null;
   }
 
-  // Sign-in popup: verifying -> granted (then the dashboard) or denied (Try again).
+  // Sign-in popup: verifying -> granted (then the dashboard), or denied / forbidden / error (Try again).
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const AUTH_TEXT = {
     verifying: ["Verifying token…", "Checking access with the dashboard API"],
     granted: ["Access granted", "Loading your drift data…"],
     denied: ["Access denied", "That token wasn’t accepted. Check it and try again."],
+    forbidden: ["Access denied", "This token is valid, but its account may not view the dashboard (it needs the viewer role)."],
+    error: ["Couldn’t load the dashboard", ""],  // the message says what failed
   };
+  const AUTH_FAILED = ["denied", "forbidden", "error"];
 
-  function setAuthState(name) {
+  function setAuthState(name, message) {
     const dialog = $("auth-dialog");
+    const failed = AUTH_FAILED.includes(name);
     dialog.dataset.state = name;
-    dialog.setAttribute("role", name === "denied" ? "alertdialog" : "dialog");
+    dialog.setAttribute("role", failed ? "alertdialog" : "dialog");
     $("auth-title").textContent = AUTH_TEXT[name][0];
-    $("auth-message").textContent = AUTH_TEXT[name][1];
-    $("auth-retry").hidden = name !== "denied";
+    $("auth-message").textContent = message || AUTH_TEXT[name][1];
+    $("auth-retry").hidden = !failed;
   }
 
+  /* Signed in only once the API has accepted the token AND every panel of the first load arrived
+     (an empty but valid dataset included). Otherwise nothing of the attempt is kept, the popup says
+     why, and so does the sign-in screen once the popup is closed. */
   async function signIn(token) {
+    if (state.signingIn) return;  // one sign-in at a time: a repeated submit changes nothing
     state.token = token;
     setAuthState("verifying");
     $("auth-dialog").showModal();
     state.signingIn = true;
-    const [result] = await Promise.all([load(), wait(900)]);  // the verify step stays readable on a fast API
-    state.signingIn = false;
-    if (result === "denied") {
-      setAuthState("denied");
+    let result = "error";
+    try {
+      [result] = await Promise.all([load(), wait(900)]);  // the verify step stays readable on a fast API
+    } finally {
+      state.signingIn = false;  // never stuck: a later sign-in must not be ignored
+    }
+    if (result !== "ok") {
+      const reason = R.errorMessage(state.loadError || "network_error", window.location.origin);
+      const failure = result === "denied" || result === "forbidden" ? result : "error";
+      signOut({ denied: DENIED, forbidden: FORBIDDEN,
+        error: "Couldn’t load the dashboard: " + reason + " The token was not rejected; try again." }[failure]);
+      setAuthState(failure, failure === "error" ? reason + " The token was not rejected; try again." : "");
       $("auth-retry").focus();
       return;
     }
-    if (result === "ok") {
-      setAuthState("granted");
-      await wait(1000);
-    }
-    $("auth-dialog").close();  // "error" too: the dashboard's status line explains it, as before
+    setAuthState("granted");
+    await wait(1000);
+    $("auth-dialog").close();
+    $("signin-error").textContent = "";  // an earlier attempt's reason does not outlive this sign-in
     $("signin").hidden = true;
     $("app").hidden = false;
     $("signout").hidden = false;
@@ -609,10 +642,10 @@
       if (token) signIn(token);
     });
     $("auth-dialog").addEventListener("cancel", (event) => {
-      if ($("auth-dialog").dataset.state !== "denied") event.preventDefault();  // no Escape mid-verification
+      if (!AUTH_FAILED.includes($("auth-dialog").dataset.state)) event.preventDefault();  // no Escape mid-verification
     });
     $("auth-dialog").addEventListener("close", () => {
-      if ($("auth-dialog").dataset.state === "denied") $("token").focus();
+      if (AUTH_FAILED.includes($("auth-dialog").dataset.state)) $("token").focus();
     });
     $("auth-retry").addEventListener("click", () => $("auth-dialog").close());
     $("token-toggle").addEventListener("click", () => setTokenVisible($("token").type === "password"));

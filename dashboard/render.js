@@ -60,6 +60,10 @@
         "dashboard-api server (by default 127.0.0.1, port 8000), not as a static file or file preview.";
     }
     if (code === "network_error") return "The dashboard API at " + origin + " could not be reached.";
+    if (code === "http_401") {  // a 401 without the API's own error code: refused in front of the API
+      return "The request was stopped before it reached the dashboard API (for example, the hosting " +
+        "platform's own sign-in has expired). Reload the page.";
+    }
     return "Could not load data (" + code + ").";
   }
 

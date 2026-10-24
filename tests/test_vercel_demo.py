@@ -140,6 +140,43 @@ class VercelEntryPointTest(unittest.TestCase):
         for response in (signed_in, client.get("/"), client.get("/app.js")):
             self.assertNotIn("set-cookie", response.headers)
 
+    def test_sign_in_matrix_never_reaches_report_data(self) -> None:
+        """The API half of the dashboard's sign-in outcomes: only a known token with the viewer role reads
+        reports; every refusal is a fixed error body; revocation applies on the next request; an unsafe users
+        file fails closed. (Tokens never expire: a token is revoked by removing its digest.)"""
+        users_file = os.path.join(self.tmp.name, "matrix-users.json")
+        viewer, no_role = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+
+        def write(entries: list, mode: int = 0o600) -> None:
+            with open(users_file, "w", encoding="utf-8") as fh:
+                json.dump({"users": entries}, fh)
+            os.chmod(users_file, mode)
+
+        no_role_user = {"name": "no-role", "token_sha256": auth.token_digest(no_role), "roles": []}
+        write([{"name": "viewer", "token_sha256": auth.token_digest(viewer), "roles": ["viewer"]}, no_role_user])
+        client = TestClient(self.index.create_demo_app(users_file=users_file))
+        refused = {"no header": {}, "empty token": {"Authorization": "Bearer "}, "scheme only": {"Authorization": "Bearer"},
+                   "basic scheme": {"Authorization": "Basic dmlld2VyOng="}, "token without scheme": {"Authorization": viewer},
+                   "unknown token": {"Authorization": f"Bearer {secrets.token_urlsafe(32)}"},
+                   "token with trailing junk": {"Authorization": f"Bearer {viewer} x"}}
+        for name, headers in refused.items():
+            for path in GET_ENDPOINTS:
+                response = client.get(path, headers=headers)
+                self.assertEqual((response.status_code, response.json()), (401, {"error": "unauthenticated"}),
+                                 f"{name}: {path}")
+        for path in GET_ENDPOINTS:  # a known token without the viewer role: authenticated, not authorized
+            response = client.get(path, headers={"Authorization": f"Bearer {no_role}"})
+            self.assertEqual((response.status_code, response.json()), (403, {"error": "forbidden"}), path)
+        signed_in = client.get("/api/summary", headers={"Authorization": f"bearer {viewer}"})  # scheme: any case
+        self.assertEqual(signed_in.status_code, 200)
+        self.assertIn(RUN_44, {run["report_id"] for run in signed_in.json()["history"]})
+        write([no_role_user])  # the viewer is revoked
+        response = client.get("/api/summary", headers={"Authorization": f"Bearer {viewer}"})
+        self.assertEqual((response.status_code, response.json()), (401, {"error": "unauthenticated"}))
+        write([no_role_user], mode=0o666)  # a users file that others may change is refused: fail closed
+        response = client.get("/api/summary", headers={"Authorization": f"Bearer {no_role}"})
+        self.assertEqual((response.status_code, response.json()), (503, {"error": "auth_unavailable"}))
+
     def test_viewer_reads_the_four_fixture_runs(self) -> None:
         client = self.client()
         summary = self.get(client, "/api/summary")
