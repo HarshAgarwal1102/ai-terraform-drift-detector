@@ -38,6 +38,12 @@
   const DENIED = "Access denied: the token was not accepted. Check it and sign in again.";
   const FORBIDDEN = "Access denied: this token is valid, but its account may not view the dashboard " +
     "(it needs the viewer role).";
+  // A browser refuses a header value with NUL, CR or LF or any character above U+00FF (the line breaks,
+  // curly quotes and dashes of pasted prose): the browser's fetch then fails before any request is sent, which
+  // must not read as "could not be reached". Such text can never arrive as a token: denied without a request.
+  const sendable = (token) => !/[\0\r\n]|[^\0-\u00ff]/.test(token);
+  const NOT_A_TOKEN = "Access denied: that is not a valid token (it has line breaks or characters such as " +
+    "curly quotes or dashes). Nothing was sent to the dashboard API.";
 
   // `method` is GET except for the write requests: POST /api/fetch ("Check GitHub for new runs") and the
   // GitHub connection (POST /api/github/connect with the GitHub token as a JSON body, /disconnect).
@@ -541,9 +547,10 @@
     granted: ["Access granted", "Loading your drift data…"],
     denied: ["Access denied", "That token wasn’t accepted. Check it and try again."],
     forbidden: ["Access denied", "This token is valid, but its account may not view the dashboard (it needs the viewer role)."],
+    invalid: ["Access denied", "That isn’t a valid token: it has line breaks or characters (such as curly quotes or dashes) a token never has. Nothing was sent."],
     error: ["Couldn’t load the dashboard", ""],  // the message says what failed
   };
-  const AUTH_FAILED = ["denied", "forbidden", "error"];
+  const AUTH_FAILED = ["denied", "forbidden", "invalid", "error"];
 
   function setAuthState(name, message) {
     const dialog = $("auth-dialog");
@@ -560,6 +567,13 @@
      why, and so does the sign-in screen once the popup is closed. */
   async function signIn(token) {
     if (state.signingIn) return;  // one sign-in at a time: a repeated submit changes nothing
+    if (!sendable(token)) {  // the browser could not send it: denied at once, nothing is sent
+      signOut(NOT_A_TOKEN);
+      setAuthState("invalid");
+      $("auth-dialog").showModal();
+      $("auth-retry").focus();
+      return;
+    }
     state.token = token;
     setAuthState("verifying");
     $("auth-dialog").showModal();

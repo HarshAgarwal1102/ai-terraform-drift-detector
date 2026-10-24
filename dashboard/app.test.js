@@ -60,7 +60,13 @@ function harness(options) {
   const delays = [];  // every setTimeout delay the controller asked for (timers still fire at once)
   const calls = [];
   const auto = new Map();
-  const fetch = (url, options) => new Promise((resolve, reject) => {
+  const fetch = (url, options) => {
+    // As a browser does: a header value it cannot send (a line break, a character above U+00FF) makes fetch()
+    // fail with a TypeError before any request exists. Node's Headers applies the same rule.
+    try { new Headers(options.headers); } catch (err) { return Promise.reject(err); }
+    return sendRequest(url, options);
+  };
+  const sendRequest = (url, options) => new Promise((resolve, reject) => {
     const call = { path: url, method: options.method || "GET", auth: options.headers.Authorization || null,
       credentials: options.credentials, cache: options.cache, answered: false };
     call.respond = (status, body, hdrs) => {
@@ -417,6 +423,44 @@ test("sign-in: server, network and platform failures are a retryable error, neve
     assert.equal(h.$("app").hidden, false, name);
     assert.equal(h.$("signin-error").textContent, "", name);
   }
+});
+
+test("sign-in: pasted text the browser cannot send is denied at once, never reported as unreachable", async () => {
+  // Observed live: a pasted paragraph showed "could not be reached", because fetch() refused the header and
+  // no request was ever sent. Dummy text only; never a real token.
+  const paragraphs = [["line break", "Terraform drift happens.\nA second line follows."],
+    ["curly apostrophe", "It\u2019s a paragraph about drift, not a token"], ["em dash", "Drift \u2014 a paragraph"]];
+  for (const [name, text] of paragraphs) {
+    const h = signInPage();
+    await h.flush();
+    const before = h.calls.length;
+    await submitSignIn(h, text);
+    assertSignedOut(h);
+    assert.equal(h.calls.length, before, name);  // nothing was sent
+    const dialog = h.$("auth-dialog");
+    assert.equal(dialog.open, true, name);
+    assert.equal(dialog.dataset.state, "invalid", name);
+    assert.equal(dialog.getAttribute("role"), "alertdialog", name);
+    assert.equal(h.$("auth-title").textContent, "Access denied", name);
+    assert.match(h.$("auth-message").textContent, /isn’t a valid token.*Nothing was sent/, name);
+    assert.match(h.$("signin-error").textContent, /^Access denied: that is not a valid token/, name);
+    for (const shown of [h.$("auth-message").textContent, h.$("signin-error").textContent]) {
+      assert.doesNotMatch(shown, /could not be reached|not rejected|try again\.$/, name);
+      assert.ok(!shown.includes(text), name);  // the pasted text is never echoed
+    }
+    h.$("auth-retry").fire("click");
+    assert.equal(dialog.open, false, name);
+    assert.match(h.$("signin-error").textContent, /^Access denied/, name);  // the reason stays on screen
+    await h.signIn();  // a real token still works afterwards
+    assert.equal(h.$("app").hidden, false, name);
+  }
+  const h = signInPage();  // a paragraph the browser can send reaches the API, and the API denies it
+  const sendable = "Terraform drift happens when nobody notices it for weeks";
+  await submitSignIn(h, sendable);
+  assert.ok(h.calls.some((c) => c.auth === "Bearer " + sendable));
+  await answerFirstLoad(h, (call) => call.respond(...UNAUTHENTICATED));
+  assert.equal(h.$("auth-dialog").dataset.state, "denied");
+  assert.match(h.$("signin-error").textContent, /^Access denied: the token was not accepted/);
 });
 
 test("sign-in: a valid token whose account lacks the viewer role is denied as such", async () => {
