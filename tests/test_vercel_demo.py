@@ -192,6 +192,23 @@ class VercelEntryPointTest(unittest.TestCase):
         for run_id in REAL_RUNS:
             self.assertEqual(history[run_id]["unmanaged"]["available"], False, run_id)  # 9B.6 runs had no inventory
 
+    def test_run_list_opens_with_a_successful_run_and_keeps_every_run(self) -> None:
+        """Newest first (store: finished_at, then run id): run #44 leads the list on its own recorded
+        status (detection succeeded, plan exit 0, no failure, no drift); every run still opens."""
+        client = self.client()
+        history = self.get(client, "/api/summary").json()["history"]
+        self.assertEqual([run["report_id"] for run in history],
+                         [RUN_44, "github-38111406531-1", "github-38109121618-1", "github-38105671846-1"])
+        finished = [run["finished_at"] for run in history]
+        self.assertEqual(finished, sorted(finished, reverse=True))
+        top = history[0]
+        self.assertEqual((top["report_id"], top["outcome"], top["has_drift"], top["drifted_resources"]),
+                         (RUN_44, "succeeded", False, 0))
+        run = self.get(client, f"/api/reports/{RUN_44}").json()["artifacts"]["drift_report"]["run"]
+        self.assertEqual((run["detection_outcome"], run["plan_exit_code"]), ("succeeded", 0))
+        for entry in history:
+            self.assertEqual(self.get(client, f"/api/reports/{entry['report_id']}").status_code, 200, entry["report_id"])
+
     def test_the_three_original_runs_are_unchanged_by_the_added_run(self) -> None:
         demo = self.client()
         original = TestClient(app_module.create_app(data_dir=os.path.join(FIXTURES, "real_9b6"), users_file=self.users_file,
