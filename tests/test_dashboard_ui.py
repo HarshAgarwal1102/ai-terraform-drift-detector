@@ -85,6 +85,22 @@ def test_api_calls_go_through_the_backend_only():
     assert '"include"' not in app_js and "withCredentials" not in app_js
 
 
+def test_every_sign_in_failure_is_styled_as_a_failure():
+    """The sign-in popup's failure look (red ring, cross and title; no spinner, no progress bar) follows
+    data-failed, which app.js sets for every state in AUTH_FAILED. A rule for one failure state alone would leave
+    the others looking like "Verifying token…" (as it did for invalid, forbidden and error)."""
+    code = browser_code()
+    css, app_js = code["styles.css"], code["app.js"]
+    failed_states = re.findall(r'"(\w+)"', re.search(r"const AUTH_FAILED = \[([^\]]*)\]", app_js).group(1))
+    assert set(failed_states) >= {"denied", "forbidden", "invalid", "error"}
+    assert "dialog.dataset.failed = String(failed);" in app_js
+    for target in (".auth-sweep", ".auth-ring", ".auth-cross", "#auth-title", ".auth-bar"):
+        assert re.search(r'\.popup\[data-failed="true"\] ' + re.escape(target) + r"\b", css), target
+    assert re.search(r'\.popup\[data-failed="true"\] \{ animation: auth-shake', css)
+    for state in failed_states:
+        assert f'data-state="{state}"' not in css, state
+
+
 @pytest.fixture
 def client(tmp_path):
     pytest.importorskip("fastapi")

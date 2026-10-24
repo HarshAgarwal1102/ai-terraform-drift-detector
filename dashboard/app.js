@@ -556,6 +556,7 @@
     const dialog = $("auth-dialog");
     const failed = AUTH_FAILED.includes(name);
     dialog.dataset.state = name;
+    dialog.dataset.failed = String(failed);  // styles.css: every failure gets the red cross, never the spinner
     dialog.setAttribute("role", failed ? "alertdialog" : "dialog");
     $("auth-title").textContent = AUTH_TEXT[name][0];
     $("auth-message").textContent = message || AUTH_TEXT[name][1];

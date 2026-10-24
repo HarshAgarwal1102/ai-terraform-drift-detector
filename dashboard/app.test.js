@@ -463,6 +463,29 @@ test("sign-in: pasted text the browser cannot send is denied at once, never repo
   assert.match(h.$("signin-error").textContent, /^Access denied: the token was not accepted/);
 });
 
+test("sign-in popup: every failure is marked failed (red cross), never left looking like 'verifying'", async () => {
+  // Observed live: "Access denied" for pasted text showed the verifying spinner, because styles.css only knew
+  // the "denied" state. The failure look now follows data-failed, set for every failure state.
+  const outcomes = [["denied", (c) => c.respond(...UNAUTHENTICATED)], ["forbidden", (c) => c.respond(403, { error: "forbidden" })],
+    ["error", (c) => c.respond(500, { error: "internal" })], ["error", (c) => c.respond(...PLATFORM_401)]];
+  for (const [state, answer] of outcomes) {
+    const h = signInPage();
+    await submitSignIn(h, "t0k3n");
+    assert.equal(h.$("auth-dialog").dataset.state, "verifying", state);
+    assert.equal(h.$("auth-dialog").dataset.failed, "false", state);  // verifying keeps its spinner
+    await answerFirstLoad(h, answer);
+    assert.equal(h.$("auth-dialog").dataset.state, state);
+    assert.equal(h.$("auth-dialog").dataset.failed, "true", state);
+  }
+  const h = signInPage();
+  await submitSignIn(h, "pasted\ntext");
+  assert.equal(h.$("auth-dialog").dataset.state, "invalid");
+  assert.equal(h.$("auth-dialog").dataset.failed, "true");
+  await h.signIn();  // the next attempt starts unmarked and ends granted
+  assert.equal(h.$("auth-dialog").dataset.state, "granted");
+  assert.equal(h.$("auth-dialog").dataset.failed, "false");
+});
+
 test("sign-in: a valid token whose account lacks the viewer role is denied as such", async () => {
   const h = signInPage();
   await submitSignIn(h, "no-viewer");

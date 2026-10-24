@@ -397,20 +397,20 @@ dialog.popup::backdrop { background: rgba(5, 7, 10, 0.6); }
 .auth-cross { stroke: var(--error); }
 .auth-bar { width: 100%; height: 4px; border-radius: 2px; background: var(--sw-bezel); overflow: hidden; }
 .auth-bar span { display: block; width: 0; height: 100%; border-radius: 2px; background: var(--accent); }
-.popup[data-state="granted"] .auth-sweep, .popup[data-state="denied"] .auth-sweep { opacity: 0; }
+.popup[data-state="granted"] .auth-sweep, .popup[data-failed="true"] .auth-sweep { opacity: 0; }
 .popup[data-state="granted"] .auth-ring { border-color: var(--ok); box-shadow: inset 0 3px 8px var(--sw-inset),
   0 0 0 6px color-mix(in srgb, var(--ok) 14%, transparent), 0 0 24px color-mix(in srgb, var(--ok) 35%, transparent); }
-.popup[data-state="denied"] .auth-ring { border-color: var(--error); box-shadow: inset 0 3px 8px var(--sw-inset),
+.popup[data-failed="true"] .auth-ring { border-color: var(--error); box-shadow: inset 0 3px 8px var(--sw-inset),
   0 0 0 6px color-mix(in srgb, var(--error) 14%, transparent), 0 0 24px color-mix(in srgb, var(--error) 35%, transparent); }
-.popup[data-state="granted"] .auth-check, .popup[data-state="denied"] .auth-cross { display: block;
+.popup[data-state="granted"] .auth-check, .popup[data-failed="true"] .auth-cross { display: block;
   animation: auth-draw 0.45s ease-out 0.1s forwards; }
 @keyframes auth-draw { to { stroke-dashoffset: 0; } }
 .popup[data-state="granted"] #auth-title { color: var(--ok); }
-.popup[data-state="denied"] #auth-title { color: var(--error); }
+.popup[data-failed="true"] #auth-title { color: var(--error); }
 .popup[data-state="granted"] .auth-bar span { animation: auth-fill 0.9s ease-out forwards; }
 @keyframes auth-fill { to { width: 100%; } }
-.popup[data-state="denied"] .auth-bar { display: none; }
-.popup[data-state="denied"] { animation: auth-shake 0.45s ease-out 0.1s; }
+.popup[data-failed="true"] .auth-bar { display: none; }
+.popup[data-failed="true"] { animation: auth-shake 0.45s ease-out 0.1s; }
 @keyframes auth-shake {
   20% { transform: translateX(-8px); } 40% { transform: translateX(7px); }
   60% { transform: translateX(-5px); } 80% { transform: translateX(3px); }
@@ -433,8 +433,8 @@ dialog.popup::backdrop { background: rgba(5, 7, 10, 0.6); }
 .key-danger:active { transform: translateY(2px);
   box-shadow: 0 1px 0 #a3521f, 0 2px 4px var(--sw-drop), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 @media (prefers-reduced-motion: reduce) {
-  .auth-sweep, .popup-icon, .popup[data-state="denied"], .key-danger { animation: none; transition: none; }
-  .popup[data-state="granted"] .auth-check, .popup[data-state="denied"] .auth-cross { animation: none;
+  .auth-sweep, .popup-icon, .popup[data-failed="true"], .key-danger { animation: none; transition: none; }
+  .popup[data-state="granted"] .auth-check, .popup[data-failed="true"] .auth-cross { animation: none;
     stroke-dashoffset: 0; }
   .popup[data-state="granted"] .auth-bar span { animation: none; width: 100%; }
 }
