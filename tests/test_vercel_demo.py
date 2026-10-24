@@ -284,9 +284,40 @@ class DeployedRequirementsTest(unittest.TestCase):
         with open(os.path.join(ROOT, ".python-version"), encoding="utf-8") as fh:
             self.assertEqual(fh.read().strip(), "3.13")  # the pydantic-core wheels hashed in requirements.txt
 
+    def test_vercel_json_fits_the_schema_limits(self) -> None:
+        """https://openapi.vercel.sh/vercel.json: `excludeFiles` is one string of at most 256 characters (Vercel
+        refuses the whole file otherwise) and a `functions` key is at most 256 characters."""
+        with open(os.path.join(ROOT, "vercel.json"), encoding="utf-8") as fh:
+            functions = json.load(fh)["functions"]
+        for key, spec in functions.items():
+            self.assertLessEqual(len(key), 256)
+            self.assertIsInstance(spec["excludeFiles"], str)
+            self.assertLessEqual(len(spec["excludeFiles"]), 256)
+
+
+def _expand_braces(pattern: str) -> list[str]:
+    """Brace expansion as minimatch applies it: comma lists, nested groups (`{a,b/{c,d}}`)."""
+    depth = start = 0
+    for i, char in enumerate(pattern):
+        if char == "{":
+            depth, start = depth + 1, i if depth == 0 else start
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                parts, level, last = [], 0, start + 1
+                for j in range(start + 1, i):
+                    level += {"{": 1, "}": -1}.get(pattern[j], 0)
+                    if pattern[j] == "," and level == 0:
+                        parts.append(pattern[last:j])
+                        last = j + 1
+                parts.append(pattern[last:i])
+                return [x for part in parts for x in _expand_braces(pattern[:start] + part + pattern[i + 1:])]
+    return [pattern]
+
 
 def _glob_regex(pattern: str) -> re.Pattern:
-    """A glob of the `excludeFiles` form used here (`**/`, `**`, `*`, one level of braces) as a regex."""
+    """One brace-free glob of the `excludeFiles` form used here (`**/`, `**`, `*`, `[!x]`) as a regex, with
+    minimatch's `dot: true` (glob applies ignore patterns that way): `*` also matches a leading dot."""
     out, i = "", 0
     while i < len(pattern):
         if pattern.startswith("**/", i):
@@ -295,6 +326,10 @@ def _glob_regex(pattern: str) -> re.Pattern:
             out, i = out + ".*", i + 2
         elif pattern[i] == "*":
             out, i = out + "[^/]*", i + 1
+        elif pattern[i] == "[":
+            end = pattern.index("]", i)
+            body = pattern[i + 1:end]
+            out, i = out + "[" + ("^" + body[1:] if body.startswith("!") else body) + "]", end + 1
         else:
             out, i = out + re.escape(pattern[i]), i + 1
     return re.compile(out + r"\Z")
@@ -303,7 +338,7 @@ def _glob_regex(pattern: str) -> re.Pattern:
 def excluded_by_vercel_json(path: str) -> bool:
     with open(os.path.join(ROOT, "vercel.json"), encoding="utf-8") as fh:
         spec = json.load(fh)["functions"]["index.py"]["excludeFiles"]
-    return any(_glob_regex(p).match(path) for p in spec.strip("{}").split(","))
+    return any(_glob_regex(p).match(path) for p in _expand_braces(spec))
 
 
 RUNTIME_FILES = ("index.py", "deploy/vercel/users.json", "dashboard/index.html", "dashboard/app.js",
@@ -356,7 +391,11 @@ class DeploymentContentsTest(unittest.TestCase):
                      "x/terraform.tfstate", "a/b/dev.tfstate.backup", "tfplan", "a/plan.json", "a/.env",
                      "a/.env.local", "scripts/fetch_dashboard_data.py", "src/ai_engine/llm.py", "tests/test_cli.py",
                      "tests/fixtures/plan_evidence/in_sync/plan.sanitized.json", "dashboard/app.test.js",
-                     "PROJECT_PLAN.md", "aitdd-l1-backup-2026-10-19.dmg", ".github/workflows/tests.yml"):
+                     "PROJECT_PLAN.md", "aitdd-l1-backup-2026-10-19.dmg", ".github/workflows/tests.yml",
+                     ".artifacts/dashboard-local/vercel-demo-viewer-token.txt", "terraform.tfstate", "a/x.tfplan",
+                     "x/.terraform/terraform.tfstate", "a/secret.auto.tfvars.json", "src/dashboard_api/.env.production",
+                     "a/client.key", "a/id.pem", "cert.pfx", ".coverage.host.1", "tests/corpora/guards.json",
+                     "tests/fixtures/security_plans/nsg_open_inbound/plan.synthetic.json", "requirements.txt"):
             self.assertTrue(excluded_by_vercel_json(path), path)
 
 
