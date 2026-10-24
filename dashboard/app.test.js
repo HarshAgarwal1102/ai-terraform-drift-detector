@@ -62,7 +62,7 @@ function harness(options) {
   const auto = new Map();
   const fetch = (url, options) => new Promise((resolve) => {
     const call = { path: url, method: options.method || "GET", auth: options.headers.Authorization || null,
-      answered: false };
+      credentials: options.credentials, cache: options.cache, answered: false };
     call.respond = (status, body, hdrs) => {
       call.answered = true;
       resolve({ ok: status >= 200 && status < 300, status, json: async () => body,
@@ -111,6 +111,22 @@ function harness(options) {
   }
   return { $, R, calls, auto, ctx, open, sent, answer, click, flush, signIn, autoAnswer, delays };
 }
+
+test("every API request is same-origin, uncached, and sends cookies only to this origin", async () => {
+  // A protected Vercel deployment answers a request without its sign-in cookie with its own 401 before the
+  // dashboard API sees it, so `omit` broke the deployed dashboard; `include` would also send cookies to
+  // other origins. The bearer header stays the API's only sign-in.
+  const h = harness();
+  await h.signIn();
+  h.click("github-2-1");
+  await h.flush();
+  assert.ok(h.calls.length >= 6);
+  for (const call of h.calls) {
+    assert.match(call.path, /^\/api\//);
+    assert.equal(call.credentials, "same-origin", call.path);
+    assert.equal(call.cache, "no-store", call.path);
+  }
+});
 
 test("run click: the four panels' requests start in parallel, unchanged summary is not refetched", async () => {
   const h = harness();

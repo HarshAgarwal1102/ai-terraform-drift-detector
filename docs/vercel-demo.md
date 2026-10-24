@@ -14,7 +14,7 @@ sign-in or Terraform state is involved.
 | `deploy/vercel/requirements.txt` | The 11 runtime packages (FastAPI closure), versions from `ci/*-constraints.txt`, hash-pinned. |
 | `.python-version` | Python 3.13, the interpreter the pins were resolved and tested on. |
 | `deploy/vercel/users.json` | One account, `demo-viewer`, role `viewer`, SHA-256 digest only. |
-| `.vercelignore` | Allowlist of what `vercel deploy` may upload from a checkout. |
+| `.vercelignore` | Allowlist of the files a deployment may contain (applied to `vercel deploy` and Git deployments). |
 | `scripts/new_vercel_demo_token.py` | Creates or rotates the demo token (never uploaded). |
 
 Why a custom install command: when `pyproject.toml` is present, Vercel's Python builder runs `uv sync` on it
@@ -82,12 +82,23 @@ and Vercel's build keep it at 0644.
 5. In the build log, check for `Successfully installed … fastapi-0.143.3 …` (the custom install command) and
    no errors about missing modules.
 
-Deployment Protection: the dashboard calls its API with `credentials: "omit"`, so Vercel Authentication's
-cookie never reaches `/api/*`. On a deployment protected by Vercel Authentication, the page may load while
-every API call is stopped by Vercel, and the sign-in screen shows a connection error. If so, test on a URL
-without Vercel Authentication (the production domain under Standard Protection), or turn Vercel
-Authentication off for this project. The dashboard's own bearer sign-in still protects every `/api/*`
-endpoint.
+Deployment Protection: Preview URLs are protected by Vercel Authentication by default. Only signed-in members
+of your Vercel team can open them, and everyone else is sent to Vercel's login. The dashboard calls its API with
+`credentials: "same-origin"`, so Vercel's sign-in cookie reaches `/api/*` as well and both layers apply:
+Vercel's login, then the dashboard's bearer sign-in. (With `credentials: "omit"`, every API call was answered
+by Vercel's own `401 {"message":"Protected by Vercel Authentication"}` before the API saw it, and the sign-in
+screen showed `Could not load data (http_401)`.) The API never reads cookies and never sets one. To show the
+demo to people without a Vercel account, turn Vercel Authentication off for this project. The dashboard's
+bearer sign-in still protects every `/api/*` endpoint.
+
+Vercel Toolbar: on Preview deployments Vercel adds a `https://vercel.live/…/feedback.js` script, which the
+dashboard's Content-Security-Policy (`script-src 'self'`) blocks. That only logs a console error, and nothing
+in the dashboard depends on it. To stop it, turn the toolbar off under **Settings → General → Vercel Toolbar →
+Preview: Off**, or set `VERCEL_PREVIEW_FEEDBACK_ENABLED=0` for the `vercel-demo` branch. Do not widen the CSP
+for it.
+
+`.vercelignore` applies to Git deployments too: the build log says `Found .vercelignore` and lists the ignored
+files.
 
 ## Verify
 

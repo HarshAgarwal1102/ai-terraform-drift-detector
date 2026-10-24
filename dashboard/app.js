@@ -31,10 +31,13 @@
 
   // `method` is GET except for the write requests: POST /api/fetch ("Check GitHub for new runs") and the
   // GitHub connection (POST /api/github/connect with the GitHub token as a JSON body, /disconnect).
+  // `credentials: "same-origin"`: a hosting platform's own sign-in cookie for this origin (Vercel
+  // Authentication on a protected deployment) must reach /api/* too. The API never reads cookies: the
+  // bearer header is its only sign-in, and nothing is ever sent to another origin.
   async function request(path, method, body) {
     const headers = { Accept: "application/json" };
     if (state.token) headers.Authorization = "Bearer " + state.token;
-    const options = { method: method || "GET", headers, cache: "no-store", credentials: "omit",
+    const options = { method: method || "GET", headers, cache: "no-store", credentials: "same-origin",
       referrerPolicy: "no-referrer" };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";

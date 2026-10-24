@@ -79,7 +79,10 @@ def test_api_calls_go_through_the_backend_only():
     assert "encodeURIComponent(state.run)" in app_js
     assert app_js.count("fetch(") == 1
     assert "fetch(" not in browser_code()["loader.js"]  # the loader only wraps app.js's request function
-    assert 'credentials: "omit"' in app_js and 'cache: "no-store"' in app_js
+    # same-origin: a platform sign-in cookie (Vercel Authentication) reaches /api/*; never "include".
+    options = re.search(r"const options = \{[^}]*\}", app_js).group(0)  # the one fetch's options
+    assert 'credentials: "same-origin"' in options and 'cache: "no-store"' in options
+    assert '"include"' not in app_js and "withCredentials" not in app_js
 
 
 @pytest.fixture

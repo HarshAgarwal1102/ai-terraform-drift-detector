@@ -101,6 +101,22 @@ class VercelEntryPointTest(unittest.TestCase):
         for path in ("/api/fetch", "/api/github/disconnect"):
             self.assertEqual(client.post(path).status_code, 401, path)
 
+    def test_cookies_grant_no_access_and_none_are_set(self) -> None:
+        """The UI sends same-origin cookies (Vercel Authentication's own sign-in cookie must pass the protected
+        deployment); the API ignores every cookie: only the bearer header signs in, and it never sets one."""
+        client = self.client()
+        cookie = {"Cookie": f"_vercel_jwt={secrets.token_urlsafe(32)}; session=viewer; token={self.tokens['viewer']}"}
+        for path in GET_ENDPOINTS:
+            response = client.get(path, headers=cookie)
+            self.assertEqual((response.status_code, response.json()), (401, {"error": "unauthenticated"}), path)
+            self.assertNotIn("set-cookie", response.headers, path)
+        response = client.post("/api/fetch", headers=dict(cookie, Origin="http://testserver"))
+        self.assertEqual(response.status_code, 401)
+        signed_in = client.get("/api/summary", headers=dict(cookie, Authorization=f"Bearer {self.tokens['viewer']}"))
+        self.assertEqual(signed_in.status_code, 200)
+        for response in (signed_in, client.get("/"), client.get("/app.js")):
+            self.assertNotIn("set-cookie", response.headers)
+
     def test_viewer_reads_the_three_fixture_runs(self) -> None:
         client = self.client()
         summary = self.get(client, "/api/summary")
