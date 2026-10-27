@@ -16,6 +16,12 @@
 #   RUNNER_TEMP          required; a NEW directory $RUNNER_TEMP/auth-test is created
 #   TF_DIR               Terraform root (default: terraform/environments/dev)
 #   TERRAFORM_VERSION    pinned Terraform version (default: 1.14.7)
+#   BACKEND_CONFIG       backend settings file of the current account (CI: written by
+#                        scripts/resolve_backend_config.sh), passed as -backend-config.
+#                        init ALWAYS runs with -reconfigure: an initialized folder keeps
+#                        the backend of its last init (possibly another account's), and
+#                        a plain init would silently reuse it. Without this file the
+#                        partial backend (dev/backend.tf) fails. Never -migrate-state.
 #   GITHUB_STEP_SUMMARY  optional; the same fixed lines are appended
 #
 # Output (stdout) on success, exit 0:
@@ -92,6 +98,7 @@ ROOT_DIR="$(CDPATH='' cd -- "${SCRIPT_DIR}/.." && pwd)"
 TF_DIR="${TF_DIR:-${ROOT_DIR}/terraform/environments/dev}"
 TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.14.7}"
 VAR_FILE="dev.tfvars"
+BACKEND_CONFIG="${BACKEND_CONFIG:-}"
 
 # -----------------------------------------------
 # Preflight
@@ -100,6 +107,9 @@ VAR_FILE="dev.tfvars"
 command -v terraform >/dev/null 2>&1 || fail preflight_failed
 command -v jq >/dev/null 2>&1 || fail preflight_failed
 [ -f "${TF_DIR}/${VAR_FILE}" ] || fail preflight_failed
+if [ -n "${BACKEND_CONFIG}" ]; then
+  [ -f "${BACKEND_CONFIG}" ] && [ -r "${BACKEND_CONFIG}" ] && [ ! -L "${BACKEND_CONFIG}" ] || fail preflight_failed
+fi
 # TF_CLI_ARGS* would silently inject flags (e.g. -lock=false, -target, -var).
 for v in TF_CLI_ARGS TF_CLI_ARGS_init TF_CLI_ARGS_validate TF_CLI_ARGS_plan TF_CLI_ARGS_show; do
   [ -z "${!v:-}" ] || fail preflight_failed
@@ -121,8 +131,12 @@ actual_version="$(printf '%s' "${version_json}" | jq -r '.terraform_version // e
 # -----------------------------------------------
 # Init, validate, plan, show (output to runner-local files only)
 # -----------------------------------------------
+# -reconfigure always: never the backend an earlier init stored (a plain init silently reuses
+# it), never a state migration. Without BACKEND_CONFIG the partial backend fails instead.
+init_args=(-input=false -no-color -reconfigure)
+[ -z "${BACKEND_CONFIG}" ] || init_args+=("-backend-config=${BACKEND_CONFIG}")
 rc=0
-terraform -chdir="${TF_DIR}" init -input=false -no-color > "${LOG_DIR}/init.log" 2>&1 || rc=$?
+terraform -chdir="${TF_DIR}" init "${init_args[@]}" > "${LOG_DIR}/init.log" 2>&1 || rc=$?
 [ "${rc}" -eq 0 ] || fail init_failed
 
 rc=0

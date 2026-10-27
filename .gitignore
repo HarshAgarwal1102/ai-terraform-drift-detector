@@ -45,6 +45,12 @@ crash.*.log
 .env
 .env.*
 
+# The active Azure account (scripts/onboard_azure_account.sh --config): its tenant,
+# subscription and client IDs stay on your machine. Only the template is committed.
+# Any name or backup of it (azure-account.json.bak, azure-account.2026-10.json, ...).
+config/azure-account*
+!config/azure-account.example.json
+
 # -------------------------------------------------
 # OS / Editor
 # -------------------------------------------------

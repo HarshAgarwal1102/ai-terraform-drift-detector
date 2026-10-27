@@ -535,7 +535,8 @@ def test_azure_login_only_on_trusted_events_after_offline_checks(auth_wf):
     assert job["needs"] == "offline-validate"
     assert job["permissions"] == {"id-token": "write", "contents": "read"}
     assert [s["name"] for s in job["steps"]] == ["Checkout Code", "Azure OIDC Login", "Verify Azure OIDC Authentication",
-                                                 "Setup Terraform", "Validate Dev Environment Configuration"]
+                                                 "Verify Terraform State Storage", "Setup Terraform",
+                                                 "Validate Dev Environment Configuration"]
     assert _steps(job)["Checkout Code"]["with"] == {"persist-credentials": False}  # F-7: no token left in .git/config
     for name, other in auth_wf["jobs"].items():
         if name != "validate-and-plan":
@@ -550,7 +551,16 @@ def test_auth_test_uses_the_real_terraform_binary_and_the_script(auth_wf):
     assert dev["env"] == {"ARM_CLIENT_ID": "${{ secrets.AZURE_CLIENT_ID }}",
                           "ARM_TENANT_ID": "${{ secrets.AZURE_TENANT_ID }}",
                           "ARM_SUBSCRIPTION_ID": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-                          "ARM_USE_OIDC": "true", "ARM_USE_AZUREAD": "true"}
+                          "ARM_USE_OIDC": "true", "ARM_USE_AZUREAD": "true",
+                          "BACKEND_CONFIG": "${{ runner.temp }}/backend.hcl"}  # the file the guard verified
+    guard = steps["Verify Terraform State Storage"]
+    assert guard["run"].strip() == "./scripts/resolve_backend_config.sh"
+    assert guard["env"] == {"TFSTATE_RESOURCE_GROUP": "${{ vars.TFSTATE_RESOURCE_GROUP }}",
+                            "TFSTATE_STORAGE_ACCOUNT": "${{ vars.TFSTATE_STORAGE_ACCOUNT }}",
+                            "TFSTATE_CONTAINER": "${{ vars.TFSTATE_CONTAINER }}",
+                            "TFSTATE_KEY": "${{ vars.TFSTATE_KEY }}",
+                            "EXPECTED_SUBSCRIPTION_ID": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+                            "BACKEND_CONFIG": "${{ runner.temp }}/backend.hcl"}
     text = AUTH_WORKFLOW.read_text(encoding="utf-8")
     assert "upload-artifact" not in text and "lock-timeout" not in text
     for where, run in _run_blocks(auth_wf):

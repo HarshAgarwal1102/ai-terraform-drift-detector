@@ -575,7 +575,7 @@ reverted (18/18 checks).
 | **Remote Terraform state** | State stored in Azure instead of on my laptop | Shared, durable, versioned, lockable; GitHub Actions can read it |
 | **Azure Storage Account** `aitddtfstatesa001` | Holds the state blob | HTTPS only, TLS 1.2, no public blob access, blob versioning, 7-day soft delete |
 | **State container** `tfstate` | Private blob container | The dev state file is the blob `dev.tfstate` |
-| **AzureRM backend** (`backend.tf`) | Tells Terraform where the state lives | Points `dev` at `aitdd-tfstate-rg` / `aitddtfstatesa001` / `tfstate` / `dev.tfstate` |
+| **AzureRM backend** (`backend.tf`) | Tells Terraform where the state lives | A partial backend: the location (first account: `aitdd-tfstate-rg` / `aitddtfstatesa001` / `tfstate` / `dev.tfstate`) is supplied at init from the `TFSTATE_*` repository variables, after a check that it belongs to the signed-in subscription ([account switching](azure-account-switching.md)) |
 | **State migration** (Task 2.4) | Moving local state into the remote backend | In practice there was **no local state** to move: the backend started as an empty remote state, and Task 2.4a then deployed the Resource Group through it |
 | **GitHub Actions OIDC** | GitHub gets a short-lived token instead of a stored password | No long-lived secret anywhere |
 | **Microsoft Entra ID** | Azure's identity service | Hosts the app registration `aitdd-github-oidc`, which trusts GitHub's token for the `main` branch only |
@@ -625,7 +625,7 @@ human-approved remediation (Phase 11).
 |---|---|---|---|
 | 2.1 | Validate bootstrap config offline | Catch errors before touching Azure | 🟢 |
 | 2.2 | Deploy state infrastructure (RG, storage account, container) | Somewhere safe to keep state | 🟢 |
-| 2.3 | Verify `backend.tf` points at that storage | Wrong backend = wrong state | 🟢 |
+| 2.3 | Verify the backend points at that storage (now enforced on every run by `scripts/resolve_backend_config.sh`) | Wrong backend = wrong state | 🟢 |
 | 2.4 | Initialize remote state for `dev` (no local state existed) | State lives in Azure from the start | 🟢 |
 | 2.4a | Deploy `aitdd-dev-main-rg` through the remote backend (approved apply) | Creates the real resource drift detection needs | 🟢 |
 | 2.5 | Plan shows zero changes against remote state | Proves the zero-drift baseline | 🟢 |

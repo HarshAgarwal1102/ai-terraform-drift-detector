@@ -5,6 +5,10 @@
 #     (pytest -m "not integration and not mutation"); target < 60 s (Decision 4);
 #   - full: every test, the unchanged 85% coverage gate on src/drift_engine
 #     (pyproject.toml fail_under) and a report-only figure for src/ai_engine (Decision 2).
+#     It also installs Terraform 1.14.7, with the same pinned setup-terraform action as the
+#     drift and auth workflows, for the real-Terraform regression tests
+#     (tests/test_backend_config.py); with AITDD_REQUIRE_REAL_TERRAFORM=1 they fail, never
+#     skip, if that binary is missing.
 #
 # Security boundary: contents: read only; no Azure login, no secrets, no OIDC token
 # (no id-token permission); actions pinned by verified full commit SHA (WF-1); the
@@ -87,9 +91,18 @@ jobs:
           python -m pip install --disable-pip-version-check --no-input -r requirements.txt
           python -m pip check
 
+      # Pinned version, wrapper disabled (the real binary, as in the drift and auth workflows).
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.14.7"
+          terraform_wrapper: false
+
       # One run measures both packages; the gate is applied afterwards to src/drift_engine
       # only, with fail_under from pyproject.toml (85), exactly as `pytest --cov=src/drift_engine`.
       - name: Run Full Suite
+        env:
+          AITDD_REQUIRE_REAL_TERRAFORM: "1"
         run: |
           set -uo pipefail
           start=$SECONDS

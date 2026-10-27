@@ -20,14 +20,16 @@ output "container_name" {
 output "backend_config_instructions" {
   description = "CLI configuration parameters for initializing remote backend in environment modules."
   value       = <<EOT
-To initialize the dev environment backend using this storage account, run:
+The dev backend is a partial configuration (docs/azure-account-switching.md). Initialize it
+against THIS account's storage with (the key names the storage account; only the first
+account's aitddtfstatesa001 keeps dev.tfstate):
 
-cd terraform/environments/dev
-terraform init \
+terraform -chdir=terraform/environments/dev init -reconfigure \
   -backend-config="resource_group_name=${azurerm_resource_group.tfstate.name}" \
   -backend-config="storage_account_name=${azurerm_storage_account.tfstate.name}" \
   -backend-config="container_name=${azurerm_storage_container.tfstate.name}" \
-  -backend-config="key=dev.tfstate" \
-  -migrate-state
+  -backend-config="key=${azurerm_storage_account.tfstate.name == "aitddtfstatesa001" ? "dev.tfstate" : "dev-${azurerm_storage_account.tfstate.name}.tfstate"}"
+
+Never use -migrate-state when switching accounts: each account starts from its own empty state.
 EOT
 }

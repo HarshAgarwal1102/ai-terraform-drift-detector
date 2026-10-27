@@ -15,7 +15,8 @@ name: "Phase 5 - Drift Detection"
 #
 # Jobs: preflight -> plan-and-analyze -> issues / cost / investigation / unmanaged / report.
 #   preflight         main-branch guard and environment/path validation.
-#   plan-and-analyze  OIDC, Terraform init/validate, plan evidence, drift-engine
+#   plan-and-analyze  OIDC, state storage check (the account's own state only),
+#                     Terraform init/validate, plan evidence, drift-engine
 #                     analyze, and upload of the two-file report artifact. Plan
 #                     generation and analysis share one job on purpose: raw plan
 #                     evidence (tfplan, plan.json, plan.log) must never leave this
@@ -211,6 +212,7 @@ jobs:
       checkout_outcome: ${{ steps.checkout.outcome }}
       login_outcome: ${{ steps.login.outcome }}
       auth_outcome: ${{ steps.auth.outcome }}
+      state_guard_outcome: ${{ steps.state_guard.outcome }}
       tf_setup_outcome: ${{ steps.tf_setup.outcome }}
       tf_init_outcome: ${{ steps.tf_init.outcome }}
       tf_validate_outcome: ${{ steps.tf_validate.outcome }}
@@ -287,6 +289,22 @@ jobs:
           fi
           echo "Azure OIDC context verified (subscription and tenant match the configured values; not printed)."
 
+      # Account switching (docs/azure-account-switching.md): dev/backend.tf is a partial
+      # backend. The state location comes from repository variables and is written to a
+      # runner-local file only after the storage account is proven to belong to the
+      # signed-in subscription (read-only, Reader), so a run can never read or lock an
+      # earlier account's state. Only the state key and fixed lines are printed.
+      - name: Verify Terraform State Storage
+        id: state_guard
+        env:
+          TFSTATE_RESOURCE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
+          TFSTATE_STORAGE_ACCOUNT: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+          TFSTATE_KEY: ${{ vars.TFSTATE_KEY }}
+          EXPECTED_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          BACKEND_CONFIG: ${{ runner.temp }}/backend.hcl
+        run: ./scripts/resolve_backend_config.sh
+
       # Wrapper disabled so later steps see Terraform's real exit codes and
       # unmodified stdout (needed for `plan -detailed-exitcode` and JSON output).
       - name: Setup Terraform
@@ -296,14 +314,16 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      # Remote AzureRM backend (dev.tfstate), authenticated end to end with OIDC:
+      # Remote AzureRM backend (the verified file above), authenticated end to end with OIDC:
       #   ARM_USE_OIDC    - exchange the GitHub ID token for an Azure token
       #   ARM_USE_AZUREAD - Entra ID for the state blob instead of storage keys
       # -lockfile=readonly: use the committed provider lock as-is; never rewrite it.
+      # -reconfigure: always the current account's backend; never -migrate-state.
       - name: Terraform Init (remote backend)
         id: tf_init
         env:
           WORK_DIR: ${{ needs.preflight.outputs.working_directory }}
+          BACKEND_CONFIG: ${{ runner.temp }}/backend.hcl
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -312,7 +332,8 @@ jobs:
         run: |
           set -euo pipefail
           terraform version
-          terraform -chdir="${WORK_DIR}" init -input=false -lockfile=readonly -no-color
+          terraform -chdir="${WORK_DIR}" init -input=false -reconfigure -backend-config="${BACKEND_CONFIG}" \
+            -lockfile=readonly -no-color
 
       - name: Terraform Validate
         id: tf_validate
@@ -349,6 +370,7 @@ jobs:
           WORK_DIR: ${{ needs.preflight.outputs.working_directory }}
           VAR_FILE: ${{ needs.preflight.outputs.var_file }}
           ARTIFACT_DIR: ${{ runner.temp }}/drift
+          BACKEND_CONFIG: ${{ runner.temp }}/backend.hcl
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -1195,6 +1217,7 @@ jobs:
             Checkout Code (plan)=${{ needs.plan-and-analyze.outputs.checkout_outcome || 'skipped' }};
             Azure OIDC Login=${{ needs.plan-and-analyze.outputs.login_outcome || 'skipped' }};
             Verify Azure OIDC Authentication=${{ needs.plan-and-analyze.outputs.auth_outcome || 'skipped' }};
+            Verify Terraform State Storage=${{ needs.plan-and-analyze.outputs.state_guard_outcome || 'skipped' }};
             Setup Terraform=${{ needs.plan-and-analyze.outputs.tf_setup_outcome || 'skipped' }};
             Terraform Init (remote backend)=${{ needs.plan-and-analyze.outputs.tf_init_outcome || 'skipped' }};
             Terraform Validate=${{ needs.plan-and-analyze.outputs.tf_validate_outcome || 'skipped' }};

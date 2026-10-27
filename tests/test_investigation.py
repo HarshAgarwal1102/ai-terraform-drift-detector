@@ -208,7 +208,7 @@ class _Base(unittest.TestCase):
         return path
 
     def plan(self, entries, *, run_id=CURRENT_RUN, started=STARTED, finished=FINISHED, plan_ts=PLAN_TS,
-             environment="dev", outcome="succeeded") -> tuple[str, str]:
+             environment="dev", outcome="succeeded", backend_key="dev.tfstate") -> tuple[str, str]:
         drift, changes = entries
         directory = self.dir("plan")
         plan = {"format_version": "1.2", "terraform_version": "1.14.7", "errored": False, "complete": True,
@@ -216,6 +216,7 @@ class _Base(unittest.TestCase):
         pending = any(e["change"]["actions"] not in (["no-op"], ["read"]) for e in changes)
         manifest = {"outcome": outcome, "plan_exit_code": 2 if pending else 0, "terraform_version": "1.14.7",
                     "run_id": run_id, "environment": environment, "started_at": started, "finished_at": finished}
+        manifest["backend_key"] = backend_key  # DELETE: a manifest without one
         for key in [k for k, v in manifest.items() if v is DELETE]:
             del manifest[key]
         paths = os.path.join(directory, "plan.json"), os.path.join(directory, "detection_run.json")
@@ -226,7 +227,7 @@ class _Base(unittest.TestCase):
 
     def anchor(self, anchors: str, name: str, entries=None, *, run=400, attempt=1, started="2026-10-02T06:00:00Z",
                finished="2026-10-02T06:01:00Z", plan_ts="2026-10-02T06:00:30Z", environment="dev",
-               report: bytes | None = None, **metadata) -> str:
+               report: bytes | None = None, backend_key="dev.tfstate", **metadata) -> str:
         directory = os.path.join(anchors, name)
         os.makedirs(directory)
         meta = {"id": run, "run_attempt": attempt, "repository": REPO, "workflow_path": inv.WORKFLOW_PATH,
@@ -237,7 +238,7 @@ class _Base(unittest.TestCase):
         if report is None:
             report = public_report_bytes(self.plan(entries if entries is not None else in_sync(),
                                             run_id=f"github-{run}-{attempt}", started=started, finished=finished,
-                                            plan_ts=plan_ts, environment=environment))
+                                            plan_ts=plan_ts, environment=environment, backend_key=backend_key))
         with open(os.path.join(directory, "drift_report.json"), "wb") as fh:
             fh.write(report)
         return directory
@@ -282,8 +283,9 @@ class RealShapeTests(_Base):
         plan["timestamp"] = "2026-10-04T11:06:49Z"
         with open(os.path.join(src, "detection_run.json"), encoding="utf-8") as fh:
             manifest = json.load(fh)
+        # backend_key: the sanitized fixture nulls it; real CI runs record their state key.
         manifest.update(run_id="github-37197574080-1", started_at="2026-10-04T11:06:39Z",
-                        finished_at="2026-10-04T11:06:57Z")
+                        finished_at="2026-10-04T11:06:57Z", backend_key="dev.tfstate")
         directory = self.dir("real")
         paths = os.path.join(directory, "plan.json"), os.path.join(directory, "detection_run.json")
         for path, doc in zip(paths, (plan, manifest)):
@@ -795,6 +797,7 @@ class AnchorTests(_Base):
             "wrong_event": {"event": "push"},
             "same_run": {"run": 500},
             "environment_mismatch": {"environment": "prod"},
+            "backend_mismatch": {"backend_key": "dev-2026-11.tfstate"},  # another account's state
             "not_earlier": {"started": "2026-10-03T09:00:00Z", "finished": "2026-10-03T10:00:00Z"},
             "plan_not_earlier": {"plan_ts": "2026-10-03T10:02:00Z"},
             "outside_retention": {"started": "2026-07-01T06:00:00Z", "finished": "2026-07-01T06:01:00Z",
@@ -819,6 +822,47 @@ class AnchorTests(_Base):
                                                started="2026-10-02T06:00:00Z", finished="2026-10-02T06:01:00Z"))
         self.assertEqual(self.rejection(report=other_binding), "run_binding_mismatch")
         del good_report
+
+    def test_runs_of_another_azure_account_are_never_anchors(self):
+        """One `dev` environment, one Azure account at a time: only runs of the same state are baselines."""
+        paths = self.plan(nsg_drift(), backend_key="dev-2026-11.tfstate")
+        anchors = self.dir("anchors")
+        self.anchor(anchors, "a-previous-account", run=398, backend_key="dev.tfstate")
+        self.anchor(anchors, "b-same-account", run=399, backend_key="dev-2026-11.tfstate")
+        self.anchor(anchors, "c-no-key", run=400, backend_key=DELETE)  # a report without backend_key: fail closed
+        selection = self.select(anchors, paths)
+        self.assertEqual([run.run_id for run in selection.accepted], ["github-399-1"])
+        self.assertEqual(dict(selection.rejected), {"a-previous-account": "backend_mismatch",
+                                                    "c-no-key": "backend_mismatch"})
+        alone = self.dir("anchors")
+        self.anchor(alone, "only-previous", run=398, backend_key="dev.tfstate")
+        self.assertEqual(self.select(alone, paths).accepted, [])  # no baseline rather than a wrong one
+
+    def test_a_run_without_backend_key_never_accepts_an_anchor(self):
+        """Regression: two runs without a key were equal (None == None), so another account's could be the baseline."""
+        paths = self.plan(nsg_drift(), backend_key=DELETE)
+        anchors = self.dir("anchors")
+        self.anchor(anchors, "a-no-key", run=398, backend_key=DELETE)
+        self.anchor(anchors, "b-empty-key", run=399, backend_key="")
+        self.anchor(anchors, "c-keyed", run=400)
+        selection = self.select(anchors, paths)
+        self.assertEqual(selection.accepted, [])
+        self.assertEqual(dict(selection.rejected), {"a-no-key": "backend_mismatch", "b-empty-key": "backend_mismatch",
+                                                    "c-keyed": "backend_mismatch"})
+
+    def test_a_backend_mismatch_is_published_as_a_rejection_count(self):
+        paths = self.plan(nsg_drift(), backend_key="dev-2026-11.tfstate")
+        anchors = self.dir("anchors")
+        self.anchor(anchors, "previous-account", run=398, backend_key="dev.tfstate")
+        from drift_engine import investigation_public as pub
+
+        result = self.inv_run(paths=paths, anchors=anchors)
+        self.assertEqual([(r.candidate, r.reason) for r in result.document.anchor_candidates.rejected],
+                         [("previous-account", "backend_mismatch")])
+        text, problems = inv.publish(result.document)
+        self.assertEqual(problems, [])
+        public = pub.load_public(text.encode())  # the strict public model accepts the new code
+        self.assertEqual((public.anchors.accepted, public.anchors.rejected), (0, {"backend_mismatch": 1}))
 
     def test_the_current_report_can_never_be_an_anchor(self):
         paths = self.plan(nsg_drift())

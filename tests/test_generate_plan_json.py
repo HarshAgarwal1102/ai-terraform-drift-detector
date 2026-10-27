@@ -55,7 +55,7 @@ def engine_shim(tmp_path) -> Path:
     return shim
 
 
-def run_script(tmp_path: Path, sentinel: str, plan, *, plan_rc=2, jq_fail_on=None):
+def run_script(tmp_path: Path, sentinel: str, plan, *, plan_rc=2, jq_fail_on=None, extra_env=None, prepare=None):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     _exe(bindir / "terraform", FAKE_TERRAFORM)
@@ -69,13 +69,15 @@ def run_script(tmp_path: Path, sentinel: str, plan, *, plan_rc=2, jq_fail_on=Non
     tf_dir = tmp_path / "tf"
     tf_dir.mkdir()
     (tf_dir / "dev.tfvars").write_text('environment = "dev"\n')
+    if prepare:
+        prepare(tf_dir)
     show = tmp_path / "show.json"
     show.write_text(json.dumps(plan) if isinstance(plan, dict) else Path(plan).read_text())
     art = tmp_path / "evidence"  # absolute, new, outside the repository
     env = {"PATH": os.pathsep.join(path), "HOME": str(tmp_path), "SENTINEL": sentinel,
            "FAKE_CALLS": str(tmp_path / "calls.log"), "FAKE_PLAN_RC": str(plan_rc), "FAKE_SHOW_FILE": str(show),
            "REAL_JQ": JQ, "JQ_FAIL_ON": jq_fail_on or "", "ARTIFACT_DIR": str(art), "TF_DIR": str(tf_dir),
-           "TERRAFORM_VERSION": "1.14.7"}
+           "TERRAFORM_VERSION": "1.14.7", **(extra_env or {})}
     proc = subprocess.run([BASH, str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
     manifest = json.loads((art / "detection_run.json").read_text())
     return proc, manifest, art
