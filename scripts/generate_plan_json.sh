@@ -16,6 +16,13 @@
 #                      otherwise a fresh mktemp directory.
 #   TF_DIR             Terraform root (default: terraform/environments/dev).
 #   TERRAFORM_VERSION  Pinned Terraform version (default: 1.14.7).
+#   BACKEND_CONFIG     Backend settings file of the current account (CI: written
+#                      by scripts/resolve_backend_config.sh), passed as
+#                      -backend-config. init ALWAYS runs with -reconfigure: an
+#                      initialized folder keeps the backend of its last init
+#                      (possibly another account's), and a plain init would
+#                      silently reuse it. Without this file the partial backend
+#                      (dev/backend.tf) fails. Never -migrate-state.
 #
 # Evidence written to ARTIFACT_DIR:
 #   detection_run.json  run manifest (always, once ARTIFACT_DIR is usable)
@@ -39,6 +46,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TF_DIR="${TF_DIR:-${ROOT_DIR}/terraform/environments/dev}"
 TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.14.7}"
 VAR_FILE="dev.tfvars"
+BACKEND_CONFIG="${BACKEND_CONFIG:-}"
 
 # -----------------------------------------------
 # Artifact directory: must be outside the tracked tree
@@ -181,6 +189,10 @@ trap 'INTERRUPTED=1; exit 130' INT TERM
 command -v jq >/dev/null 2>&1 || fail preflight "jq is required but was not found"
 command -v terraform >/dev/null 2>&1 || fail preflight "terraform is required but was not found"
 [[ -f "${TF_DIR}/${VAR_FILE}" ]] || fail preflight "var-file not found: ${TF_DIR}/${VAR_FILE}"
+if [[ -n "${BACKEND_CONFIG}" ]]; then
+  [[ -f "${BACKEND_CONFIG}" && -r "${BACKEND_CONFIG}" && ! -L "${BACKEND_CONFIG}" ]] \
+    || fail preflight "backend configuration file not found or not a regular readable file"
+fi
 
 # TF_CLI_ARGS* would silently inject flags (e.g. -refresh=false, -target,
 # -lock=false, -var) that the contract forbids.
@@ -199,7 +211,11 @@ echo "==> Evidence directory: ${ARTIFACT_DIR}"
 # -----------------------------------------------
 FAILURE_STAGE="init"
 log_section "terraform init"
-terraform -chdir="${TF_DIR}" init -input=false -no-color >> "${PLAN_LOG}" 2>&1
+# -reconfigure always: never the backend an earlier init stored (a plain init silently reuses
+# it), never a state migration. Without BACKEND_CONFIG the partial backend fails instead.
+init_args=(-input=false -no-color -reconfigure)
+[[ -z "${BACKEND_CONFIG}" ]] || init_args+=("-backend-config=${BACKEND_CONFIG}")
+terraform -chdir="${TF_DIR}" init "${init_args[@]}" >> "${PLAN_LOG}" 2>&1
 init_rc=$?
 [[ "${init_rc}" -eq 0 ]] || fail init "terraform init exited ${init_rc}"
 BACKEND_KEY="$(jq -r '.backend.config.key // empty' "${TF_DIR}/.terraform/terraform.tfstate" 2>/dev/null || true)"

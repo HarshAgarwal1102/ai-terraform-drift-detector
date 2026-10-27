@@ -1,0 +1,20 @@
+{
+  "_comment": "Template. Copy to config/azure-account.json (ignored by git), fill in the active Azure account, then run scripts/onboard_azure_account.sh --config config/azure-account.json. Identifiers only: never put a secret, password, token or key in this file.",
+  "label": "<yyyy-mm, e.g. 2026-11>",
+  "azure": {
+    "tenant_id": "<tenant-id GUID>",
+    "subscription_id": "<subscription-id GUID>",
+    "client_id": null,
+    "app_name": "aitdd-github-oidc"
+  },
+  "state_backend": {
+    "resource_group": "aitdd-tfstate-rg",
+    "storage_account": "<globally unique, 3-24 lowercase letters and digits, e.g. aitddtf202611>",
+    "container": "tfstate",
+    "key": "<dev-STORAGE_ACCOUNT.tfstate, e.g. dev-aitddtf202611.tfstate>",
+    "location": "Central India"
+  },
+  "github": {
+    "repository": "HarshAgarwal1102/ai-terraform-drift-detector"
+  }
+}

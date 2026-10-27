@@ -44,8 +44,8 @@ PRECONDITION_REASONS = ("detection_time_unknown", "evidence_failed", "evidence_i
                         "evidence_not_settled", "invalid_resource_id", "no_resource_id", "unsupported_scope")
 PROPERTY_LINK_REASONS = ("decisive_operation_mismatch", "deletion_rule_not_confirmed",
                          "no_property_values_in_activity_log", "verdict_not_decisive")
-ANCHOR_REJECTIONS = ("candidate_limit", "environment_mismatch", "metadata_invalid", "not_a_candidate",
-                     "not_earlier", "observation_unknown", "outside_retention", "plan_not_earlier",
+ANCHOR_REJECTIONS = ("backend_mismatch", "candidate_limit", "environment_mismatch", "metadata_invalid",
+                     "not_a_candidate", "not_earlier", "observation_unknown", "outside_retention", "plan_not_earlier",
                      "report_failed", "report_invalid", "run_binding_mismatch", "same_run", "wrong_branch",
                      "wrong_event", "wrong_repository", "wrong_workflow")
 FAILURE_REASONS = {

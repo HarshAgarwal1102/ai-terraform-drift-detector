@@ -44,7 +44,10 @@ Timing (G7, G8): observation = [run.started_at, run.finished_at] of the plan
 evidence; `before_observation` ends before started_at - 60 s, `after_observation`
 starts after finished_at + 60 s, otherwise `during_observation`. A group belongs to a
 resource's window when its end is at or after the window start: the last-in-sync
-anchor's started_at - 60 s (G9), else the lookback start. The first query runs at
+anchor's started_at - 60 s (G9), else the lookback start. An anchor must also come from
+the same state (`run.backend_key`, `backend_mismatch` otherwise): with one Azure account at
+a time behind one `dev` environment (docs/azure-account-switching.md), an earlier
+account's runs are never this account's baseline. The first query runs at
 finished_at + 10 min (M); while a queried drifted resource has no capable operation,
 the evidence is collected again every 2 minutes up to finished_at + 20 min (C). With
 no queryable target there is no wait and no Azure query.
@@ -139,8 +142,8 @@ PRECONDITION_REASONS = ("detection_time_unknown", "evidence_failed", "evidence_i
 NOT_INVESTIGATED_REASONS = PRECONDITION_REASONS + ("unreadable_events_in_scope",)
 PROPERTY_LINK_REASONS = ("decisive_operation_mismatch", "deletion_rule_not_confirmed",
                          "no_property_values_in_activity_log", "verdict_not_decisive")
-ANCHOR_REJECTIONS = ("candidate_limit", "environment_mismatch", "metadata_invalid", "not_a_candidate",
-                     "not_earlier", "observation_unknown", "outside_retention", "plan_not_earlier",
+ANCHOR_REJECTIONS = ("backend_mismatch", "candidate_limit", "environment_mismatch", "metadata_invalid",
+                     "not_a_candidate", "not_earlier", "observation_unknown", "outside_retention", "plan_not_earlier",
                      "report_failed", "report_invalid", "run_binding_mismatch", "same_run", "wrong_branch",
                      "wrong_event", "wrong_repository", "wrong_workflow")
 FAILURE_REASONS = {
@@ -609,6 +612,11 @@ def _check_candidate(path: str, report: dict, repository: str) -> AnchorRun | st
         return "run_binding_mismatch"
     if candidate_run.get("environment") is None or candidate_run.get("environment") != run.get("environment"):
         return "environment_mismatch"
+    backend_key = run.get("backend_key")
+    if not isinstance(backend_key, str) or not backend_key or candidate_run.get("backend_key") != backend_key:
+        # Another Azure account's state behind the same environment, or a state that
+        # cannot be told apart (no key on either side): never a baseline.
+        return "backend_mismatch"
     started = al.parse_timestamp(candidate_run.get("started_at"))
     finished = al.parse_timestamp(candidate_run.get("finished_at"))
     if started is None or finished is None or started > finished:

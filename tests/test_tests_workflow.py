@@ -192,7 +192,8 @@ def test_no_azure_secrets_oidc_or_cache(text):
 def test_actions_are_pinned_by_full_commit_sha(workflow, text):
     uses = [s["uses"] for job in workflow["jobs"].values() for s in job["steps"] if "uses" in s]
     assert sorted(set(uses)) == ["actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
-                                 "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"]
+                                 "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+                                 "hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd"]
     for line in text.splitlines():
         if "uses:" in line:
             assert re.search(r"@[0-9a-f]{40} # v\d+\.\d+\.\d+$", line), line
@@ -206,6 +207,21 @@ def test_setup_is_pinned_and_credential_free(workflow, job):
     assert s["Setup Python"]["with"] == {"python-version": "3.12"}
     install = s["Install Pinned Dependencies"]["run"]
     assert "set -euo pipefail" in install and "-r requirements.txt" in install and "pip check" in install
+
+
+def test_full_job_installs_the_pinned_terraform_and_requires_it(workflow):
+    """The real-Terraform regression tests run in CI, with the drift and auth workflows' exact Terraform."""
+    s = steps(workflow, "full")
+    assert list(s).index("Setup Terraform") == list(s).index("Run Full Suite") - 1
+    reference = yaml.safe_load((WORKFLOW.parent / "terraform-auth-test.yml").read_text(encoding="utf-8"))
+    pinned = {st["uses"] for job in reference["jobs"].values() for st in job["steps"]
+              if st.get("uses", "").startswith("hashicorp/setup-terraform@")}
+    assert pinned == {s["Setup Terraform"]["uses"]}  # the very same action reference
+    assert s["Setup Terraform"]["with"] == {"terraform_version": reference["env"]["TERRAFORM_VERSION"],
+                                            "terraform_wrapper": False}
+    assert reference["env"]["TERRAFORM_VERSION"] == "1.14.7"
+    assert s["Run Full Suite"]["env"] == {"AITDD_REQUIRE_REAL_TERRAFORM": "1"}  # fail, never skip
+    assert "Setup Terraform" not in steps(workflow, "fast")  # the fast tier runs no integration test
 
 
 def test_fast_job_runs_the_fast_tier_and_reports_runtime(workflow):

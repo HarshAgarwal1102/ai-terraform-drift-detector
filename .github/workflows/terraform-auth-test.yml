@@ -115,6 +115,20 @@ jobs:
           fi
           echo "Azure OIDC context verified (subscription and tenant match the configured values; not printed)."
 
+      # Account switching (docs/azure-account-switching.md): dev/backend.tf is a partial
+      # backend. The state location comes from repository variables and is used only
+      # after the storage account is proven to belong to the signed-in subscription;
+      # only the state key and fixed lines are printed.
+      - name: Verify Terraform State Storage
+        env:
+          TFSTATE_RESOURCE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
+          TFSTATE_STORAGE_ACCOUNT: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+          TFSTATE_KEY: ${{ vars.TFSTATE_KEY }}
+          EXPECTED_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          BACKEND_CONFIG: ${{ runner.temp }}/backend.hcl
+        run: ./scripts/resolve_backend_config.sh
+
       # Wrapper disabled (Task 12.1A, E6): the real terraform binary gives the real
       # `plan -detailed-exitcode` exit codes and never echoes output to the log.
       - name: Setup Terraform
@@ -142,4 +156,5 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: "true"
           ARM_USE_AZUREAD: "true"
+          BACKEND_CONFIG: ${{ runner.temp }}/backend.hcl
         run: ./scripts/auth_test_plan.sh

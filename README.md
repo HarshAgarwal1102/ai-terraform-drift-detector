@@ -1333,13 +1333,21 @@ terraform apply
 
 ```bash
 cd terraform/environments/dev
-terraform init
+terraform init -reconfigure -backend-config=<path to this account's backend.hcl>
 terraform validate
 terraform plan -var-file="dev.tfvars"
 ```
 
-The one-time migration from local to remote state (`terraform init -migrate-state`) was
-completed in Phase 2. A fresh clone only needs `terraform init`.
+`backend.tf` is a **partial** backend: the state location changes with every Azure account,
+so it is passed at init time (`scripts/onboard_azure_account.sh --config config/azure-account.json` writes the file under
+`.artifacts/azure-accounts/<label>/backend.hcl`; for the first account it holds
+`aitdd-tfstate-rg` / `aitddtfstatesa001` / `tfstate` / `dev.tfstate`). In a fresh clone an init
+without it fails. An already initialized folder **keeps the backend of its last init**, which may
+be an earlier account's, and a plain `terraform init` silently reuses it. So always run
+`init -reconfigure -backend-config=<this account's backend.hcl>`. If Terraform reports that the
+backend configuration changed, answer with `-reconfigure`, **never** `-migrate-state`. The
+one-time migration from local to remote state was completed in Phase 2. See
+[`docs/azure-account-switching.md`](docs/azure-account-switching.md).
 
 ---
 
@@ -1395,6 +1403,21 @@ registration holds zero credentials.
 
    These are referenced by the workflow as `${{ secrets.* }}`; their values are
    intentionally not recorded in this repository.
+
+   And the **repository variables** (not secrets) that locate the state of the current Azure
+   account: `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT`, `TFSTATE_CONTAINER` and
+   `TFSTATE_KEY` (always `dev-<storage account>.tfstate`; only the first account's `aitddtfstatesa001`
+   keeps `dev.tfstate`). Both
+   workflows refuse to run without them, and only after proving that the storage account
+   belongs to the signed-in subscription (`scripts/resolve_backend_config.sh`).
+   All of these values come from **one local file**, `config/azure-account.json`. It is
+   ignored by git; the committed template is `config/azure-account.example.json`, and the file
+   holds identifiers only, never a secret. To switch to a new Azure account, edit that file and
+   run `scripts/onboard_azure_account.sh --config config/azure-account.json --close-open-drift-issues --apply`.
+   It does steps 1-4 and copies the IDs to the secrets and the state location to the variables.
+   `--close-open-drift-issues` closes every open `drift-detected` issue of the previous account
+   as "not planned", so the new account's runs never update or close them as resolved
+   ([`docs/azure-account-switching.md`](docs/azure-account-switching.md)).
 
 5. **Verify** by running the `terraform-auth-test.yml` workflow. A green run proves the
    federated credential, the secrets, and the RBAC scopes are all correct together.
@@ -1498,7 +1521,8 @@ registration holds zero credentials.
     closeout; they stay readable by signed-in GitHub users until GitHub's log retention removes them
     (90 days by default; see [`docs/remediation-safeguards.md`](docs/remediation-safeguards.md) §12.1). Residual: the
     drift-detection `terraform init`/`validate` steps still print Terraform's own output (failure
-    text can include backend and resource names, which are public in `backend.tf`/`dev.tfvars`).
+    text can include backend and resource names, which are public in `dev.tfvars` and the state key,
+    and visible to collaborators in the `TFSTATE_*` repository variables).
     The auth-test `Validate Bootstrap Configuration` (offline, `-backend=false`) and `Check
     Terraform Formatting` steps also still print Terraform's own output for the committed
     configuration.
